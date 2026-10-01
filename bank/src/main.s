@@ -63,6 +63,8 @@
     b CombinePatch_OptionalRewardBypassUpdate
 .org BankDataSyncState_Update
     b CombinePatch_BankDataSyncDispatch
+.org BankDataSync_TurtleTransactionWrite
+    b CombinePatch_BankDataSyncTurtleState0
 .org BankDataSyncState_Initialize + 0x18
     b CombinePatch_BankDataSyncInitialize
 
@@ -171,6 +173,10 @@
     b CombinePatch_SaveDisplayWait
     nop
     nop
+.org BankSave_TurtleCommitWrite
+    b CombinePatch_SaveTurtleState2
+.org BankSave_TurtleRollbackWrite
+    b CombinePatch_SaveTurtleState1
 .org BankSave_SerializeAndStage + 0x180
     bl CombinePatch_SaveStage
 .org BankSaveState_Update + 0x3B4
@@ -382,6 +388,68 @@ CombinePatch_BankDataSyncEntry:
     strb r1,[r0,#0x30]
     mov r0,#1
     pop {r4,pc}
+    .pool
+
+// The server callback fills a 32-byte transaction descriptor before the
+// native state copies it into Turtle. Offline loading has no server descriptor,
+// so preserve bytes 0x00-0x1B and update only transaction state 0 before using
+// the unchanged native save callback. Download mode keeps the complete copy.
+// 服务器回调会先填充 32 字节事务描述，随后原版状态才把它复制进 Turtle。离线
+// 载入没有服务器描述，因此保留 0x00-0x1B，只把事务状态更新为 0，再沿用原版
+// 保存回调；下载模式仍执行完整复制。
+CombinePatch_BankDataSyncTurtleState0:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12]
+    cmp r12,#CombinePatch_ModeOffline
+    bne @@native
+    ldr r0,[r4,#0x08]
+    ldr r5,[r0,#0x74]
+    mov r0,r5
+    mov r1,#0
+    bl TurtleRecord_SetTransactionState
+    b BankDataSync_TurtleSaveBegin
+@@native:
+    ldr r0,[r4,#0x08]
+    b BankDataSync_TurtleTransactionWrite + 4
+    .pool
+
+// Native save substates copy the server-generated descriptor together with
+// states 2 or 1. The local stage operation deliberately has no such descriptor;
+// retain the existing online identity/version fields while preserving the
+// native intermediate state and Turtle-save sequence.
+// 原版保存子状态会连同状态 2 或 1 一起复制服务器生成的描述。本地暂存操作并不
+// 生成该描述，因此保留既有在线身份／版本字段，同时保留原版中间状态和 Turtle
+// 保存顺序。
+CombinePatch_SaveTurtleState2:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12]
+    cmp r12,#CombinePatch_ModeOffline
+    bne @@native
+    ldr r0,[r4,#0x08]
+    ldr r5,[r0,#0x74]
+    mov r0,r5
+    mov r1,#2
+    bl TurtleRecord_SetTransactionState
+    b BankSave_TurtleCommitSaveBegin
+@@native:
+    ldr r0,[r4,#0x08]
+    b BankSave_TurtleCommitWrite + 4
+    .pool
+
+CombinePatch_SaveTurtleState1:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12]
+    cmp r12,#CombinePatch_ModeOffline
+    bne @@native
+    ldr r0,[r4,#0x08]
+    ldr r5,[r0,#0x74]
+    mov r0,r5
+    mov r1,#1
+    bl TurtleRecord_SetTransactionState
+    b BankSave_TurtleRollbackSaveBegin
+@@native:
+    ldr r0,[r4,#0x08]
+    b BankSave_TurtleRollbackWrite + 4
     .pool
 
 // C-owned path data occupies this second verified injection region.
@@ -868,7 +936,21 @@ CombinePatch_SaveCommit:
     ldrb r12,[r12]
     cmp r12,#CombinePatch_ModeOffline
     bne @@native
-    b OfflinePatch_Commit
+    // The native save state has already persisted transaction state 2. Once
+    // the local file rotation succeeds, clear that now-obsolete remote marker
+    // through the stock Turtle object and persist the regenerated record.
+    // 原版保存状态此时已经持久化事务状态 2。本地文件轮换成功后，通过原版
+    // Turtle 对象清除这个已失去意义的远端标记，并保存重新生成的记录。
+    push {r4,lr}
+    bl OfflinePatch_Commit
+    cmp r0,#0
+    beq @@return
+    ldr r0,[r4,#0x08]
+    ldr r1,[r0,#0x74]
+    ldr r0,[r0,#0x78]
+    bl TurtleRedirect_ClearTransactionAndSave
+@@return:
+    pop {r4,pc}
 @@native:
     b BankRemote_CommitStagedUpdate
     .pool
@@ -893,7 +975,20 @@ CombinePatch_SaveRollback:
     ldrb r12,[r12]
     cmp r12,#CombinePatch_ModeOffline
     bne @@native
-    b OfflinePatch_Rollback
+    // A completed local rollback also has no pending remote transaction. This
+    // symmetrically clears native state 1 after bankdata.tmp is discarded.
+    // 本地回滚完成后同样不存在待处理的远端事务；删除 bankdata.tmp 后，对称地
+    // 清除原版状态 1。
+    push {r4,lr}
+    bl OfflinePatch_Rollback
+    cmp r0,#0
+    beq @@return
+    ldr r0,[r4,#0x08]
+    ldr r1,[r0,#0x74]
+    ldr r0,[r0,#0x78]
+    bl TurtleRedirect_ClearTransactionAndSave
+@@return:
+    pop {r4,pc}
 @@native:
     b BankRemote_RollbackStagedUpdate
     .pool

@@ -109,6 +109,21 @@ s32 TurtleRedirect_SaveBackend(void *storage,void *path,void *object)
 }
 
 __attribute__((used,noinline))
+int TurtleRedirect_ClearTransactionAndSave(void *storage,void *object)
+{
+    /* Offline Bankdata commit/rollback is maintained by bankdata.tmp/.bin/.bak,
+       so no remote transaction remains after either local operation completes.
+       Use the stock setter and object serializer instead of editing sav.bin so
+       the native checksum is regenerated before the redirected write. */
+    /* 离线 Bankdata 的提交／回滚由 bankdata.tmp/.bin/.bak 维护，因此任一本地
+       操作完成后都不存在待处理的远端事务。通过原版 setter 与对象序列化器清零，
+       而不直接修改 sav.bin，使重定向写入前能够重新生成原版校验值。 */
+    if (!storage || !object) return 0;
+    TurtleRecord_SetTransactionState(object,0);
+    return TurtleRedirect_SaveBackend(storage,0,object)==TURTLE_BACKEND_SUCCESS;
+}
+
+__attribute__((used,noinline))
 s32 TurtleRedirect_CheckBackend(void *storage,void *path)
 {
     s32 status=inspectTurtlePath(turtleSavePath,sizeof(turtleSavePath));

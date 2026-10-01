@@ -104,9 +104,21 @@
 .definelabel TurtleStorage_FinishSave,               0x0022DAC0
 .definelabel ApplicationCondition_Add,               0x001D4D90
 .definelabel ApplicationCondition_Remove,            0x00229EB4
+; Updates the Turtle record's transaction-state byte. The stock object save
+; regenerates the serialized checksum after this setter is used.
+; 更新 Turtle 记录的事务状态字节。调用该 setter 后，原版对象保存流程会重新
+; 生成序列化校验值。
+.definelabel TurtleRecord_SetTransactionState,        0x001D4D84
 .definelabel WaitingUi_Hide,                    0x001D5F50
 .definelabel BankDataSyncState_Update,          0x002AF460
 .definelabel BankDataSyncState_Initialize,      0x002AFE38
+; Native transaction-descriptor copy sites inside the Bankdata-sync and save
+; state machines. Offline mode preserves the existing descriptor fields and
+; changes only the transaction-state byte.
+; Bankdata 同步与保存状态机中的原版事务描述复制位置。离线模式保留既有描述字段，
+; 只修改事务状态字节。
+.definelabel BankDataSync_TurtleTransactionWrite, 0x002AF720
+.definelabel BankDataSync_TurtleSaveBegin,         0x002AF784
 .definelabel HomeRollbackState_Update,           0x002AFE94
 ; State ID 15: the 0x158-byte state contains optional-reward UI and remote-result
 ; handling. It is distinct from state ID 12 (reward eligibility) and ID 25 (Bank Box).
@@ -116,6 +128,10 @@
 .definelabel BankSaveState_Update,              0x002B1CF8
 .definelabel BankSave_SerializeAndStage,        0x002B2320
 .definelabel BankSaveState_Initialize,           0x002B2520
+.definelabel BankSave_TurtleCommitWrite,          0x002B1F4C
+.definelabel BankSave_TurtleCommitSaveBegin,      0x002B1FB0
+.definelabel BankSave_TurtleRollbackWrite,        0x002B1FF8
+.definelabel BankSave_TurtleRollbackSaveBegin,    0x002B205C
 ; The title update makes both title UI layers visible and reports title exit
 ; through the byte at state+0x3C.
 ; 标题更新会显示两层标题 UI，并通过 state+0x3C 的字节报告标题退出。

@@ -54,6 +54,7 @@ typedef s32 (*TurtleStorage_LoadAtOnceFn)(void *,void *,void *);
 typedef s32 (*TurtleStorage_CheckArchiveStatusFn)(void *,void *);
 typedef void (*TurtleStorage_FinishSaveFn)(void *,u32,u32,u32);
 typedef void (*ApplicationConditionFn)(u32);
+typedef void (*TurtleRecord_SetTransactionStateFn)(void *,u8);
 typedef void *(*ObjectCreateBufferFn)(void *,u32);
 typedef u32 (*ObjectGetSizeFn)(void *);
 typedef void *(*ObjectGetDataFn)(void *);
@@ -114,11 +115,14 @@ typedef struct TurtleFormatStateView {
     ((ApplicationConditionFn)0x001D4D90u)
 #define ApplicationCondition_Remove \
     ((ApplicationConditionFn)0x00229EB4u)
+#define TurtleRecord_SetTransactionState \
+    ((TurtleRecord_SetTransactionStateFn)0x001D4D84u)
 
 s32 TurtleRedirect_LoadBackend(void *storage,void *path,void *object);
 s32 TurtleRedirect_SaveBackend(void *storage,void *path,void *object);
 s32 TurtleRedirect_CheckBackend(void *storage,void *path);
 s32 TurtleRedirect_FormatBackend(void *state);
 s32 TurtleRedirect_FormatPoll(void *state,u8 *result);
+int TurtleRedirect_ClearTransactionAndSave(void *storage,void *object);
 
 #endif
