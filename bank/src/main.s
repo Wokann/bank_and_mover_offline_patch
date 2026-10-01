@@ -5,8 +5,9 @@
 .include "../include/symbol.inc"
 
 // Offline behavior is the baseline. Mode wrappers branch to these native entry
-// points when Download Mode was selected on the title screen.
-// 离线行为作为基线；标题界面选定下载模式后，模式包装函数会跳转到这些原版入口。
+// points when Download or Unlock Mode was selected on the title screen.
+// 离线行为作为基线；标题界面选定下载模式或解锁模式后，模式包装函数会跳转到这些
+// 原版入口。
 .definelabel OfflinePatch_VersionStorageSize, 0x40
 .definelabel OfflinePatch_VersionStorageStart, TextMappedEnd - OfflinePatch_VersionStorageSize
 .definelabel CombinePatch_CodeStart, 0x00313A40
@@ -18,6 +19,8 @@
 .definelabel CombinePatch_HidManager, 0x003DC3B4
 .definelabel CombinePatch_ModeOffline, 0
 .definelabel CombinePatch_ModeDownload, 1
+.definelabel CombinePatch_ModeUnlock, 2
+.definelabel CombinePatch_ModeCount, 3
 .definelabel CombinePatch_KeyR, 0x100
 .definelabel CombinePatch_SessionModeOffset, 0
 .definelabel CombinePatch_DownloadCapturedOffset, 1
@@ -37,7 +40,12 @@
 .definelabel CombinePatch_LanguageMenuMessage, 0x6B
 .definelabel CombinePatch_OfflineMenuGreeting, 0x1B
 .definelabel CombinePatch_DownloadMenuGreeting, 0x1C
+.definelabel CombinePatch_UnlockMenuGreeting, 0x1D
 .definelabel CombinePatch_DownloadGameSelectionPrompt, 0x6C
+.definelabel CombinePatch_TitleModeUnlockMessage, 0x6D
+.definelabel CombinePatch_UnlockUseBankMessage, 0x6E
+.definelabel CombinePatch_UnlockGameSelectionPrompt, 0x6F
+.definelabel CombinePatch_UnlockChallengePrompt, 0x70
 
 .open "../rom/exefs/00040000000C9B00.dec.code", "../build/00040000000C9B00.dec.code", 0x00100000
 
@@ -86,9 +94,9 @@
 
 // Keep the native first-present flag test. Offline mode bypasses only the
 // remote BOSS gift lookup after that flag is set and resumes the native local
-// mileage calculation. Download mode preserves the stock branch.
+// mileage calculation. Download and Unlock modes preserve the stock branch.
 // 保留原版首次奖励标志判断。标志已设置后，离线模式只跳过远端 BOSS 礼物查询，
-// 并恢复原版的本地里程计算；下载模式保留原分支。
+// 并恢复原版的本地里程计算；下载模式与解锁模式保留原分支。
 .org RewardReceive_FirstPresentBranch
     b CombinePatch_FirstPresentDispatch
 
@@ -144,6 +152,8 @@
     bl CombinePatch_ShowModeGreeting
 .org GameSelectionState_MessageIdLoad
     bl CombinePatch_SelectGameSelectionMessage
+.org ForceRollbackState_ChallengePromptCall
+    bl CombinePatch_ShowUnlockPrompt
 .org BankMenuUi_FirstLabelCall
     bl CombinePatch_SelectUseBankMenuText
 .org BankMenuUi_FirstLabelCall + 0x08
@@ -223,28 +233,36 @@ CombinePatch_RedirectHomeToLanguage:
     pop {r4,pc}
 
 // The stock menu's greeting uses BMG line 17. The LayeredFS archive appends
-// one short explanation for each mode; select it after the startup mode latch.
-// 原版菜单说明使用 BMG 第 17 行。LayeredFS 档案为两种模式各追加一条简短说明，
+// one explanation for each of the three modes; select it after the startup
+// mode latch.
+// 原版菜单说明使用 BMG 第 17 行。LayeredFS 档案为三种模式各追加一条说明，
 // 在启动模式锁定后选择其中之一。
 CombinePatch_ShowModeGreeting:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12]
     cmp r12,#CombinePatch_ModeDownload
     moveq r2,#CombinePatch_DownloadMenuGreeting
+    beq @@show
+    cmp r12,#CombinePatch_ModeUnlock
+    moveq r2,#CombinePatch_UnlockMenuGreeting
     movne r2,#CombinePatch_OfflineMenuGreeting
+@@show:
     b BankUi_ShowMessageLine
     .pool
 
 // Select the static upper-screen guide message in the game-selection state,
-// then let its original display call run unchanged. Download mode substitutes
-// a dedicated explanation; offline mode keeps stock message 3.
-// 在游戏选择状态中选择上屏静态说明文本，随后让原版显示调用保持不变。下载模式
-// 替换为专用说明；离线模式保留原消息 3。
+// then let its original display call run unchanged. Download and Unlock modes
+// use dedicated guidance; Offline mode keeps stock message 3.
+// 在游戏选择状态中选择上屏静态说明文本，随后让原版显示调用保持不变。下载模式与
+// 解锁模式使用各自的说明；离线模式保留原消息 3。
 CombinePatch_SelectGameSelectionMessage:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12,#CombinePatch_SessionModeOffset]
     cmp r12,#CombinePatch_ModeDownload
     moveq r1,#CombinePatch_DownloadGameSelectionPrompt
+    bxeq lr
+    cmp r12,#CombinePatch_ModeUnlock
+    moveq r1,#CombinePatch_UnlockGameSelectionPrompt
     movne r1,#3
     bx lr
     .pool
@@ -258,15 +276,19 @@ CombinePatch_SelectUseBankMenuText:
     ldrb r12,[r12]
     cmp r12,#CombinePatch_ModeDownload
     moveq r12,#CombinePatch_DownloadUseBankMessage
+    beq @@selected
+    cmp r12,#CombinePatch_ModeUnlock
+    moveq r12,#CombinePatch_UnlockUseBankMessage
     movne r12,#0x29
+@@selected:
     msr cpsr_f,r3
     mov r3,r12
     bx lr
     .pool
 
-// Preserve every stock menu label in original mode. The two patched modes
-// substitute only the labels whose callbacks they deliberately redirect.
-// 原版模式保留全部原始选单标签。两种补丁模式只替换其明确重定向回调的项目标签。
+// Select only the labels deliberately replaced by the current patch modes.
+// Other stock menu labels remain unchanged.
+// 这里只选择当前补丁模式明确替换的标签；其余原版选单标签保持不变。
 CombinePatch_SelectSupportMenuText:
     mov r8,#CombinePatch_DisabledMenuMessage
     bx lr
@@ -288,6 +310,51 @@ CombinePatch_SelectHomeMenuTextR5:
     bx lr
     .pool
 
+// The stock rollback state has already placed the challenge number in number
+// register 0 when this wrapper runs. Unlock Mode additionally copies the first
+// server candidate into number register 1, using the same modulo rule as the
+// stock input validator, and then expands the appended three-line message.
+// Empty candidate lists retain the original two-line prompt.
+// 此包装函数运行时，原版回滚状态已把挑战码写入数字寄存器 0。解锁模式再按原版
+// 输入验证使用的同一取模规则，把服务器第一个候选值写入数字寄存器 1，并展开追加的
+// 三行消息。候选列表为空时仍显示原版两行提示。
+CombinePatch_ShowUnlockPrompt:
+    push {r4-r8,lr}
+    sub sp,sp,#8
+    mov r5,r0
+    ldr r6,=CombinePatch_ModeStorage
+    ldrb r6,[r6,#CombinePatch_SessionModeOffset]
+    cmp r6,#CombinePatch_ModeUnlock
+    bne @@stock
+    ldr r0,[r4,#0x54]
+    ldr r1,[r4,#0x58]
+    mov r2,sp
+    bl UnlockMode_TryGetFirstCandidateCode
+    cmp r0,#0
+    beq @@stock
+    ldr r6,[sp]
+    mov r0,#2
+    mov r1,#1
+    str r0,[sp]
+    str r1,[sp,#4]
+    ldr r0,[r5,#0x5C]
+    mov r1,#1
+    mov r2,r6
+    mov r3,#8
+    bl G2dUtil_SetRegisterNumber
+    mov r0,r5
+    mov r1,#CombinePatch_UnlockChallengePrompt
+    bl FlowView_SetTextMessage
+    b @@done
+@@stock:
+    mov r0,r5
+    mov r1,#0x22
+    bl FlowView_SetTextMessage
+@@done:
+    add sp,sp,#8
+    pop {r4-r8,pc}
+    .pool
+
 CombinePatch_SelectDisconnectMessage:
     ldrb r1,[r4,#0x3C]
     ldr r2,=CombinePatch_ModeStorage
@@ -295,8 +362,11 @@ CombinePatch_SelectDisconnectMessage:
     cmp r1,#0
     movne r1,#CombinePatch_BlankMessage
     bxne lr
+    cmp r3,#CombinePatch_ModeOffline
+    moveq r1,#CombinePatch_OfflineDisconnectMessage
+    bxeq lr
     cmp r3,#CombinePatch_ModeDownload
-    movne r1,#CombinePatch_OfflineDisconnectMessage
+    movne r1,#0x0D
     bxne lr
     ldrb r2,[r2,#CombinePatch_DownloadCapturedOffset]
     cmp r2,#0
@@ -396,7 +466,7 @@ CombinePatch_BankDataSyncEntry:
 // the unchanged native save callback. Download mode keeps the complete copy.
 // 服务器回调会先填充 32 字节事务描述，随后原版状态才把它复制进 Turtle。离线
 // 载入没有服务器描述，因此保留 0x00-0x1B，只把事务状态更新为 0，再沿用原版
-// 保存回调；下载模式仍执行完整复制。
+// 保存回调；下载模式与解锁模式仍执行完整复制。
 CombinePatch_BankDataSyncTurtleState0:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12]
@@ -545,10 +615,11 @@ CombinePatch_TitleScreenUpdate:
     pop {r3,r4,r5,r6,r7,pc}
     .pool
 
-// Toggle only on an R rising edge and immediately rebind the bottom title
-// help line. No caller after title exit invokes this routine.
-// 只在 R 键上升沿切换，并立即重新绑定标题底部帮助行。标题退出后不会有调用者
-// 再执行此例程。
+// Advance Offline -> Download -> Unlock -> Offline on each R rising edge and
+// immediately rebind the bottom title help line. No caller after title exit
+// invokes this routine.
+// 每次 R 键上升沿按“离线→下载→解锁→离线”循环切换，并立即重新绑定标题底部
+// 帮助行。标题退出后不会有调用者再执行此例程。
 CombinePatch_TitleProcessModeToggle:
     push {r4,r5,r6,lr}
     mov r4,r0
@@ -573,7 +644,9 @@ CombinePatch_TitleProcessModeToggle:
     cmp r1,#0
     bne @@done
     ldrb r1,[r6,#CombinePatch_TitleSelectedModeOffset]
-    eor r1,r1,#1
+    add r1,r1,#1
+    cmp r1,#CombinePatch_ModeCount
+    movcs r1,#CombinePatch_ModeOffline
     strb r1,[r6,#CombinePatch_TitleSelectedModeOffset]
     ldr r0,[r4,#0x38]
     cmp r0,#0
@@ -583,7 +656,11 @@ CombinePatch_TitleProcessModeToggle:
     ldrb r3,[r6,#CombinePatch_TitleSelectedModeOffset]
     cmp r3,#CombinePatch_ModeDownload
     moveq r3,#CombinePatch_TitleModeDownloadMessage
+    beq @@setText
+    cmp r3,#CombinePatch_ModeUnlock
+    moveq r3,#CombinePatch_TitleModeUnlockMessage
     movne r3,#CombinePatch_TitleModeOfflineMessage
+@@setText:
     bl BankUi_SetMessageLine
 @@done:
     pop {r4,r5,r6,pc}
@@ -605,9 +682,10 @@ CombinePatch_NetworkAvailability:
     b 0x001103CC
     .pool
 
-// In offline mode skip allocating the stock remote connection job. In download
-// mode replay the three overwritten allocation instructions before resuming it.
-// 离线模式跳过原版远端连接任务的分配；下载模式会重放三条被覆盖的分配指令，再继续原版。
+// In Offline Mode skip allocating the stock remote connection job. Download
+// and Unlock modes replay the overwritten instructions before resuming it.
+// 离线模式跳过原版远端连接任务的分配；下载模式与解锁模式会重放被覆盖的指令，再
+// 继续原版流程。
 CombinePatch_NetworkSkipRemoteJob:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12]
@@ -647,10 +725,10 @@ CombinePatch_InitialRemoteRecordUpdate:
     .pool
 
 // State ID 15 combines remote entitlement and campaign/online-gift checks.
-// Both modes complete it locally, disabling free_campaign and online gifts
+// All patch modes complete it locally, disabling free_campaign and online gifts
 // while supplying the runtime entitlement fields needed downstream. This is
 // separate from the native local mileage calculation in states 12 and 13.
-// state 15 组合了远端使用权以及活动／联网礼物检查。两种模式都让它在本地
+// state 15 组合了远端使用权以及活动／联网礼物检查。所有补丁模式都让它在本地
 // 完成，以禁用 free_campaign 与在线礼物，同时提供后续所需的运行时使用权字段。
 // 它与 state 12/13 的原版本地里程计算相互独立。
 CombinePatch_OptionalRewardBypassUpdate:
@@ -696,6 +774,8 @@ CombinePatch_BankDataSyncInitialize:
     mov r3,r1
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeUnlock
+    beq @@native
     cmp r12,#CombinePatch_ModeDownload
     bne @@offline
     cmp r3,#0
@@ -704,6 +784,11 @@ CombinePatch_BankDataSyncInitialize:
     b @@show
 @@offline:
     mov r1,#CombinePatch_OfflineBankConnectMessage
+    b @@show
+@@native:
+    cmp r3,#0
+    beq @@return
+    mov r1,#0x0E
 @@show:
     sub sp,sp,#8
     str r1,[sp]
@@ -712,11 +797,13 @@ CombinePatch_BankDataSyncInitialize:
     add sp,sp,#8
     ldr r0,[r4,#0x38]
     b BankDataSyncState_Initialize + 0x2C
+@@return:
+    b BankDataSyncState_Initialize + 0x30
     .pool
 
-// Keep the stock Internet and save messages in download mode. Only the offline
-// route selects the appended local-data messages.
-// 下载模式保留原版联网与保存文本；只有离线路线选择追加的本地数据文本。
+// Keep the stock Internet and save messages in Download and Unlock modes. Only
+// the Offline route selects the appended local-data messages.
+// 下载模式与解锁模式保留原版联网与保存文本；只有离线路线选择追加的本地数据文本。
 CombinePatch_SelectInitialConnectionMessage:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12,#CombinePatch_SessionModeOffset]
@@ -742,9 +829,9 @@ CombinePatch_SelectSaveMessage:
 CombinePatch_SelectPostSelectionConnectionMessage:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12,#CombinePatch_SessionModeOffset]
-    cmp r12,#CombinePatch_ModeDownload
-    moveq r1,#0x0E
-    movne r1,#CombinePatch_OfflineBankConnectMessage
+    cmp r12,#CombinePatch_ModeOffline
+    moveq r1,#CombinePatch_OfflineBankConnectMessage
+    movne r1,#0x0E
     bx lr
     .pool
 
@@ -794,9 +881,11 @@ CombinePatch_DisconnectSkipRemoteJobOfficial:
     b DisconnectCleanupState_Initialize + 0x68
     .pool
 
-// These three sites preserve stock first-use creation in download mode while
-// retaining the local first-use initializer and checked write in offline mode.
-// 三个位置在下载模式保留原版首次创建，在离线模式保留本地首次初始化与检查写入。
+// These three sites preserve stock first-use creation in Download and Unlock
+// modes while retaining the local first-use initializer and checked write in
+// Offline mode.
+// 三个位置在下载模式与解锁模式保留原版首次创建，在离线模式保留本地首次初始化与
+// 检查写入。
 CombinePatch_BankCreateState0:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12]
@@ -866,9 +955,9 @@ CombinePatch_HomeResult:
 CombinePatch_Result21:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12]
-    cmp r12,#CombinePatch_ModeDownload
-    beq BankFlow_SelectNextState + 0x370
-    b BankFlow_SelectNextState + 0x3B4
+    cmp r12,#CombinePatch_ModeOffline
+    beq BankFlow_SelectNextState + 0x3B4
+    b BankFlow_SelectNextState + 0x370
     .pool
 
 CombinePatch_Result5:
@@ -888,11 +977,11 @@ CombinePatch_Result6Or12:
     b BankFlow_SelectNextState + 0x294
     .pool
 
-// Download mode must not inherit any of the offline save substitutions. The
-// native branches below replay exactly the instructions overwritten at each
-// hook and then resume the original save state.
-// 下载模式不能继承任何离线保存替换。下面的原版分支会重放各钩子处被覆盖的指令，
-// 然后回到原版保存状态。
+// Download and Unlock modes must not inherit any Offline save substitutions.
+// The native branches below replay exactly the instructions overwritten at
+// each hook and then resume the original save state.
+// 下载模式与解锁模式不能继承任何离线保存替换。下面的原版分支会重放各钩子处被
+// 覆盖的指令，然后回到原版保存状态。
 CombinePatch_SaveBegin:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12]
@@ -1008,9 +1097,9 @@ CombinePatch_SaveRollbackWait:
     b BankSaveState_Update + 0x414
     .pool
 
-// Support code and Mover/eShop are disabled in both modes. HOME is deliberately
+// Support code and Mover/eShop are disabled in all three modes. HOME is deliberately
 // left native here so its existing Bank-flow hook can redirect it to language.
-// 两种模式都禁用支持代码与 Mover/eShop。HOME 在这里故意保持原版，使现有 Bank
+// 三种模式都禁用支持代码与 Mover/eShop。HOME 在这里故意保持原版，使现有 Bank
 // 流程钩子能够把它重定向至语言选择。
 CombinePatch_MenuSelectionCallback:
     ldr r2,[r0,#0x10]
@@ -1095,12 +1184,12 @@ TurtleRedirect_PayloadBegin:
 TurtleRedirect_PayloadEnd:
 .endarea
 
-// Both patched routes complete this optional-reward state through the local
+// All patched routes complete this optional-reward state through the local
 // bypass. Its original body is therefore unreachable and is the verified
 // contiguous home for the shared FS, Bankdata, offline-flow, local-mileage,
-// and local-ticket objects.
-// 两条补丁路由都会通过本地跳过逻辑完成这个可选奖励状态。因此原函数体不可达，是
-// 共用 FS、Bankdata、离线流程、本地里程输入与本地票据对象经验证的连续容器。
+// local-ticket, and unlock-display objects.
+// 所有补丁路线都会通过本地跳过逻辑完成这个可选奖励状态。因此原函数体不可达，是
+// 共用 FS、Bankdata、离线流程、本地里程、本地票据与解锁显示对象经验证的连续容器。
 .org CombinePatch_PayloadStart
 .area CombinePatch_PayloadEndLimit-CombinePatch_PayloadStart
 CombinePatch_PayloadBegin:
@@ -1119,6 +1208,9 @@ LocalMileage_PayloadEnd:
 LocalTicket_PayloadBegin:
     .importobj "../build/local_ticket.o"
 LocalTicket_PayloadEnd:
+UnlockMode_PayloadBegin:
+    .importobj "../build/unlock_mode.o"
+UnlockMode_PayloadEnd:
 CombinePatch_PayloadEnd:
 .endarea
 

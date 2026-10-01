@@ -203,6 +203,9 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
         "localmileage_payloadend",
         "localticket_payloadbegin",
         "localticket_payloadend",
+        "unlockmode_payloadbegin",
+        "unlockmode_payloadend",
+        "unlockmode_trygetfirstcandidatecode",
         "combinepatch_networkupdate",
         "combinepatch_initialremoterecordupdate",
         "combinepatch_optionalrewardbypassupdate",
@@ -244,6 +247,7 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
         "combinepatch_redirecthometolanguage",
         "combinepatch_showmodegreeting",
         "combinepatch_selectgameselectionmessage",
+        "combinepatch_showunlockprompt",
         "combinepatch_selectusebankmenutext",
         "combinepatch_selectsupportmenutext",
         "combinepatch_selectinstalledmovermenutext",
@@ -344,6 +348,8 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
         < symbols["localmileage_payloadend"]
         == symbols["localticket_payloadbegin"]
         < symbols["localticket_payloadend"]
+        == symbols["unlockmode_payloadbegin"]
+        < symbols["unlockmode_payloadend"]
         == payload_end
     ):
         raise ValueError("imported local-file payload objects are not contiguous or ordered")
@@ -390,8 +396,6 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
         "combinepatch_menuselectioncallback",
         "combinepatch_menuselectiondisabled",
         "combinepatch_downloadcapturetrampoline",
-        "turtleredirect_payloadbegin",
-        "turtleredirect_payloadend",
         "turtleredirect_loadbackend",
         "turtleredirect_savebackend",
         "turtleredirect_checkbackend",
@@ -402,11 +406,19 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
         address = symbols[name]
         if not HOME_CAVE_START <= address < HOME_CAVE_END:
             raise ValueError(f"{name} is outside the reclaimed HOME/Mover code cave")
+    if not (
+        HOME_CAVE_START
+        <= symbols["turtleredirect_payloadbegin"]
+        < symbols["turtleredirect_payloadend"]
+        <= HOME_CAVE_END
+    ):
+        raise ValueError("Turtle redirect payload exceeds the reclaimed HOME/Mover code cave")
 
     tail_cave_symbols = (
         "combinepatch_redirecthometolanguage",
         "combinepatch_showmodegreeting",
         "combinepatch_selectgameselectionmessage",
+        "combinepatch_showunlockprompt",
         "combinepatch_selectusebankmenutext",
         "combinepatch_selectdisconnectmessage",
         "combinepatch_disconnectwithlanguagesave",
@@ -454,6 +466,7 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
         "getfilesize",
         "readcompletefile",
         "writecompletefile",
+        "unlockmode_trygetfirstcandidatecode",
     ):
         address = symbols[name]
         if not payload_begin <= address < payload_end:
@@ -506,7 +519,8 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
         (0x002A6C8C, "combinepatch_menuselectioncallback", False, ARM_COND_AL, "feature-menu callback"),
         (0x002A6824, "combinepatch_showmodegreeting", True, ARM_COND_AL, "first menu greeting"),
         (0x002A6978, "combinepatch_showmodegreeting", True, ARM_COND_AL, "return menu greeting"),
-        (0x002ADD0C, "combinepatch_selectgameselectionmessage", True, ARM_COND_AL, "download game-selection prompt"),
+        (0x002ADD0C, "combinepatch_selectgameselectionmessage", True, ARM_COND_AL, "mode-specific game-selection prompt"),
+        (0x002AD92C, "combinepatch_showunlockprompt", True, ARM_COND_AL, "official unlock-code prompt"),
         (0x001D6308, "combinepatch_selectusebankmenutext", True, ARM_COND_AL, "first menu label"),
         (0x001D6310, "combinepatch_selectsupportmenutext", True, ARM_COND_AL, "support menu label"),
         (0x001D6318, "combinepatch_selectinstalledmovermenutext", True, ARM_COND_AL, "installed Mover menu label"),
@@ -815,6 +829,10 @@ def verify_messages(source_romfs: Path, output_romfs: Path) -> None:
             f"{title_home}\n"
             f"{module.TITLE_MODE_DOWNLOAD_MESSAGES[archive]}"
         )
+        expected_title_mode_unlock = (
+            f"{title_home}\n"
+            f"{module.TITLE_MODE_UNLOCK_MESSAGES[archive]}"
+        )
         expected_lines = {
             module.INTERNET_CONNECTION_LINE: source_lines[module.INTERNET_CONNECTION_LINE],
             module.BANK_CONNECTION_LINE: source_lines[module.BANK_CONNECTION_LINE],
@@ -835,9 +853,12 @@ def verify_messages(source_romfs: Path, output_romfs: Path) -> None:
             module.OFFLINE_DISCONNECT_LINE: module.OFFLINE_DISCONNECT_MESSAGES[archive],
             module.TITLE_MODE_OFFLINE_LINE: expected_title_mode_offline,
             module.TITLE_MODE_DOWNLOAD_LINE: expected_title_mode_download,
+            module.TITLE_MODE_UNLOCK_LINE: expected_title_mode_unlock,
             module.DISABLED_LINE: module.DISABLED_MESSAGES[archive],
             module.LANGUAGE_MENU_LINE: module.LANGUAGE_MENU_MESSAGES[archive],
             module.DOWNLOAD_GAME_SELECTION_LINE: module.DOWNLOAD_GAME_SELECTION_MESSAGES[archive],
+            module.UNLOCK_USE_BANK_LINE: module.UNLOCK_MENU_MESSAGES[archive],
+            module.UNLOCK_GAME_SELECTION_LINE: module.UNLOCK_GAME_SELECTION_MESSAGES[archive],
         }
         for line, expected in expected_lines.items():
             if output_lines[line] != expected:
@@ -851,12 +872,32 @@ def verify_messages(source_romfs: Path, output_romfs: Path) -> None:
         menu_greeting = module.SHORT_MENU_GREETINGS.get(archive, source_greeting)
         expected_offline = f"{menu_greeting}\n{module.OFFLINE_MENU_GREETINGS[archive]}"
         expected_download = f"{menu_greeting}\n{module.DOWNLOAD_MENU_GREETINGS[archive]}"
+        expected_unlock = f"{menu_greeting}\n{module.UNLOCK_MENU_GREETINGS[archive]}"
         if output_greetings[module.MENU_GREETING_LINE] != source_greeting:
             raise ValueError(f"stock greeting mismatch in archive {archive}")
         if output_greetings[module.OFFLINE_MENU_GREETING_LINE] != expected_offline:
             raise ValueError(f"offline greeting mismatch in archive {archive}")
         if output_greetings[module.DOWNLOAD_MENU_GREETING_LINE] != expected_download:
             raise ValueError(f"download greeting mismatch in archive {archive}")
+        if output_greetings[module.UNLOCK_MENU_GREETING_LINE] != expected_unlock:
+            raise ValueError(f"unlock greeting mismatch in archive {archive}")
+
+        source_challenge_values = module.message_codec.read_message_line_values(
+            source_message_file, module.UNLOCK_CHALLENGE_SOURCE_LINE
+        )
+        output_stock_challenge_values = module.message_codec.read_message_line_values(
+            output_message_file, module.UNLOCK_CHALLENGE_SOURCE_LINE
+        )
+        if output_stock_challenge_values != source_challenge_values:
+            raise ValueError(f"stock unlock prompt changed in archive {archive}")
+        expected_unlock_values = module.build_unlock_prompt_values(
+            source_challenge_values, module.UNLOCK_CODE_LABELS[archive]
+        )
+        output_unlock_values = module.message_codec.read_message_line_values(
+            output_message_file, module.UNLOCK_CHALLENGE_LINE
+        )
+        if output_unlock_values != expected_unlock_values:
+            raise ValueError(f"unlock-code prompt mismatch in archive {archive}")
 
 
 def main() -> None:

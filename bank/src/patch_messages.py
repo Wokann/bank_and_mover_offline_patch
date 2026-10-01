@@ -21,6 +21,7 @@ BANK_CONNECTION_LINE = 14
 SAVE_LINE = 8
 DISCONNECT_LINE = 13
 MENU_LINE = 41
+UNLOCK_CHALLENGE_SOURCE_LINE = 34
 
 DOWNLOAD_PROGRESS_MESSAGES = {
     "0/0/4": "ポケモンバンクからSDへ\nダウンロードしています\nsd:/3ds/Bank/bankdata.bin",
@@ -46,6 +47,19 @@ DOWNLOAD_MENU_MESSAGES = {
     "0/1/1": "뱅크 데이터 다운로드",
     "0/1/2": "下载银行数据到本地",
     "0/1/3": "下載銀行資料到本機",
+}
+
+UNLOCK_MENU_MESSAGES = {
+    "0/0/4": "つよく アンロックする",
+    "0/0/5": "強制アンロックモードへ",
+    "0/0/6": "Enter Force Unlock",
+    "0/0/7": "Déverrouillage forcé",
+    "0/0/8": "Sblocco forzato",
+    "0/0/9": "Zwangsentsperrung",
+    "0/1/0": "Desbloqueo forzado",
+    "0/1/1": "강제 잠금 해제 모드",
+    "0/1/2": "进入强制解锁模式",
+    "0/1/3": "進入強制解鎖模式",
 }
 
 LANGUAGE_MENU_MESSAGES = {
@@ -123,6 +137,7 @@ MENU_MESSAGE_FILE_INDEX = 37
 MENU_GREETING_LINE = 17
 OFFLINE_MENU_GREETING_LINE = 27
 DOWNLOAD_MENU_GREETING_LINE = 28
+UNLOCK_MENU_GREETING_LINE = 29
 BLANK_LINE = 96
 DOWNLOAD_PROGRESS_LINE = 97
 DOWNLOAD_SUCCESS_LINE = 98
@@ -136,6 +151,10 @@ TITLE_MODE_DOWNLOAD_LINE = 105
 DISABLED_LINE = 106
 LANGUAGE_MENU_LINE = 107
 DOWNLOAD_GAME_SELECTION_LINE = 108
+TITLE_MODE_UNLOCK_LINE = 109
+UNLOCK_USE_BANK_LINE = 110
+UNLOCK_GAME_SELECTION_LINE = 111
+UNLOCK_CHALLENGE_LINE = 112
 TITLE_TEXT_BUFFER_LENGTH = 54
 
 DISABLED_MESSAGES = {
@@ -190,10 +209,10 @@ SHORT_TITLE_HOME_MESSAGES = {
     "0/1/0": "Pulsa\ue073: menú HOME",
 }
 
-# Two appended BMG entries replace the wide bottom HOME-help line while the
+# Three appended BMG entries replace the wide bottom HOME-help line while the
 # stock version pane remains unchanged. The title hook rebinds this line after
 # each R press.
-# 两条追加 BMG 条目替换宽大的底部 HOME 帮助行，原版版本号窗格保持不变。标题钩子会在
+# 三条追加 BMG 条目替换宽大的底部 HOME 帮助行，原版版本号窗格保持不变。标题钩子会在
 # 每次按下 R 后重新绑定该行。
 TITLE_MODE_OFFLINE_MESSAGES = {
     "0/0/4": f"現在のモード：オフライン（{R_BUTTONS['0/0/4']}で切替）",
@@ -219,6 +238,19 @@ TITLE_MODE_DOWNLOAD_MESSAGES = {
     "0/1/1": f"현재 모드: 다운로드 ({R_BUTTONS['0/1/1']}으로 전환)",
     "0/1/2": f"当前模式：下载模式（按{R_BUTTONS['0/1/2']}键切换模式）",
     "0/1/3": f"目前模式：下載模式（按{R_BUTTONS['0/1/3']}鍵切換模式）",
+}
+
+TITLE_MODE_UNLOCK_MESSAGES = {
+    "0/0/4": f"現在のモード：アンロック（{R_BUTTONS['0/0/4']}で切替）",
+    "0/0/5": f"現在のモード：アンロック（{R_BUTTONS['0/0/5']}で切替）",
+    "0/0/6": f"Mode: Unlock ({R_BUTTONS['0/0/6']}:switch mode)",
+    "0/0/7": f"Mode: Déverrouillage ({R_BUTTONS['0/0/7']}:changer)",
+    "0/0/8": f"Modalità: Sblocco ({R_BUTTONS['0/0/8']}:cambia modo)",
+    "0/0/9": f"Modus: Entsperren({R_BUTTONS['0/0/9']}:wechseln)",
+    "0/1/0": f"Modo: Desbloqueo ({R_BUTTONS['0/1/0']}:cambiar modo)",
+    "0/1/1": f"현재 모드: 잠금 해제 ({R_BUTTONS['0/1/1']}으로 전환)",
+    "0/1/2": f"当前模式：解锁模式（按{R_BUTTONS['0/1/2']}键切换模式）",
+    "0/1/3": f"目前模式：解鎖模式（按{R_BUTTONS['0/1/3']}鍵切換模式）",
 }
 
 OFFLINE_MENU_GREETINGS = {
@@ -247,6 +279,19 @@ DOWNLOAD_MENU_GREETINGS = {
     "0/1/3": "目前模式：下載模式\n將伺服器銀行資料下載到本機並覆蓋現有資料。",
 }
 
+UNLOCK_MENU_GREETINGS = {
+    "0/0/4": "げんざいのモード：アンロックモード\nセーブが あわない ときに つよく アンロックします",
+    "0/0/5": "現在のモード：アンロックモード\nセーブデータ不一致を強制解除します。",
+    "0/0/6": "Current Mode: Unlock Mode\nForce-unlocks mismatched save data.",
+    "0/0/7": "Mode actuel : Déverrouillage\nDéverrouille si les sauvegardes diffèrent.",
+    "0/0/8": "Modalità attuale: Sblocco\nSblocca se i salvataggi non coincidono.",
+    "0/0/9": "Aktueller Modus: Entsperren\nEntsperrt bei unpassendem Spielstand.",
+    "0/1/0": "Modo actual: Desbloqueo\nDesbloquea si no coincide la partida.",
+    "0/1/1": "현재 모드: 잠금 해제 모드\n저장 데이터 불일치를 강제로 해제할 때 사용합니다.",
+    "0/1/2": "当前模式：解锁模式\n用于强制解锁存档不匹配的情况。",
+    "0/1/3": "目前模式：解鎖模式\n用於強制解鎖存檔不相符的情況。",
+}
+
 DOWNLOAD_SUCCESS_MESSAGES = {
     "0/0/4": "ぎんこうデータを SDカードに\nダウンロードしました\nタイトルにもどります……",
     "0/0/5": "銀行データをSDカードに\nダウンロードしました\nタイトルに戻ります……",
@@ -273,6 +318,67 @@ DOWNLOAD_GAME_SELECTION_MESSAGES = {
     "0/1/3": "選擇任意遊戲軟體，\n均可將完整銀行資料下載到本機。",
 }
 
+UNLOCK_GAME_SELECTION_MESSAGES = {
+    "0/0/4": "ゲームをえらんで ボタンをおすとき、\nL + A + STARTを おしつづけて\nアンロックモードに はいります。",
+    "0/0/5": "ゲームを選んでボタンを押すとき、\nL + A + STARTを押し続けて\nアンロックモードに入ります。",
+    "0/0/6": "When confirming a game,\nhold L + A + Start to enter Unlock Mode.",
+    "0/0/7": "En confirmant un jeu,\nmaintenez L + A + Start pour ouvrir\nle mode Déverrouillage.",
+    "0/0/8": "Quando confermi un gioco,\ntieni L + A + Start per aprire\nla modalità Sblocco.",
+    "0/0/9": "Beim Bestätigen eines Spiels\nL + A + Start gedrückt halten,\num den Entsperrmodus zu öffnen.",
+    "0/1/0": "Al confirmar un juego,\nmantén L + A + Start para abrir\nel modo Desbloqueo.",
+    "0/1/1": "게임을 선택해 버튼을 누를 때\nL + A + Start를 계속 눌러\n잠금 해제 모드로 들어갑니다.",
+    "0/1/2": "选择游戏按下按钮的同时，\n按住L + A + Start 以进入解锁模式。",
+    "0/1/3": "選擇遊戲按下按鈕的同時，\n按住L + A + Start 以進入解鎖模式。",
+}
+
+UNLOCK_CODE_LABELS = {
+    "0/0/4": "このコードを にゅうりょく: ",
+    "0/0/5": "この解除コードを入力: ",
+    "0/0/6": "Enter this unlock code: ",
+    "0/0/7": "Entrez ce code : ",
+    "0/0/8": "Inserisci questo codice: ",
+    "0/0/9": "Diesen Code eingeben: ",
+    "0/1/0": "Introduce este código: ",
+    "0/1/1": "이 잠금 해제 코드 입력: ",
+    "0/1/2": "输入此解锁码: ",
+    "0/1/3": "輸入此解鎖碼: ",
+}
+
+
+def build_unlock_prompt_values(source_values: list[int], label: str) -> list[int]:
+    """Append a third line that expands number register 1.
+
+    在原消息后追加展开数字寄存器 1 的第三行。
+    """
+    tag_prefix = (0x0010,0x0003,0x0207)
+    tag_index = next(
+        (
+            index
+            for index in range(len(source_values)-4)
+            if tuple(source_values[index : index + 3]) == tag_prefix
+        ),
+        -1,
+    )
+    if tag_index < 0:
+        raise ValueError("challenge message has no number-register tag")
+
+    # Keep both parameters of the stock challenge-number tag except for the
+    # register ID itself. Some language archives use a nonzero second parameter.
+    # 除寄存器编号外保留原挑战码标签的两个参数；部分语言档案的第二参数不为零。
+    tag_end = tag_index + 5
+    values = list(source_values[:tag_end])
+    values.append(0x000A)
+    encoded_label = label.encode("utf-16le")
+    values.extend(
+        int.from_bytes(encoded_label[index : index + 2], "little")
+        for index in range(0, len(encoded_label), 2)
+    )
+    values.extend((0x0010, 0x0003, 0x0207, 0x0001, source_values[tag_index + 4]))
+    values.append(0)
+    if len(values) & 1:
+        values.append(0)
+    return values
+
 
 def verify_kana_archive_messages() -> None:
     """Reject kanji in every custom string emitted for the kana-only archive.
@@ -283,7 +389,7 @@ def verify_kana_archive_messages() -> None:
     # The stock HOME hint in this archive already contains kanji. Its two
     # appended title-mode variants intentionally follow the same convention;
     # the remaining custom messages stay kana-only.
-    # 此档案的原版 HOME 提示本身已包含汉字，因此追加的两条标题模式文本也有意
+    # 此档案的原版 HOME 提示本身已包含汉字，因此追加的三条标题模式文本也有意
     # 使用相同写法；其余自定义文本仍保持纯假名。
     texts = (
         DISABLED_MESSAGES[archive],
@@ -296,8 +402,12 @@ def verify_kana_archive_messages() -> None:
         DOWNLOAD_SUCCESS_MESSAGES[archive],
         DOWNLOAD_PROGRESS_MESSAGES[archive],
         DOWNLOAD_MENU_MESSAGES[archive],
+        UNLOCK_MENU_MESSAGES[archive],
         LANGUAGE_MENU_MESSAGES[archive],
         DOWNLOAD_GAME_SELECTION_MESSAGES[archive],
+        UNLOCK_MENU_GREETINGS[archive],
+        UNLOCK_GAME_SELECTION_MESSAGES[archive],
+        UNLOCK_CODE_LABELS[archive],
     )
     for text in texts:
         kanji = [char for char in text if "\u3400" <= char <= "\u9fff" or "\uf900" <= char <= "\ufaff"]
@@ -346,12 +456,23 @@ def main() -> None:
         save_flags = message_codec.u16(
             original, section_offset + 4 + SAVE_LINE * 8 + 6
         )
+        unlock_challenge_flags = message_codec.u16(
+            original,
+            section_offset + 4 + UNLOCK_CHALLENGE_SOURCE_LINE * 8 + 6,
+        )
+        unlock_challenge_source = message_codec.read_message_line_values(
+            original, UNLOCK_CHALLENGE_SOURCE_LINE
+        )
+        unlock_challenge = build_unlock_prompt_values(
+            unlock_challenge_source, UNLOCK_CODE_LABELS[archive]
+        )
         if args.title_r_glyph_test:
             # Diagnostic archive: isolate private-use glyph rendering from
             # multiline layout and localized text length.
             # 诊断档案：将专用区字形渲染与多行布局、本地化文本长度完全分离。
             title_mode_offline = original_lines[TITLE_HOME_LINE] + R_BUTTONS[archive]
             title_mode_download = title_mode_offline
+            title_mode_unlock = title_mode_offline
         else:
             title_home = SHORT_TITLE_HOME_MESSAGES.get(
                 archive, original_lines[TITLE_HOME_LINE]
@@ -364,6 +485,10 @@ def main() -> None:
                 f"{title_home}\n"
                 f"{TITLE_MODE_DOWNLOAD_MESSAGES[archive]}"
             )
+            title_mode_unlock = (
+                f"{title_home}\n"
+                f"{TITLE_MODE_UNLOCK_MESSAGES[archive]}"
+            )
         # The stock title TextBox reserves 54 UTF-16 characters. The renderer
         # clears the whole pane instead of truncating an oversized string.
         # 原版标题 TextBox 仅预留 54 个 UTF-16 字符；越界时渲染器会清空整个
@@ -371,6 +496,7 @@ def main() -> None:
         for mode_name, title_text in (
             ("offline", title_mode_offline),
             ("download", title_mode_download),
+            ("unlock", title_mode_unlock),
         ):
             if len(title_text) > TITLE_TEXT_BUFFER_LENGTH:
                 raise ValueError(
@@ -394,7 +520,11 @@ def main() -> None:
                 (DISABLED_MESSAGES[archive], use_bank_flags),
                 (LANGUAGE_MENU_MESSAGES[archive], use_bank_flags),
                 (DOWNLOAD_GAME_SELECTION_MESSAGES[archive], game_selection_flags),
+                (title_mode_unlock, title_mode_flags),
+                (UNLOCK_MENU_MESSAGES[archive], use_bank_flags),
+                (UNLOCK_GAME_SELECTION_MESSAGES[archive], game_selection_flags),
             ),
+            ((unlock_challenge, unlock_challenge_flags),),
         )
         greeting_entry = entries[MENU_MESSAGE_FILE_INDEX]
         greeting_original = greeting_entry.files[0]
@@ -402,10 +532,10 @@ def main() -> None:
         greeting_flags = message_codec.u16(
             greeting_original, greeting_section_offset + 4 + MENU_GREETING_LINE * 8 + 6
         )
-        # Keep the stock line untouched and append two complete mode-specific
+        # Keep the stock line untouched and append three complete mode-specific
         # alternatives. Each alternative starts with the stock greeting (or
         # its one-line equivalent) and then adds the selected-mode explanation.
-        # 原版行保持不变，另行追加两条完整的模式文本。每条先放原版欢迎语（或其
+        # 原版行保持不变，另行追加三条完整的模式文本。每条先放原版欢迎语（或其
         # 一行等义版本），再追加所选模式说明。
         greeting_original_lines = message_codec.read_message_lines(greeting_original)
         menu_greeting = SHORT_MENU_GREETINGS.get(
@@ -419,12 +549,17 @@ def main() -> None:
             f"{menu_greeting}\n"
             f"{DOWNLOAD_MENU_GREETINGS[archive]}"
         )
+        unlock_menu_greeting = (
+            f"{menu_greeting}\n"
+            f"{UNLOCK_MENU_GREETINGS[archive]}"
+        )
         greeting_entry.files[0] = message_codec.patch_message_file(
             greeting_original,
             {},
             (
                 (offline_menu_greeting, greeting_flags),
                 (download_menu_greeting, greeting_flags),
+                (unlock_menu_greeting, greeting_flags),
             ),
         )
         rebuilt = message_codec.write_garc(version, alignment, entries)
@@ -453,6 +588,9 @@ def main() -> None:
             DISABLED_LINE: DISABLED_MESSAGES[archive],
             LANGUAGE_MENU_LINE: LANGUAGE_MENU_MESSAGES[archive],
             DOWNLOAD_GAME_SELECTION_LINE: DOWNLOAD_GAME_SELECTION_MESSAGES[archive],
+            TITLE_MODE_UNLOCK_LINE: title_mode_unlock,
+            UNLOCK_USE_BANK_LINE: UNLOCK_MENU_MESSAGES[archive],
+            UNLOCK_GAME_SELECTION_LINE: UNLOCK_GAME_SELECTION_MESSAGES[archive],
         }
         for index, value in expected.items():
             if rebuilt_lines[index] != value:
@@ -461,6 +599,12 @@ def main() -> None:
             raise ValueError(f"offline-menu greeting verification failed for {archive}")
         if rebuilt_greetings[DOWNLOAD_MENU_GREETING_LINE] != download_menu_greeting:
             raise ValueError(f"download-menu greeting verification failed for {archive}")
+        if rebuilt_greetings[UNLOCK_MENU_GREETING_LINE] != unlock_menu_greeting:
+            raise ValueError(f"unlock-menu greeting verification failed for {archive}")
+        if message_codec.read_message_line_values(
+            rebuilt_entries[MESSAGE_FILE_INDEX].files[0], UNLOCK_CHALLENGE_LINE
+        ) != unlock_challenge:
+            raise ValueError(f"unlock-challenge verification failed for {archive}")
         if rebuilt_greetings[MENU_GREETING_LINE] != greeting_original_lines[MENU_GREETING_LINE]:
             raise ValueError(f"stock-menu greeting verification failed for {archive}")
         destination.parent.mkdir(parents=True, exist_ok=True)

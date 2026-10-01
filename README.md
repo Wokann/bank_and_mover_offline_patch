@@ -14,13 +14,14 @@ The patches never upload offline changes to the official server. An upload patch
 
 | Application | Title-screen modes | Purpose |
 |---|---|---|
-| Pokemon Bank | Offline / Download | Download a complete official Bank to the SD card, or load, edit, and save the local Bank entirely offline |
+| Pokemon Bank | Offline / Download / Unlock | Load, edit, and save the local Bank offline; download a complete official Bank to the SD card; or enter the stock forced-unlock flow for a mismatched save |
 | Poke Mover | Offline / Original | Transfer Pokemon into the same local Bank's Transport Box, or use the unmodified official server path |
 
 - Press the physical **R** button on the title screen to switch modes. Pressing **A**, **START**, or the lower screen latches the displayed mode for that session.
 - Bank Offline Mode can invoke the stock first-use initializer to create a new local Bank when no usable file exists.
 - Bank validates the primary file, attempts recovery from `bankdata.bak`, and protects saves with `bankdata.tmp`, complete-write checks, and a previous-generation backup.
 - Bank Download Mode retains the official account, game-detection, and server-download flow. It commits the data locally and returns to the title screen without entering the boxes or uploading data.
+- Bank Unlock Mode preserves the stock online transaction-recovery flow and exposes one server-returned unlock candidate on the official challenge-code screen.
 - Poke Mover Offline Mode retains stock game reading, filtering, conversion, Transport Box checks, and source-game saving while replacing server Bank I/O with local transactions.
 - Added messages cover all ten language archives shipped with both applications.
 
@@ -51,11 +52,13 @@ Poke Mover:   00040000000C9C00
 
 ### Pokemon Bank
 
-The title screen defaults to **Offline Mode**. Press **R** to select **Download Mode**.
+The title screen defaults to **Offline Mode**. Press **R** to cycle through **Download Mode**, **Unlock Mode**, and back to Offline Mode.
 
 If the official server already contains your Bank, first enter Download Mode, choose “Download Bank data locally,” complete the stock account checks, and select any available game. After the completion message returns to the title screen, switch back to Offline Mode and use the normal Bank interface to manage boxes and save locally.
 
 Download Mode overwrites the current local Bank, so back it up first. If no server copy needs to be preserved, Offline Mode may be used directly; when neither a valid primary nor backup exists, the patch invokes the stock first-use initializer to create a local Bank.
+
+Unlock Mode is intended only for the stock save-mismatch lock. Enter its first menu item, select the relevant game, and hold **L + A + START** while confirming the game to open the official forced-unlock screen. If the server supplies an accepted candidate, the patch shows its first eight-digit form on a third line. The subsequent rollback, validation, and server handling remain stock behavior; this mode does not capture `bankdata.bin` or use Download Mode's early-exit route.
 
 > **Privacy:** `bankdata.bin` downloaded in Download Mode may contain private account-related identifiers, player and Trainer information, and timestamps. Do not upload it publicly or share it casually.
 
@@ -82,6 +85,7 @@ python .\gui\bank_viewer.py
 - Back up the SD card, source-game saves, and `SD:/3ds/Bank/` before real-console use.
 - Do not mix Bank files belonging to different accounts.
 - Download Mode is server-to-local only; Offline Mode is local only; no local-to-server upload feature exists.
+- Unlock Mode uses the official online recovery path and may change the official transaction state. It does not upload the local offline `bankdata.bin`.
 - Poke Mover Original Mode and the local offline Bank are independent.
 
 ## Unofficial-project disclaimer

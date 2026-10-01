@@ -2,7 +2,7 @@
 
 This document records the outer state machine, network paths, and transaction
 branches in the supported stock binary, then compares them with the current
-combined patch's Download and Offline modes. See
+combined patch's Download, Offline, and Unlock modes. See
 [`code-analysis.md`](code-analysis.md) for the memory map, function map, and
 data-structure overview.
 
@@ -216,21 +216,21 @@ the middle, states 18 and 17 resolve the persisted state on a later use.
 
 ## Current patch versus stock
 
-| Node | Stock | Download Mode | Offline Mode |
-|---|---|---|---|
-| Turtle backend | Stock `data:/turtle` storage | Redirected to `sd:/3ds/Bank/sav.bin` | Redirected to the same `sav.bin` |
-| state 5 | Real connection | Stock | Complete the session locally; no remote job |
-| state 8 | Server account summary | Stock | Classify existing/first-use from local `bankdata.bin/.bak` |
-| state 15 | Remote entitlement/campaign | Supply required ticket fields locally; disable online campaigns | Same as Download Mode |
-| state 9 | Server-side first creation | Stock creation and upload | Create the initial local `bankdata.bin` |
-| state 11 | Select recovery path | Stock | Keep the test, but redirect result `9` to state 17 instead of state 18 |
-| state 18 | Current Turtle remote recovery | Stock | Never entered |
-| state 17 | Selected-game remote recovery | Stock | Keep stock UI timing without remote commit/rollback |
-| state 16 | Download complete file | Stock download plus local capture | Load the complete object from `bankdata.bin` |
-| state 12/13 | Local mileage plus online gifts | Skipped after download | Keep local mileage; skip only online-gift lookup |
-| state 25 | Normal Bank Box | Not entered after capture | Stock Bank Box |
-| state 7 | Remote stage, game save, commit/rollback | Normally not reached; stock if reached | Local file stage, commit, and rollback |
-| state 19/20 | Remote release and disconnect | Stock no-save exit after capture | Local cleanup and title return |
+| Node | Stock | Download Mode | Offline Mode | Unlock Mode |
+|---|---|---|---|---|
+| Turtle backend | Stock `data:/turtle` storage | Redirected to `sd:/3ds/Bank/sav.bin` | Redirected to the same `sav.bin` | Redirected to the same `sav.bin` |
+| state 5 | Real connection | Stock | Complete the session locally; no remote job | Stock |
+| state 8 | Server account summary | Stock | Classify existing/first-use from local `bankdata.bin/.bak` | Stock |
+| state 15 | Remote entitlement/campaign | Supply required ticket fields locally; disable online campaigns | Same as Download Mode | Same project-wide local result |
+| state 9 | Server-side first creation | Stock creation and upload | Create the initial local `bankdata.bin` | Stock creation and upload |
+| state 11 | Select recovery path | Stock | Keep the test, but redirect result `9` to state 17 instead of state 18 | Stock |
+| state 18 | Current Turtle remote recovery | Stock | Never entered | Stock; challenge UI may append the first server candidate |
+| state 17 | Selected-game remote recovery | Stock | Keep stock UI timing without remote commit/rollback | Stock |
+| state 16 | Download complete file | Stock download plus local capture | Load the complete object from `bankdata.bin` | Stock download; no local capture |
+| state 12/13 | Local mileage plus online gifts | Skipped after download | Keep local mileage; skip only online-gift lookup | Stock |
+| state 25 | Normal Bank Box | Not entered after capture | Stock Bank Box | Stock Bank Box |
+| state 7 | Remote stage, game save, commit/rollback | Normally not reached; stock if reached | Local file stage, commit, and rollback | Stock |
+| state 19/20 | Remote release and disconnect | Stock no-save exit after capture | Local cleanup and title return | Stock |
 
 Download Mode is not a full stock mode. It retains real networking, first-use
 creation, transaction recovery, and complete-file download, but state 15 uses
@@ -239,6 +239,15 @@ no-save exit. HOME, support-code, and Mover/eShop menu operations are also
 disabled or redirected by the patch. Because the Turtle backend is redirected
 globally, server transaction descriptors written in Download Mode are stored
 in `sav.bin`, not the stock logical-record backend.
+
+Unlock Mode follows the stock state 11/18/17 transaction-recovery branches. At
+the stock state-18 challenge screen, the server response already owns a vector
+of accepted candidate values. The original validator compares the entered
+eight-digit number against every candidate modulo `100,000,000`. Unlock Mode
+uses the same rule to place the first candidate in message number register 1
+and appends it as a third prompt line. The stock challenge value in register 0,
+input validation, rollback request, success/failure result, and continuation
+remain unchanged. An empty candidate vector retains the stock two-line prompt.
 
 ### Offline save transaction
 
@@ -273,6 +282,8 @@ completed offline path clears it.
   it is not equivalent to server-side content validation.
 - Download Mode still requires valid account, transaction, and complete-file
   responses from the official service.
+- Unlock Mode can display only a candidate actually present in the server
+  response; it cannot guarantee that the service accepts the later rollback.
 - Offline Mode neither interprets nor fabricates a remote descriptor;
   `bankdata.tmp/.bin/.bak` forms a separate local file transaction.
 - This document states branches implemented in the current binary and patch;

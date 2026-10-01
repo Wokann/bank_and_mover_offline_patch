@@ -1,4 +1,4 @@
-# Combined offline and download patch
+# Combined offline, download, and unlock patch
 
 See [`../docs/code-analysis.md`](../docs/code-analysis.md) for the stock
 program's memory map, state table, network paths, BankObject, and bankdata
@@ -11,26 +11,30 @@ the former standalone download and offline patches into one runtime-selectable
 build. It does not concatenate their IPS files: every shared network, data,
 message, and save hook dispatches according to a session mode.
 
-The upload patch has been permanently discontinued. This project only imports
-server data in download mode and uses a separate local copy in offline mode; it
-never uploads offline changes to the official service.
+The upload patch has been permanently discontinued. This project imports
+server data in Download Mode and uses a separate local copy in Offline Mode; it
+never uploads offline changes to the official service. Unlock Mode enters the
+stock online transaction-recovery flow but never substitutes local Bankdata for
+the server Bank.
 
 ## Modes and recommended workflow
 
-The title screen defaults to **Offline Mode**. Press the physical **R** button
-to switch between **Offline Mode** and **Download Mode**. The line below the
-stock HOME-menu help updates immediately. Press **A**, **START**, or touch the
-lower screen to latch the displayed mode for the whole session; R no longer
-changes it after leaving the title screen.
+The title screen defaults to **Offline Mode**. Each press of the physical **R**
+button advances through **Offline Mode**, **Download Mode**, and **Unlock
+Mode**. The line below the stock HOME-menu help updates immediately. Press
+**A**, **START**, or touch the lower screen to latch the displayed mode for the
+whole session; R no longer changes it after leaving the title screen.
 
 ```text
 Title screen (default: Offline)
         │
         ├── R ───────────────► Download
+        ├── R again ─────────► Unlock
         ├── R again ─────────► Offline
         └── A / START / touch
                   │ latch displayed mode
                   ├── Download ─► official server download ─► local file
+                  ├── Unlock  ─► stock forced-unlock path
                   └── Offline  ─► local file ─► normal Bank use
 ```
 
@@ -50,7 +54,8 @@ preferred when an existing official Bank account must be preserved locally.
 
 ## Local files and invariants
 
-Both modes use the same checked local-file implementation.
+Offline and Download modes use the same checked Bankdata-file implementation.
+All three modes share the redirected Turtle-record backend described below.
 
 | File | Purpose |
 |---|---|
@@ -74,7 +79,7 @@ an existing invalid file cannot participate in recovery.
 
 ### Local-record redirection
 
-Both patch modes redirect the persistence backend of the stock logical
+All three patch modes redirect the persistence backend of the stock logical
 `data:/turtle` record to `sd:/3ds/Bank/sav.bin`. They neither replace nor
 directly parse the outer `00000001.sav`. Stock object clearing, language setup,
 transaction-field updates, checksum generation, validation, the loaded flag,
@@ -99,7 +104,7 @@ First-use initialization still lets the stock flow clear the object, apply the
 selected language, and invoke its normal save wrapper. Redirected formatting
 only resets `sav.bin` and `sav.tmp`; it does not fake object initialization or
 format the stock save archive. Once `sav.bin` is available, all later
-local-record reads and writes in both modes use it exclusively. An SD write
+local-record reads and writes in all three modes use it exclusively. An SD write
 failure is returned as a save failure and never falls back to modifying the
 stock save.
 
@@ -163,6 +168,43 @@ result or silently mark the capture successful.
 Download Mode locally completes the separate entitlement/campaign state to
 disable `free_campaign` and online gifts while supplying the downstream
 runtime fields. This state is independent of the normal local mileage states.
+
+## Unlock Mode
+
+Unlock Mode is a separate entry into the stock online transaction-recovery
+flow. It does not inherit Download Mode's Bankdata capture, post-download state
+skip, or download-complete message.
+
+```text
+Title screen: Unlock Mode
+        │
+        ▼
+Feature menu: Enter Force Unlock
+        │
+        ▼
+Select the relevant game while holding L + A + START
+        │
+        ▼
+Stock forced-unlock challenge state
+        ├── no server candidate ─► retain the stock two-line prompt
+        └── candidate available ─► append its first accepted eight-digit form
+                                      as “Enter this unlock code: xxxxxxxx”
+        │
+        ▼
+Stock input validation, rollback request, result handling, and continuation
+```
+
+The server response owns a vector of candidate values. The stock validator
+accepts an entered number when it equals any vector element modulo
+`100,000,000`. The patch displays the first element using exactly that rule and
+lets the existing message system add leading zeroes. It does not invent a code,
+skip validation, force a success result, or replace the subsequent server
+operation. If the vector is empty, the original prompt is used unchanged.
+
+This mode still shares project-wide menu restrictions, the redirected Turtle
+record, and the local entitlement/online-gift bypass. Its recovery state,
+however, remains the stock state machine. The local offline `bankdata.bin` is
+neither loaded nor uploaded by the unlock display hook.
 
 ## Offline Mode: startup, recovery, and first use
 
@@ -279,14 +321,14 @@ Ending Bank use without saving does not install a new `bankdata.bin`.
 
 ## Shared menu, messages, and language handling
 
-| Feature-menu entry | Offline Mode | Download Mode |
-|---|---|---|
-| First entry | Use Pokemon Bank | Download Bank Data |
-| About Pokemon Bank | Stock information screen | Stock information screen |
-| Support | Disabled; return to feature menu | Disabled; return to feature menu |
-| Poke Mover/eShop | Disabled; return to feature menu | Disabled; return to feature menu |
-| Pokemon HOME | Stock language-selection flow | Stock language-selection flow |
-| Back | Stock behavior | Stock behavior |
+| Feature-menu entry | Offline Mode | Download Mode | Unlock Mode |
+|---|---|---|---|
+| First entry | Use Pokemon Bank | Download Bank Data | Enter Force Unlock |
+| About Pokemon Bank | Stock information screen | Stock information screen | Stock information screen |
+| Support | Disabled; return to feature menu | Disabled; return to feature menu | Disabled; return to feature menu |
+| Poke Mover/eShop | Disabled; return to feature menu | Disabled; return to feature menu | Disabled; return to feature menu |
+| Pokemon HOME | Stock language-selection flow | Stock language-selection flow | Stock language-selection flow |
+| Back | Stock behavior | Stock behavior | Stock behavior |
 
 The former HOME entry is redirected before any HOME networking or Box state is
 created. It opens the stock language selector. Before returning to the title,
@@ -313,6 +355,7 @@ Spanish, Korean, Simplified Chinese, and Traditional Chinese.
 | `offline_flow.c` | Local connection, disconnection, and save-display state updates |
 | `local_mileage.c` | Converts console time into the packed date consumed by the stock Poké Mile states; it does not replace the native point calculation |
 | `local_ticket.c` | Locally completes the entitlement/optional-reward state and supplies ticket fields without implementing Poké Mile calculation |
+| `unlock_mode.c` | Selects and normalizes the first server-returned unlock candidate for the stock challenge-code UI |
 | `patch_paths.c` | Path constants placed in the verified tail-code region |
 | `turtle_redirect.c` | Redirected Turtle-record backend placed in the verified HOME-code region |
 | `../include/bankdata_redirect.h` | Confirmed serialized Bankdata layout, partial native Bank views, redirection constants, and stock entry points |
@@ -324,6 +367,7 @@ Spanish, Korean, Simplified Chinese, and Traditional Chinese.
 | `../include/patch_paths.h` | Path declarations shared across the separately placed objects |
 | `../include/system_time.h` | Shared-memory system-time structure and addresses |
 | `../include/turtle_redirect.h` | Confirmed logical-record layout, backend result contract, stock entry points, and exported backend declarations |
+| `../include/unlock_mode.h` | Unlock-candidate display helper declaration |
 | `patch_messages.py` | Rebuilds and validates the ten localized LayeredFS archives |
 | `message_archive.py` | Self-contained GARC and encrypted message-file codec |
 | `verify_patch.py` | Verifies base hash, code ranges, hooks, IPS reconstruction, native instruction replay, and resources |
