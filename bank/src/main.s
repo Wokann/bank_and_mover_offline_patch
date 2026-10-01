@@ -942,7 +942,7 @@ CombinePatch_DownloadCaptureTrampoline:
     bne @@restore
     mov r0,#0
     mov r1,r7
-    ldr r2,=BankFile_Size
+    ldr r2,=BANK_FILE_SIZE
     mov r3,#0
     bl OfflinePatch_Stage
     cmp r0,#0

@@ -19,7 +19,7 @@
 ; Bank object and fixed-size serialized file
 ; Bank 对象和定长序列化文件
 ; -----------------------------------------------------------------------------
-.definelabel BankFile_Size,                     0x000BB518
+.definelabel BANK_FILE_SIZE,                    0x000BB518
 .definelabel BankFile_Vtable,                   0x003626FC
 ; Contains 0x003AB938.
 ; 内含 0x003AB938。
@@ -192,13 +192,13 @@
 
 ; Raw IPC values used when no application wrapper is available.
 ; 在程序没有现成封装函数时使用的原始 IPC 值。
-.definelabel FS_ArchiveId_SDMC,                  9
-.definelabel FS_PathType_Empty,                  1
-.definelabel FS_PathType_ASCII,                  3
-.definelabel FSUSER_Cmd_OpenArchive,             0x080C00C2
-.definelabel FSUSER_Cmd_DeleteFile,              0x08040142
-.definelabel FSUSER_Cmd_RenameFile,              0x08050244
-.definelabel FSUSER_Cmd_CreateDirectory,         0x08090182
-.definelabel FSUSER_Cmd_CloseArchive,            0x080E0080
-.definelabel FSFILE_Cmd_SetSize,                 0x08050080
-.definelabel SVC_SendSyncRequest,                0x32
+.definelabel FS_ARCHIVE_ID_SDMC,                 9
+.definelabel FS_PATH_TYPE_EMPTY,                 1
+.definelabel FS_PATH_TYPE_ASCII,                 3
+.definelabel FSUSER_CMD_OPEN_ARCHIVE,            0x080C00C2
+.definelabel FSUSER_CMD_DELETE_FILE,             0x08040142
+.definelabel FSUSER_CMD_RENAME_FILE,             0x08050244
+.definelabel FSUSER_CMD_CREATE_DIRECTORY,        0x08090182
+.definelabel FSUSER_CMD_CLOSE_ARCHIVE,           0x080E0080
+.definelabel FSFILE_CMD_SET_SIZE,                0x08050080
+.definelabel SVC_SEND_SYNC_REQUEST,               0x32

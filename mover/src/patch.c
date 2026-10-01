@@ -6,45 +6,52 @@ typedef unsigned long long u64;
 typedef signed long long s64;
 
 enum {
-    BANKDATA_SIZE=0xBB518,
+    BANK_FILE_SIZE=0xBB518,
     TRANSFER_BOX_POINTER_OFFSET=0xBB524,
-    TRANSFER_SLOT_COUNT=30,
-    ARCHIVE_SDMC=9, PATH_EMPTY=1, PATH_ASCII=3,
+    TRANSFER_BOX_SLOT_COUNT=30,
+    FS_ARCHIVE_ID_SDMC=9, FS_PATH_TYPE_EMPTY=1, FS_PATH_TYPE_ASCII=3,
     OPEN_READ=1, OPEN_WRITE=2, OPEN_CREATE=4, WRITE_FLUSH=1,
     RESULT_SUMMARY_SHIFT=21, RESULT_SUMMARY_MASK=0x3F,
     RESULT_SUMMARY_NOT_FOUND=4
 };
 
-#define FSUSER_HANDLE ((volatile u32 *)0x00311F80u)
-#define OPEN_DIRECT ((OpenDirect)0x001DF448u)
-#define FILE_READ ((FileRead)0x0015930Cu)
-#define FILE_CLOSE ((FileClose)0x00159364u)
-#define FILE_WRITE ((FileWrite)0x00159390u)
-#define FILE_GET_SIZE ((FileGetSize)0x001593F0u)
-#define ALLOCATE_OBJECT ((AllocateObject)0x001E6360u)
-#define CREATE_TRANSFER_OBJECT ((CreateTransferObject)0x001DFBA4u)
-#define TRANSFER_SLOT_OCCUPIED ((TransferSlotOccupied)0x0019A858u)
-#define TRANSFER_SLOT_LOAD ((TransferSlotLoad)0x0019A224u)
-#define TRANSFER_SLOT_CLEAR ((TransferSlotClear)0x0019A7E0u)
-#define TRANSFER_SLOT_WRITE ((TransferSlotWrite)0x0019A6F4u)
-#define TRANSFER_COUNT ((TransferCount)0x0024D624u)
-#define STATE_DELAY_ELAPSED ((StateDelayElapsed)0x0019B758u)
-#define STATE_DELAY_RESET ((StateDelayReset)0x00233844u)
+#define FSUSER_HandleSlot ((volatile u32 *)0x00311F80u)
+#define FSUSER_OpenFileDirectly ((FSUSER_OpenFileDirectlyFn)0x001DF448u)
+#define FSFILE_Read ((FSFILE_ReadFn)0x0015930Cu)
+#define FSFILE_Close ((FSFILE_CloseFn)0x00159364u)
+#define FSFILE_Write ((FSFILE_WriteFn)0x00159390u)
+#define FSFILE_GetSize ((FSFILE_GetSizeFn)0x001593F0u)
+#define Heap_AllocateObject ((Heap_AllocateObjectFn)0x001E6360u)
+#define TransferObject_Create ((TransferObject_CreateFn)0x001DFBA4u)
+#define TransferSlot_IsOccupied ((TransferSlot_IsOccupiedFn)0x0019A858u)
+#define TransferSlot_Load ((TransferSlot_LoadFn)0x0019A224u)
+#define TransferSlot_Clear ((TransferSlot_ClearFn)0x0019A7E0u)
+#define TransferSlot_Write ((TransferSlot_WriteFn)0x0019A6F4u)
+#define TransferSlot_CountOccupied ((TransferSlot_CountOccupiedFn)0x0024D624u)
+#define StateTimer_HasElapsed ((StateTimer_HasElapsedFn)0x0019B758u)
+#define StateTimer_Reset ((StateTimer_ResetFn)0x00233844u)
+#define BankFile_Vtable 0x002E6DD0u
+#define FSUSER_CMD_OPEN_ARCHIVE 0x080C00C2u
+#define FSUSER_CMD_CREATE_DIRECTORY 0x08090182u
+#define FSUSER_CMD_DELETE_FILE 0x08040142u
+#define FSUSER_CMD_RENAME_FILE 0x08050244u
+#define FSUSER_CMD_CLOSE_ARCHIVE 0x080E0080u
+#define FSFILE_CMD_SET_SIZE 0x08050080u
 
-typedef s32 (*OpenDirect)(volatile u32 *,u32 *,u32,u32,u32,const void *,u32,u32,const void *,u32,u32,u32);
-typedef s32 (*FileRead)(u32 *,u32 *,u64,void *,u32);
-typedef s32 (*FileWrite)(u32 *,u32 *,u64,const void *,u32,u32);
-typedef s32 (*FileClose)(u32 *);
-typedef s32 (*FileGetSize)(u32 *,u64 *);
-typedef void *(*AllocateObject)(u32,u32);
-typedef void *(*CreateTransferObject)(void *,u32,u32);
-typedef int (*TransferSlotOccupied)(void *,u32);
-typedef void (*TransferSlotLoad)(void *,void *,u32);
-typedef void (*TransferSlotClear)(void *,u32);
-typedef void (*TransferSlotWrite)(void *,void *,u32);
-typedef int (*TransferCount)(void *);
-typedef int (*StateDelayElapsed)(void *,u32);
-typedef void (*StateDelayReset)(void *);
+typedef s32 (*FSUSER_OpenFileDirectlyFn)(volatile u32 *,u32 *,u32,u32,u32,const void *,u32,u32,const void *,u32,u32,u32);
+typedef s32 (*FSFILE_ReadFn)(u32 *,u32 *,u64,void *,u32);
+typedef s32 (*FSFILE_WriteFn)(u32 *,u32 *,u64,const void *,u32,u32);
+typedef s32 (*FSFILE_CloseFn)(u32 *);
+typedef s32 (*FSFILE_GetSizeFn)(u32 *,u64 *);
+typedef void *(*Heap_AllocateObjectFn)(u32,u32);
+typedef void *(*TransferObject_CreateFn)(void *,u32,u32);
+typedef int (*TransferSlot_IsOccupiedFn)(void *,u32);
+typedef void (*TransferSlot_LoadFn)(void *,void *,u32);
+typedef void (*TransferSlot_ClearFn)(void *,u32);
+typedef void (*TransferSlot_WriteFn)(void *,void *,u32);
+typedef int (*TransferSlot_CountOccupiedFn)(void *);
+typedef int (*StateTimer_HasElapsedFn)(void *,u32);
+typedef void (*StateTimer_ResetFn)(void *);
 
 static const char emptyPath[1]={0};
 static const char directory3ds[]="/3ds";
@@ -69,9 +76,9 @@ static s32 sync(u32 handle)
 static s32 openArchive(u64 *archive)
 {
     volatile u32 *c=commandBuffer(); s32 r;
-    c[0]=0x080C00C2u; c[1]=ARCHIVE_SDMC; c[2]=PATH_EMPTY; c[3]=1;
+    c[0]=FSUSER_CMD_OPEN_ARCHIVE; c[1]=FS_ARCHIVE_ID_SDMC; c[2]=FS_PATH_TYPE_EMPTY; c[3]=1;
     c[4]=(1u<<14)|2u; c[5]=(u32)emptyPath;
-    r=sync(*FSUSER_HANDLE); if (r) return r; r=(s32)c[1];
+    r=sync(*FSUSER_HandleSlot); if (r) return r; r=(s32)c[1];
     if (!r) *archive=(u64)c[2]|((u64)c[3]<<32);
     return r;
 }
@@ -79,46 +86,46 @@ static s32 openArchive(u64 *archive)
 static void closeArchive(u64 archive)
 {
     volatile u32 *c=commandBuffer();
-    c[0]=0x080E0080u; c[1]=(u32)archive; c[2]=(u32)(archive>>32); (void)sync(*FSUSER_HANDLE);
+    c[0]=FSUSER_CMD_CLOSE_ARCHIVE; c[1]=(u32)archive; c[2]=(u32)(archive>>32); (void)sync(*FSUSER_HandleSlot);
 }
 
 static void createDirectory(u64 archive,const char *path,u32 size)
 {
     volatile u32 *c=commandBuffer();
-    c[0]=0x08090182u; c[1]=0; c[2]=(u32)archive; c[3]=(u32)(archive>>32);
-    c[4]=PATH_ASCII; c[5]=size; c[6]=0; c[7]=(size<<14)|2u; c[8]=(u32)path;
-    (void)sync(*FSUSER_HANDLE);
+    c[0]=FSUSER_CMD_CREATE_DIRECTORY; c[1]=0; c[2]=(u32)archive; c[3]=(u32)(archive>>32);
+    c[4]=FS_PATH_TYPE_ASCII; c[5]=size; c[6]=0; c[7]=(size<<14)|2u; c[8]=(u32)path;
+    (void)sync(*FSUSER_HandleSlot);
 }
 
 static s32 pathCommand(u32 command,u64 archive,const char *path,u32 size)
 {
     volatile u32 *c=commandBuffer(); s32 r;
     c[0]=command; c[1]=0; c[2]=(u32)archive; c[3]=(u32)(archive>>32);
-    c[4]=PATH_ASCII; c[5]=size; c[6]=(size<<14)|2u; c[7]=(u32)path;
-    r=sync(*FSUSER_HANDLE); return r?r:(s32)c[1];
+    c[4]=FS_PATH_TYPE_ASCII; c[5]=size; c[6]=(size<<14)|2u; c[7]=(u32)path;
+    r=sync(*FSUSER_HandleSlot); return r?r:(s32)c[1];
 }
 
 static s32 renamePath(u64 archive,const char *from,u32 fromSize,const char *to,u32 toSize)
 {
     volatile u32 *c=commandBuffer(); s32 r;
-    c[0]=0x08050244u; c[1]=0; c[2]=(u32)archive; c[3]=(u32)(archive>>32);
-    c[4]=PATH_ASCII; c[5]=fromSize; c[6]=(u32)archive; c[7]=(u32)(archive>>32);
-    c[8]=PATH_ASCII; c[9]=toSize; c[10]=(fromSize<<14)|0x402u; c[11]=(u32)from;
+    c[0]=FSUSER_CMD_RENAME_FILE; c[1]=0; c[2]=(u32)archive; c[3]=(u32)(archive>>32);
+    c[4]=FS_PATH_TYPE_ASCII; c[5]=fromSize; c[6]=(u32)archive; c[7]=(u32)(archive>>32);
+    c[8]=FS_PATH_TYPE_ASCII; c[9]=toSize; c[10]=(fromSize<<14)|0x402u; c[11]=(u32)from;
     c[12]=(toSize<<14)|0x802u; c[13]=(u32)to;
-    r=sync(*FSUSER_HANDLE); return r?r:(s32)c[1];
+    r=sync(*FSUSER_HandleSlot); return r?r:(s32)c[1];
 }
 
 static s32 setSize(u32 handle,u64 size)
 {
     volatile u32 *c=commandBuffer(); s32 r;
-    c[0]=0x08050080u; c[1]=(u32)size; c[2]=(u32)(size>>32);
+    c[0]=FSFILE_CMD_SET_SIZE; c[1]=(u32)size; c[2]=(u32)(size>>32);
     r=sync(handle); return r?r:(s32)c[1];
 }
 
 static s32 openFile(const char *path,u32 size,u32 flags,u32 *handle)
 {
-    return OPEN_DIRECT(FSUSER_HANDLE,handle,0,ARCHIVE_SDMC,PATH_EMPTY,emptyPath,1,
-        PATH_ASCII,path,size,flags,0);
+    return FSUSER_OpenFileDirectly(FSUSER_HandleSlot,handle,0,FS_ARCHIVE_ID_SDMC,
+        FS_PATH_TYPE_EMPTY,emptyPath,1,FS_PATH_TYPE_ASCII,path,size,flags,0);
 }
 
 static void ensureDirectories(void)
@@ -140,10 +147,10 @@ static int resultIsNotFound(s32 result)
         RESULT_SUMMARY_NOT_FOUND;
 }
 
-static void destroyTransferObjects(void *objects[TRANSFER_SLOT_COUNT])
+static void destroyTransferObjects(void *objects[TRANSFER_BOX_SLOT_COUNT])
 {
     u32 i;
-    for (i=0;i<TRANSFER_SLOT_COUNT;i++) {
+    for (i=0;i<TRANSFER_BOX_SLOT_COUNT;i++) {
         void *object=objects[i];
         if (object) {
             void (**vtable)(void *)=*(void (***)(void *))object;
@@ -156,35 +163,35 @@ static void destroyTransferObjects(void *objects[TRANSFER_SLOT_COUNT])
 static int loadLocalBank(void *state)
 {
     u8 *flow=*(u8 **)((u8 *)state+8); u8 *object=flow?*(u8 **)(flow+0xCC):0;
-    void *transferObjects[TRANSFER_SLOT_COUNT];
+    void *transferObjects[TRANSFER_BOX_SLOT_COUNT];
     u32 h=0,n=0,i,count=0; u64 size=0; s32 r=-1,closeResult=0; void *box; u32 heap;
-    for (i=0;i<TRANSFER_SLOT_COUNT;i++) transferObjects[i]=0;
-    if (!object || *(u32 *)object!=0x002E6DD0u) return -1;
+    for (i=0;i<TRANSFER_BOX_SLOT_COUNT;i++) transferObjects[i]=0;
+    if (!object || *(u32 *)object!=BankFile_Vtable) return -1;
     box=*(void **)(object+TRANSFER_BOX_POINTER_OFFSET);
     if (!box) return -1;
     heap=*(u32 *)((u8 *)state+0x0C);
     /* Preserve candidates through the same semantic slot objects used by the
        stock download callback; this also keeps the patch stack small. */
     /* 使用原版下载回调相同的语义槽对象保留候选，同时降低补丁栈占用。 */
-    for (i=0;i<TRANSFER_SLOT_COUNT;i++) {
-        if (TRANSFER_SLOT_OCCUPIED(box,i)) {
-            void *memory=ALLOCATE_OBJECT(0x14u,heap);
-            void *candidate=memory?CREATE_TRANSFER_OBJECT(memory,heap,1u):0;
+    for (i=0;i<TRANSFER_BOX_SLOT_COUNT;i++) {
+        if (TransferSlot_IsOccupied(box,i)) {
+            void *memory=Heap_AllocateObject(0x14u,heap);
+            void *candidate=memory?TransferObject_Create(memory,heap,1u):0;
             if (!candidate) { destroyTransferObjects(transferObjects); return -1; }
-            TRANSFER_SLOT_LOAD(box,candidate,i);
+            TransferSlot_Load(box,candidate,i);
             transferObjects[count++]=candidate;
         }
     }
     r=openFile(bankPath,sizeof(bankPath),OPEN_READ,&h);
-    if (!r) r=FILE_GET_SIZE(&h,&size);
-    if (!r && size==BANKDATA_SIZE) r=FILE_READ(&h,&n,0,object+8,BANKDATA_SIZE); else if (!r) r=-1;
-    if (h) closeResult=FILE_CLOSE(&h);
-    if (r || closeResult || n!=BANKDATA_SIZE || !validHeader(object+8)) {
+    if (!r) r=FSFILE_GetSize(&h,&size);
+    if (!r && size==BANK_FILE_SIZE) r=FSFILE_Read(&h,&n,0,object+8,BANK_FILE_SIZE); else if (!r) r=-1;
+    if (h) closeResult=FSFILE_Close(&h);
+    if (r || closeResult || n!=BANK_FILE_SIZE || !validHeader(object+8)) {
         destroyTransferObjects(transferObjects); return -1;
     }
-    if (TRANSFER_COUNT(box)!=0) { destroyTransferObjects(transferObjects); return 1; }
-    for (i=0;i<TRANSFER_SLOT_COUNT;i++) TRANSFER_SLOT_CLEAR(box,i);
-    for (i=0;i<count;i++) TRANSFER_SLOT_WRITE(box,transferObjects[i],i);
+    if (TransferSlot_CountOccupied(box)!=0) { destroyTransferObjects(transferObjects); return 1; }
+    for (i=0;i<TRANSFER_BOX_SLOT_COUNT;i++) TransferSlot_Clear(box,i);
+    for (i=0;i<count;i++) TransferSlot_Write(box,transferObjects[i],i);
     destroyTransferObjects(transferObjects);
     return 0;
 }
@@ -193,10 +200,10 @@ static int writeTemporary(const void *data)
 {
     u32 h=0,n=0; s32 r,closeResult=0; ensureDirectories();
     r=openFile(tempPath,sizeof(tempPath),OPEN_READ|OPEN_WRITE|OPEN_CREATE,&h);
-    if (!r) r=setSize(h,BANKDATA_SIZE);
-    if (!r) r=FILE_WRITE(&h,&n,0,data,BANKDATA_SIZE,WRITE_FLUSH);
-    if (h) closeResult=FILE_CLOSE(&h);
-    return !r && !closeResult && n==BANKDATA_SIZE;
+    if (!r) r=setSize(h,BANK_FILE_SIZE);
+    if (!r) r=FSFILE_Write(&h,&n,0,data,BANK_FILE_SIZE,WRITE_FLUSH);
+    if (h) closeResult=FSFILE_Close(&h);
+    return !r && !closeResult && n==BANK_FILE_SIZE;
 }
 
 static int commitTemporary(void)
@@ -208,7 +215,7 @@ static int commitTemporary(void)
        unless it was successfully moved aside before installing the temp file. */
     /* 只有旧备份不存在属于无害情况。必须先成功把当前银行文件移作备份，
        才能安装临时文件。 */
-    r=pathCommand(0x08040142u,archive,backupPath,sizeof(backupPath));
+    r=pathCommand(FSUSER_CMD_DELETE_FILE,archive,backupPath,sizeof(backupPath));
     if (r && !resultIsNotFound(r)) { closeArchive(archive); return 0; }
     r=renamePath(archive,bankPath,sizeof(bankPath),backupPath,sizeof(backupPath));
     if (!r) hasBackup=1;
@@ -306,7 +313,7 @@ int OfflinePatch_NetworkUpdate(u8 *state)
 {
     /* Retain the native timer started by the state initializer. */
     /* 沿用状态初始化函数启动的原版计时器。 */
-    if (!STATE_DELAY_ELAPSED(state,1500u)) return 0;
+    if (!StateTimer_HasElapsed(state,1500u)) return 0;
     u8 *flow=*(u8 **)(state+4); if (flow) { u8 *network=*(u8 **)(flow+0x24); if (network) network[0x11]=1; }
     state[0x30]=3; return 1;
 }
@@ -316,7 +323,7 @@ int OfflinePatch_DisconnectUpdate(u8 *state)
 {
     /* Retain the native timer started by the state initializer. */
     /* 沿用状态初始化函数启动的原版计时器。 */
-    if (!STATE_DELAY_ELAPSED(state,1500u)) return 0;
+    if (!StateTimer_HasElapsed(state,1500u)) return 0;
     u8 *flow=*(u8 **)(state+4); if (flow) { u8 *network=*(u8 **)(flow+0x24); if (network) network[0x11]=0; }
     state[0x30]=3; return 1;
 }
@@ -363,7 +370,7 @@ int OfflinePatch_NoTransferUpdate(u8 *state)
     /* Preserve the stock connection-screen timer, but never create or wait for
        the final remote no-transfer transaction. */
     /* 保留原版连接界面的计时，但不创建或等待最后的不传送远端事务。 */
-    if (!STATE_DELAY_ELAPSED(state,1500u)) return 0;
+    if (!StateTimer_HasElapsed(state,1500u)) return 0;
     state[0x30]=3; return 1;
 }
 
@@ -374,11 +381,11 @@ int OfflinePatch_SaveDisplayDelayUpdate(u8 *state)
        a private marker and keep the save message alive for at least two seconds. */
     /* 本地暂存写入是同步的。复用原版回调字节作为私有标记，让保存提示至少显示两秒。 */
     if (!state[0x44]) {
-        STATE_DELAY_RESET(state);
+        StateTimer_Reset(state);
         state[0x44]=1;
         return 0;
     }
-    if (!STATE_DELAY_ELAPSED(state,2000u)) return 0;
+    if (!StateTimer_HasElapsed(state,2000u)) return 0;
     state[0x44]=0;
     *(u32 *)(state+0x10)=3;
     return 1;
@@ -387,7 +394,7 @@ int OfflinePatch_SaveDisplayDelayUpdate(u8 *state)
 __attribute__((used,noinline,section(".text.offline")))
 int OfflinePatch_Stage(void *remote,const void *data,u32 size,void *transaction)
 {
-    (void)remote; (void)transaction; return size==BANKDATA_SIZE && writeTemporary(data);
+    (void)remote; (void)transaction; return size==BANK_FILE_SIZE && writeTemporary(data);
 }
 
 __attribute__((used,noinline,section(".text.offline")))
@@ -401,7 +408,7 @@ int OfflinePatch_Rollback(void *remote,void *transaction,u32 zero)
 {
     u64 archive=0; s32 r; (void)remote; (void)transaction; (void)zero;
     if (openArchive(&archive)) return 0;
-    r=pathCommand(0x08040142u,archive,tempPath,sizeof(tempPath));
+    r=pathCommand(FSUSER_CMD_DELETE_FILE,archive,tempPath,sizeof(tempPath));
     closeArchive(archive);
     /* Repeating rollback after the temp file is gone is idempotent. */
     /* 临时文件已不存在时，重复回滚仍视为成功。 */

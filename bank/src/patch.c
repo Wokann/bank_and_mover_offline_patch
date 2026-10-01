@@ -8,10 +8,10 @@ typedef unsigned long long u64;
 typedef signed long long s64;
 
 enum {
-    BANKDATA_SIZE = 0xBB518,
-    ARCHIVE_SDMC = 9,
-    PATH_EMPTY = 1,
-    PATH_ASCII = 3,
+    BANK_FILE_SIZE = 0xBB518,
+    FS_ARCHIVE_ID_SDMC = 9,
+    FS_PATH_TYPE_EMPTY = 1,
+    FS_PATH_TYPE_ASCII = 3,
     OPEN_READ = 1,
     OPEN_WRITE = 2,
     OPEN_CREATE = 4,
@@ -21,27 +21,34 @@ enum {
     RESULT_SUMMARY_NOT_FOUND = 4
 };
 
-#define FSUSER_HANDLE ((volatile u32 *)0x00390100u)
-#define OPEN_DIRECT ((OpenDirect)0x0022D338u)
-#define FILE_READ ((FileRead)0x001658C8u)
-#define FILE_CLOSE ((FileClose)0x00165920u)
-#define FILE_WRITE ((FileWrite)0x0016594Cu)
-#define FILE_GET_SIZE ((FileGetSize)0x001659ACu)
-#define BANK_METADATA_VALUE ((BankMetadataValue)0x001D5EC0u)
-#define STATE_DELAY_ELAPSED ((StateDelayElapsed)0x001D5BB0u)
-#define STATE_DELAY_RESET ((StateDelayReset)0x00229DB4u)
-#define WAITING_UI_HIDE ((WaitingUiHide)0x001D5F50u)
+#define FSUSER_HandleSlot ((volatile u32 *)0x00390100u)
+#define FSUSER_OpenFileDirectly ((FSUSER_OpenFileDirectlyFn)0x0022D338u)
+#define FSFILE_Read ((FSFILE_ReadFn)0x001658C8u)
+#define FSFILE_Close ((FSFILE_CloseFn)0x00165920u)
+#define FSFILE_Write ((FSFILE_WriteFn)0x0016594Cu)
+#define FSFILE_GetSize ((FSFILE_GetSizeFn)0x001659ACu)
+#define BankFile_DeriveFlowMetadata ((BankFile_DeriveFlowMetadataFn)0x001D5EC0u)
+#define StateTimer_HasElapsed ((StateTimer_HasElapsedFn)0x001D5BB0u)
+#define StateTimer_Reset ((StateTimer_ResetFn)0x00229DB4u)
+#define WaitingUi_Hide ((WaitingUi_HideFn)0x001D5F50u)
+#define BankFile_Vtable 0x003626FCu
+#define FSUSER_CMD_OPEN_ARCHIVE 0x080C00C2u
+#define FSUSER_CMD_DELETE_FILE 0x08040142u
+#define FSUSER_CMD_RENAME_FILE 0x08050244u
+#define FSUSER_CMD_CREATE_DIRECTORY 0x08090182u
+#define FSUSER_CMD_CLOSE_ARCHIVE 0x080E0080u
+#define FSFILE_CMD_SET_SIZE 0x08050080u
 
-typedef s32 (*OpenDirect)(volatile u32 *, u32 *, u32, u32, u32, const void *, u32,
+typedef s32 (*FSUSER_OpenFileDirectlyFn)(volatile u32 *, u32 *, u32, u32, u32, const void *, u32,
     u32, const void *, u32, u32, u32);
-typedef s32 (*FileRead)(u32 *, u32 *, u64, void *, u32);
-typedef s32 (*FileWrite)(u32 *, u32 *, u64, const void *, u32, u32);
-typedef s32 (*FileClose)(u32 *);
-typedef s32 (*FileGetSize)(u32 *, u64 *);
-typedef u32 (*BankMetadataValue)(void *);
-typedef int (*StateDelayElapsed)(void *, u32);
-typedef void (*StateDelayReset)(void *);
-typedef void (*WaitingUiHide)(void *);
+typedef s32 (*FSFILE_ReadFn)(u32 *, u32 *, u64, void *, u32);
+typedef s32 (*FSFILE_WriteFn)(u32 *, u32 *, u64, const void *, u32, u32);
+typedef s32 (*FSFILE_CloseFn)(u32 *);
+typedef s32 (*FSFILE_GetSizeFn)(u32 *, u64 *);
+typedef u32 (*BankFile_DeriveFlowMetadataFn)(void *);
+typedef int (*StateTimer_HasElapsedFn)(void *, u32);
+typedef void (*StateTimer_ResetFn)(void *);
+typedef void (*WaitingUi_HideFn)(void *);
 
 static const char emptyPath[1] = {0};
 static const char directory3ds[] = "/3ds";
@@ -172,9 +179,9 @@ static s32 openArchive(u64 *archive)
 {
     volatile u32 *c = commandBuffer();
     s32 r;
-    c[0]=0x080C00C2u; c[1]=ARCHIVE_SDMC; c[2]=PATH_EMPTY; c[3]=1;
+    c[0]=FSUSER_CMD_OPEN_ARCHIVE; c[1]=FS_ARCHIVE_ID_SDMC; c[2]=FS_PATH_TYPE_EMPTY; c[3]=1;
     c[4]=(1u<<14)|2u; c[5]=(u32)emptyPath;
-    r=sync(*FSUSER_HANDLE); if (r) return r; r=(s32)c[1];
+    r=sync(*FSUSER_HandleSlot); if (r) return r; r=(s32)c[1];
     if (!r) *archive=(u64)c[2]|((u64)c[3]<<32);
     return r;
 }
@@ -182,39 +189,39 @@ static s32 openArchive(u64 *archive)
 static void closeArchive(u64 a)
 {
     volatile u32 *c=commandBuffer();
-    c[0]=0x080E0080u; c[1]=(u32)a; c[2]=(u32)(a>>32); (void)sync(*FSUSER_HANDLE);
+    c[0]=FSUSER_CMD_CLOSE_ARCHIVE; c[1]=(u32)a; c[2]=(u32)(a>>32); (void)sync(*FSUSER_HandleSlot);
 }
 
 static s32 pathCommand(u32 command, u64 a, const char *path, u32 size)
 {
     volatile u32 *c=commandBuffer(); s32 r;
     c[0]=command; c[1]=0; c[2]=(u32)a; c[3]=(u32)(a>>32);
-    c[4]=PATH_ASCII; c[5]=size; c[6]=(size<<14)|2u; c[7]=(u32)path;
-    r=sync(*FSUSER_HANDLE); return r ? r : (s32)c[1];
+    c[4]=FS_PATH_TYPE_ASCII; c[5]=size; c[6]=(size<<14)|2u; c[7]=(u32)path;
+    r=sync(*FSUSER_HandleSlot); return r ? r : (s32)c[1];
 }
 
 static void createDirectory(u64 a,const char *path,u32 size)
 {
     volatile u32 *c=commandBuffer();
-    c[0]=0x08090182u; c[1]=0; c[2]=(u32)a; c[3]=(u32)(a>>32);
-    c[4]=PATH_ASCII; c[5]=size; c[6]=0; c[7]=(size<<14)|2u; c[8]=(u32)path;
-    (void)sync(*FSUSER_HANDLE);
+    c[0]=FSUSER_CMD_CREATE_DIRECTORY; c[1]=0; c[2]=(u32)a; c[3]=(u32)(a>>32);
+    c[4]=FS_PATH_TYPE_ASCII; c[5]=size; c[6]=0; c[7]=(size<<14)|2u; c[8]=(u32)path;
+    (void)sync(*FSUSER_HandleSlot);
 }
 
 static s32 renamePath(u64 a,const char *from,u32 fromSize,const char *to,u32 toSize)
 {
     volatile u32 *c=commandBuffer(); s32 r;
-    c[0]=0x08050244u; c[1]=0; c[2]=(u32)a; c[3]=(u32)(a>>32);
-    c[4]=PATH_ASCII; c[5]=fromSize; c[6]=(u32)a; c[7]=(u32)(a>>32);
-    c[8]=PATH_ASCII; c[9]=toSize; c[10]=(fromSize<<14)|0x402u; c[11]=(u32)from;
+    c[0]=FSUSER_CMD_RENAME_FILE; c[1]=0; c[2]=(u32)a; c[3]=(u32)(a>>32);
+    c[4]=FS_PATH_TYPE_ASCII; c[5]=fromSize; c[6]=(u32)a; c[7]=(u32)(a>>32);
+    c[8]=FS_PATH_TYPE_ASCII; c[9]=toSize; c[10]=(fromSize<<14)|0x402u; c[11]=(u32)from;
     c[12]=(toSize<<14)|0x802u; c[13]=(u32)to;
-    r=sync(*FSUSER_HANDLE); return r ? r : (s32)c[1];
+    r=sync(*FSUSER_HandleSlot); return r ? r : (s32)c[1];
 }
 
 static s32 setSize(u32 handle,u64 size)
 {
     volatile u32 *c=commandBuffer(); s32 r;
-    c[0]=0x08050080u; c[1]=(u32)size; c[2]=(u32)(size>>32);
+    c[0]=FSFILE_CMD_SET_SIZE; c[1]=(u32)size; c[2]=(u32)(size>>32);
     r=sync(handle); return r ? r : (s32)c[1];
 }
 
@@ -228,8 +235,8 @@ static void ensureDirectories(void)
 
 static s32 openFile(const char *path,u32 pathSize,u32 flags,u32 *handle)
 {
-    return OPEN_DIRECT(FSUSER_HANDLE,handle,0,ARCHIVE_SDMC,PATH_EMPTY,emptyPath,1,
-        PATH_ASCII,path,pathSize,flags,0);
+    return FSUSER_OpenFileDirectly(FSUSER_HandleSlot,handle,0,FS_ARCHIVE_ID_SDMC,
+        FS_PATH_TYPE_EMPTY,emptyPath,1,FS_PATH_TYPE_ASCII,path,pathSize,flags,0);
 }
 
 static int validHeader(const u8 header[4])
@@ -249,10 +256,10 @@ static int writeCompleteFile(const char *path,u32 pathSize,const void *data)
     u32 h=0,n=0; s32 r,closeResult=0;
     ensureDirectories();
     r=openFile(path,pathSize,OPEN_READ|OPEN_WRITE|OPEN_CREATE,&h);
-    if (!r) r=setSize(h,BANKDATA_SIZE);
-    if (!r) r=FILE_WRITE(&h,&n,0,data,BANKDATA_SIZE,WRITE_FLUSH);
-    if (h) closeResult=FILE_CLOSE(&h);
-    return !r && !closeResult && n==BANKDATA_SIZE;
+    if (!r) r=setSize(h,BANK_FILE_SIZE);
+    if (!r) r=FSFILE_Write(&h,&n,0,data,BANK_FILE_SIZE,WRITE_FLUSH);
+    if (h) closeResult=FSFILE_Close(&h);
+    return !r && !closeResult && n==BANK_FILE_SIZE;
 }
 
 static int writeTemporary(const void *data)
@@ -269,7 +276,7 @@ static int commitTemporary(void)
        unless it was successfully moved aside before installing the temp file. */
     /* 只有旧备份不存在属于无害情况。必须先成功把当前银行文件移作备份，
        才能安装临时文件。 */
-    r=pathCommand(0x08040142u,a,backupPath,sizeof(backupPath));
+    r=pathCommand(FSUSER_CMD_DELETE_FILE,a,backupPath,sizeof(backupPath));
     if (r && !resultIsNotFound(r)) { closeArchive(a); return 0; }
     r=renamePath(a,bankPath,sizeof(bankPath),backupPath,sizeof(backupPath));
     if (!r) hasBackup=1;
@@ -294,7 +301,7 @@ static int writeInitialBank(const void *data)
        失败，则删除不完整的新文件。 */
     complete=writeCompleteFile(bankPath,sizeof(bankPath),data);
     if (!complete && !openArchive(&a)) {
-        (void)pathCommand(0x08040142u,a,bankPath,sizeof(bankPath));
+        (void)pathCommand(FSUSER_CMD_DELETE_FILE,a,bankPath,sizeof(bankPath));
         closeArchive(a);
     }
     return complete;
@@ -313,10 +320,10 @@ static int inspectBankFile(const char *path,u32 pathSize)
 
     r=openFile(path,pathSize,OPEN_READ,&h);
     if (r) return resultIsNotFound(r)?LOCAL_FILE_MISSING:LOCAL_FILE_INVALID;
-    r=FILE_GET_SIZE(&h,&size);
-    if (!r && size==BANKDATA_SIZE) r=FILE_READ(&h,&n,0x15Cu,header,sizeof(header));
+    r=FSFILE_GetSize(&h,&size);
+    if (!r && size==BANK_FILE_SIZE) r=FSFILE_Read(&h,&n,0x15Cu,header,sizeof(header));
     else if (!r) r=-1;
-    closeResult=FILE_CLOSE(&h);
+    closeResult=FSFILE_Close(&h);
     if (!r && !closeResult && n==sizeof(header) && validHeader(header)) return LOCAL_FILE_VALID;
     return LOCAL_FILE_INVALID;
 }
@@ -331,7 +338,7 @@ static int preserveBrokenFile(const char *source,u32 sourceSize,
     s32 r,sourceClose=0,destinationClose=0;
 
     r=openFile(source,sourceSize,OPEN_READ,&sourceHandle);
-    if (!r) r=FILE_GET_SIZE(&sourceHandle,&size);
+    if (!r) r=FSFILE_GetSize(&sourceHandle,&size);
     if (!r && (size>>32)) r=-1;
     if (!r) size32=(u32)size;
     if (!r) r=openFile(destination,destinationSize,
@@ -342,20 +349,20 @@ static int preserveBrokenFile(const char *source,u32 sourceSize,
         chunk=(remaining>sizeof(buffer))?sizeof(buffer):(u32)remaining;
         readCount=0;
         writeCount=0;
-        r=FILE_READ(&sourceHandle,&readCount,offset,buffer,chunk);
+        r=FSFILE_Read(&sourceHandle,&readCount,offset,buffer,chunk);
         if (!r && readCount!=chunk) r=-1;
-        if (!r) r=FILE_WRITE(&destinationHandle,&writeCount,offset,buffer,chunk,WRITE_FLUSH);
+        if (!r) r=FSFILE_Write(&destinationHandle,&writeCount,offset,buffer,chunk,WRITE_FLUSH);
         if (!r && writeCount!=chunk) r=-1;
         offset+=chunk;
     }
-    if (destinationHandle) destinationClose=FILE_CLOSE(&destinationHandle);
-    if (sourceHandle) sourceClose=FILE_CLOSE(&sourceHandle);
+    if (destinationHandle) destinationClose=FSFILE_Close(&destinationHandle);
+    if (sourceHandle) sourceClose=FSFILE_Close(&sourceHandle);
     if (!r && !sourceClose && !destinationClose && offset==size32) return 1;
 
     /* Never leave a partial .break file that could be mistaken for a complete copy. */
     /* 不保留可能被误认为完整副本的残缺 .break 文件。 */
     if (!openArchive(&archive)) {
-        (void)pathCommand(0x08040142u,archive,destination,destinationSize);
+        (void)pathCommand(FSUSER_CMD_DELETE_FILE,archive,destination,destinationSize);
         closeArchive(archive);
     }
     return 0;
@@ -367,13 +374,13 @@ static int restoreBankFromBackup(u8 *state)
     u8 *object=flow?*(u8 **)(flow+0xCC):0;
     u32 h=0,n=0; u64 size=0; s32 r,closeResult=0;
 
-    if (!object || *(u32 *)object!=0x003626FCu) return 0;
+    if (!object || *(u32 *)object!=BankFile_Vtable) return 0;
     r=openFile(backupPath,sizeof(backupPath),OPEN_READ,&h);
-    if (!r) r=FILE_GET_SIZE(&h,&size);
-    if (!r && size==BANKDATA_SIZE) r=FILE_READ(&h,&n,0,object+8,BANKDATA_SIZE);
+    if (!r) r=FSFILE_GetSize(&h,&size);
+    if (!r && size==BANK_FILE_SIZE) r=FSFILE_Read(&h,&n,0,object+8,BANK_FILE_SIZE);
     else if (!r) r=-1;
-    if (h) closeResult=FILE_CLOSE(&h);
-    if (r || closeResult || n!=BANKDATA_SIZE || !validHeader(object+8+0x15C)) return 0;
+    if (h) closeResult=FSFILE_Close(&h);
+    if (r || closeResult || n!=BANK_FILE_SIZE || !validHeader(object+8+0x15C)) return 0;
 
     /* Preserve bankdata.bak and create a checked byte-for-byte bankdata.bin copy. */
     /* 保留 bankdata.bak，并创建经过完整检查、逐字节一致的 bankdata.bin 副本。 */
@@ -385,7 +392,7 @@ int OfflinePatch_NetworkUpdate(u8 *state)
 {
     /* Retain the native timer started by the state initializer. */
     /* 沿用状态初始化函数启动的原版计时器。 */
-    if (!STATE_DELAY_ELAPSED(state,1500u)) return 0;
+    if (!StateTimer_HasElapsed(state,1500u)) return 0;
     u8 *flow=*(u8 **)(state+4); if (flow) { u8 *network=*(u8 **)(flow+0x24); if (network) network[0x11]=1; }
     state[0x30]=4; return 1;
 }
@@ -399,11 +406,11 @@ int OfflinePatch_PostSelectionConnectionUpdate(u8 *state)
     /* 此原版界面表示游戏检查后的服务器事务。其初始化函数不会启动计时器，
        因此先启动本地 2 秒延时，再在不创建远端作业的情况下报告完成。 */
     if (!state[0x61]) {
-        STATE_DELAY_RESET(state);
+        StateTimer_Reset(state);
         state[0x61]=1;
         return 0;
     }
-    if (!STATE_DELAY_ELAPSED(state,2000u)) return 0;
+    if (!StateTimer_HasElapsed(state,2000u)) return 0;
     state[0x61]=0;
 
     /* Report completion through the stock state transition. Its native exit
@@ -417,7 +424,7 @@ int OfflinePatch_DisconnectUpdate(u8 *state)
 {
     /* Retain the native timer started by the state initializer. */
     /* 沿用状态初始化函数启动的原版计时器。 */
-    if (!STATE_DELAY_ELAPSED(state,1500u)) return 0;
+    if (!StateTimer_HasElapsed(state,1500u)) return 0;
     u8 *flow=*(u8 **)(state+4); if (flow) { u8 *network=*(u8 **)(flow+0x24); if (network) network[0x11]=0; }
     state[0x30]=4; return 1;
 }
@@ -510,18 +517,18 @@ int OfflinePatch_LoadBankData(u8 *state)
     u8 *object=flow?*(u8 **)(flow+0xCC):0;
     u32 h=0,n=0; u64 size=0; s32 r,closeResult=0;
 
-    if (!object || *(u32 *)object!=0x003626FCu) return 0;
+    if (!object || *(u32 *)object!=BankFile_Vtable) return 0;
     r=openFile(bankPath,sizeof(bankPath),OPEN_READ,&h);
-    if (!r) r=FILE_GET_SIZE(&h,&size);
-    if (!r && size==BANKDATA_SIZE) r=FILE_READ(&h,&n,0,object+8,BANKDATA_SIZE);
+    if (!r) r=FSFILE_GetSize(&h,&size);
+    if (!r && size==BANK_FILE_SIZE) r=FSFILE_Read(&h,&n,0,object+8,BANK_FILE_SIZE);
     else if (!r) r=-1;
-    if (h) closeResult=FILE_CLOSE(&h);
+    if (h) closeResult=FSFILE_Close(&h);
 
-    if (!r && !closeResult && n==BANKDATA_SIZE && validHeader(object+8+0x15C)) {
+    if (!r && !closeResult && n==BANK_FILE_SIZE && validHeader(object+8+0x15C)) {
         void *metadata=*(void **)(object+0xBB520);
         /* Rebuild the flow metadata value set by the stock download callback. */
         /* 重建原版完整数据下载回调写入流程对象的元数据值。 */
-        *(u32 *)(flow+0xF8)=BANK_METADATA_VALUE(metadata);
+        *(u32 *)(flow+0xF8)=BankFile_DeriveFlowMetadata(metadata);
         return 1;
     }
     return 0;
@@ -534,11 +541,11 @@ int OfflinePatch_SaveDisplayDelayUpdate(u8 *state)
        private marker and keep the save message alive for at least two seconds. */
     /* 本地写入是同步的。复用原版回调字节作为私有标记，让保存提示至少显示两秒。 */
     if (!state[0x48]) {
-        STATE_DELAY_RESET(state);
+        StateTimer_Reset(state);
         state[0x48]=1;
         return 0;
     }
-    if (!STATE_DELAY_ELAPSED(state,2000u)) return 0;
+    if (!StateTimer_HasElapsed(state,2000u)) return 0;
     state[0x48]=0;
     *(u32 *)(state+0x10)=3;
     return 1;
@@ -548,13 +555,13 @@ __attribute__((used,noinline,section(".text.offline")))
 int OfflinePatch_CreateInitial(void *remote,const void *data,u32 size)
 {
     (void)remote;
-    return size==BANKDATA_SIZE && writeInitialBank(data);
+    return size==BANK_FILE_SIZE && writeInitialBank(data);
 }
 
 __attribute__((used,noinline,section(".text.offline")))
 int OfflinePatch_Stage(void *remote,const void *data,u32 size,void *transaction)
 {
-    (void)remote; (void)transaction; return size==BANKDATA_SIZE && writeTemporary(data);
+    (void)remote; (void)transaction; return size==BANK_FILE_SIZE && writeTemporary(data);
 }
 
 __attribute__((used,noinline,section(".text.offline")))
@@ -568,7 +575,7 @@ int OfflinePatch_Rollback(void *remote,void *transaction,u32 zero)
 {
     u64 a=0; s32 r; (void)remote; (void)transaction; (void)zero;
     if (openArchive(&a)) return 0;
-    r=pathCommand(0x08040142u,a,tempPath,sizeof(tempPath));
+    r=pathCommand(FSUSER_CMD_DELETE_FILE,a,tempPath,sizeof(tempPath));
     closeArchive(a);
     /* Repeating rollback after the temp file is gone is idempotent. */
     /* 临时文件已不存在时，重复回滚仍视为成功。 */
