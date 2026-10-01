@@ -51,6 +51,8 @@
 | `sd:/3ds/Bank/bankdata.bak` | 提交过程中保留的上一份完整文件 |
 | `sd:/3ds/Bank/bankdata.bin.break` | 无法识别的主文件逐字节保全副本 |
 | `sd:/3ds/Bank/bankdata.bak.break` | 无法识别的备份文件逐字节保全副本 |
+| `sd:/3ds/Bank/sav.bin` | 重定向后的完整本地记录镜像（`0x200` 字节） |
+| `sd:/3ds/Bank/sav.tmp` | 本地记录替换前的完整暂存镜像 |
 
 补丁会在需要时创建 `sd:/3ds` 和 `sd:/3ds/Bank`。完整写入会检查文件创建／打开、
 长度设置、服务返回值、刷新行为和实际写入字节数；短写或写入失败绝不会被当作完整
@@ -59,6 +61,35 @@
 `bankdata.tmp` 是必要的事务文件，用于避免失败写入直接替换最后一份正常主文件。
 `bankdata.bak` 是上一代已提交文件，不是第二份同时使用的银行数据。`.break` 只在
 实际存在的无效文件无法用于恢复时作为保全副本生成。
+
+### 本地记录重定向
+
+补丁的两种模式都会把原版逻辑记录 `data:/turtle` 的持久化后端重定向至
+`sd:/3ds/Bank/sav.bin`，但不会替换或直接解析外层的 `00000001.sav`。原版对象清空、
+语言设置、事务字段更新、校验值生成、有效性校验、loaded 标志和上层初始化状态机均
+保持不变；补丁只替换检查、读取、格式化和保存所使用的落盘后端。
+
+```text
+检查 sav.bin
+    ├── 存在且为 0x200 字节 ─► 读取对象 ─► 原版校验器判定内容
+    ├── 存在但长度或内容无效 ─► 原版首次使用初始化 ─► 写入 sav.bin
+    └── 缺失
+          ├── 完整 sav.tmp ─► 提升为 sav.bin
+          └── 无可恢复 tmp ─► 只读尝试原版 data:/turtle
+                                  ├── 有效 ─► 迁移为 sav.bin
+                                  └── 缺失或无效 ─► 原版首次使用初始化
+                                                        └── 写入 sav.bin
+```
+
+首次初始化仍由原版流程清空对象、应用所选语言并调用常规保存包装函数；重定向格式化
+步骤只重置 `sav.bin`／`sav.tmp`，不伪造对象初始化，也不格式化原存档。成功得到
+`sav.bin` 后，后续两种模式的本地记录读写都只指向该文件。SD 写入失败会作为保存失败
+返回，不会改写原版存档作为补救。
+
+`sav.bin` 是固定 `0x200` 字节的逻辑记录镜像，其中原版对象序列化长度为 `0x30`，
+当前已确认字段占前 `0x2C` 字节。结构声明见
+[`../include/turtle_redirect.h`](../include/turtle_redirect.h)。该记录可由原存档重新迁移或由
+首次使用流程重建，因此只使用 `sav.tmp` 防止短写，不另建 `.bak` 或 `.break`。
 
 ## 下载模式
 
@@ -237,11 +268,12 @@
 |---|---|
 | `main.s` | 原址 hook、模式分派、小型跳板、状态路由，以及各 C 对象的注入位置 |
 | `bankdata_redirect.c` | 经过检查的银行数据校验、恢复、载入与本地事务实现 |
-| `fs_helpers.c` | Bankdata 本地后端使用的共用带检查 SD 文件系统实现 |
+| `fs_helpers.c` | Bankdata 与 Turtle 后端共用的带检查 SD 文件系统实现 |
 | `offline_flow.c` | 本地连接、断开连接与保存提示状态更新 |
 | `local_mileage.c` | 把主机时间转换成原版宝可里程状态读取的日期格式；不替代原版点数计算 |
 | `local_ticket.c` | 在本地完成使用权／可选奖励状态并提供票据字段；不实现宝可里程计算 |
 | `patch_paths.c` | 放入已验证代码尾部区域的路径常量 |
+| `turtle_redirect.c` | 放入已验证 HOME 代码区域的 Turtle 记录重定向后端 |
 | `../include/bankdata_redirect.h` | 已确认的 Bankdata 序列化布局、原版 Bank 局部视图、重定向常量与原版入口 |
 | `../include/fs_helpers.h` | 共用的文件系统类型、SDK 入口与带检查的 SD 辅助函数声明 |
 | `../include/local_mileage.h` | 本地里程日期输入声明 |
@@ -250,6 +282,7 @@
 | `../include/patch_types.h` | 注入 C 对象共用的固定宽度基础类型 |
 | `../include/patch_paths.h` | 分别放置的对象所共用的路径声明 |
 | `../include/system_time.h` | 共享内存系统时间结构及地址 |
+| `../include/turtle_redirect.h` | `sav.bin` 的已确认逻辑记录布局、后端返回协议、原版入口与导出后端声明 |
 | `patch_messages.py` | 重建并验证十套本地化 LayeredFS 档案 |
 | `message_archive.py` | 自包含的 GARC 与加密消息文件编解码器 |
 | `verify_patch.py` | 验证基底哈希、代码范围、钩子、IPS 还原、原指令重放与资源 |
@@ -308,7 +341,7 @@ make -C bank/src all
 make -C bank ARMIPS=/path/to/armips IPS_TOOL=/path/to/flips
 ```
 
-构建顺序为：把六个 C 编译单元分别编译成注入两个已验证区域的对象 → 输出各对象反汇编供检查
+构建顺序为：把七个 C 编译单元分别编译成注入三个已验证区域的对象 → 输出各对象反汇编供检查
 → armips 导入对象并修改基底镜像 → Floating IPS 对比生成 `code.ips` → 重建十套语言
 RomFS → 执行静态验证。完整输出为：
 

@@ -1,8 +1,8 @@
 #include "fs_helpers.h"
 #include "patch_paths.h"
 
-/* Shared checked SD filesystem implementation used by the Bankdata backend. */
-/* Bankdata 本地后端使用的共用带检查 SD 文件系统实现。 */
+/* Shared checked SD filesystem implementation used by both local backends. */
+/* Bankdata 与 Turtle 本地后端共用的带检查 SD 文件系统实现。 */
 static volatile u32 *commandBuffer(void)
 {
     u32 tls;
@@ -100,6 +100,26 @@ s32 deleteFile(const char *path,u32 pathSize)
     result=pathCommand(FSUSER_CMD_DELETE_FILE,archive,path,pathSize);
     closeArchive(archive);
     return result;
+}
+
+s32 renameFile(const char *from,u32 fromSize,const char *to,u32 toSize)
+{
+    u64 archive=0;
+    s32 result=openArchive(&archive);
+    if (result) return result;
+    result=renamePath(archive,from,fromSize,to,toSize);
+    closeArchive(archive);
+    return result;
+}
+
+s32 getFileSize(const char *path,u32 pathSize,u64 *size)
+{
+    u32 handle=0;
+    s32 result=openFile(path,pathSize,OPEN_READ,&handle);
+    s32 closeResult=0;
+    if (!result) result=FSFILE_GetSize(&handle,size);
+    if (handle) closeResult=FSFILE_Close(&handle);
+    return result?result:closeResult;
 }
 
 s32 readCompleteFile(const char *path,u32 pathSize,u32 expectedFileSize,u64 offset,

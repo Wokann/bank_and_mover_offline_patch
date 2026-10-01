@@ -17,7 +17,7 @@ EXPECTED_BASE_SHA256 = "2DCE4796F54807CF8A67F1CE6297BF472D969B30ED7A7E8E25C2A6C2
 OPTIONAL_REWARD_STATE = 0x002B0270
 OPTIONAL_REWARD_BODY_END = 0x002B14E0
 HOME_CAVE_START = 0x002A7BF0
-HOME_CAVE_END = 0x002A8404
+HOME_CAVE_END = 0x002A8760
 TAIL_CAVE_START = 0x00313A40
 TEXT_MAPPED_END = 0x00314000
 VERSION_STORAGE_SIZE = 0x40
@@ -268,6 +268,15 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
         "bankui_setmessageline",
         "waitingsound_stop",
         "offlinepatch_versionidentifier",
+        "turtleredirect_payloadbegin",
+        "turtleredirect_payloadend",
+        "turtleredirect_loadbackend",
+        "turtleredirect_savebackend",
+        "turtleredirect_checkbackend",
+        "turtleredirect_formatbackend",
+        "turtleredirect_formatpoll",
+        "turtlesavepath",
+        "turtletemppath",
         "combinepatch_pathdatabegin",
         "combinepatch_pathdataend",
         "openarchive",
@@ -278,6 +287,8 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
         "openfile",
         "resultisnotfound",
         "deletefile",
+        "renamefile",
+        "getfilesize",
         "readcompletefile",
         "writecompletefile",
         "emptypath",
@@ -288,6 +299,11 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
         "backuppath",
         "brokenbankpath",
         "brokenbackuppath",
+        "turtlestorage_formatpoll",
+        "turtlestorage_loadatonce",
+        "turtlestorage_saveatonce",
+        "turtlestorage_formatstart",
+        "turtlestorage_checkarchivestatus",
     }
     missing = sorted(required - symbols.keys())
     if missing:
@@ -371,6 +387,13 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
         "combinepatch_menuselectioncallback",
         "combinepatch_menuselectiondisabled",
         "combinepatch_downloadcapturetrampoline",
+        "turtleredirect_payloadbegin",
+        "turtleredirect_payloadend",
+        "turtleredirect_loadbackend",
+        "turtleredirect_savebackend",
+        "turtleredirect_checkbackend",
+        "turtleredirect_formatbackend",
+        "turtleredirect_formatpoll",
     )
     for name in home_cave_symbols:
         address = symbols[name]
@@ -395,6 +418,8 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
         "backuppath",
         "brokenbankpath",
         "brokenbackuppath",
+        "turtlesavepath",
+        "turtletemppath",
     )
     for name in tail_cave_symbols:
         address = symbols[name]
@@ -422,6 +447,8 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
         "openfile",
         "resultisnotfound",
         "deletefile",
+        "renamefile",
+        "getfilesize",
         "readcompletefile",
         "writecompletefile",
     ):
@@ -430,6 +457,8 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
             raise ValueError(f"{name} is outside the imported local-file payload")
 
     for name, value in {
+        "turtlesavepath": b"/3ds/Bank/sav.bin\0",
+        "turtletemppath": b"/3ds/Bank/sav.tmp\0",
         "emptypath": b"\0",
         "directory3ds": b"/3ds\0",
         "directorybank": b"/3ds/Bank\0",
@@ -490,9 +519,35 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
         (0x002B20E8, "combinepatch_saverollback", True, ARM_COND_AL, "save rollback"),
         (0x002B2100, "combinepatch_saverollbackwait", False, ARM_COND_AL, "save rollback wait"),
         (0x002B2548, "combinepatch_selectsavemessage", True, ARM_COND_AL, "save message"),
+        (0x0015DC00, "turtleredirect_loadbackend", True, ARM_COND_AL, "Turtle load backend"),
+        (0x0015DC40, "turtleredirect_savebackend", True, ARM_COND_AL, "Turtle save backend"),
+        (0x002A484C, "turtleredirect_checkbackend", True, ARM_COND_AL, "title Turtle check"),
+        (0x002AC578, "turtleredirect_checkbackend", True, ARM_COND_AL, "initial Turtle check"),
+        (0x002AC678, "turtleredirect_formatbackend", True, ARM_COND_AL, "Turtle format start"),
+        (0x002AC68C, "turtleredirect_formatpoll", True, ARM_COND_AL, "Turtle format poll"),
     )
     for address, target_symbol, link, condition, name in hook_branches:
         expect_branch(image, address, symbols[target_symbol], link, condition, name)
+
+    for address, target_symbol, name in (
+        (0x0015DC00, "turtlestorage_loadatonce", "base Turtle load backend"),
+        (0x0015DC40, "turtlestorage_saveatonce", "base Turtle save backend"),
+        (0x002A484C, "turtlestorage_checkarchivestatus", "base title Turtle check"),
+        (0x002AC578, "turtlestorage_checkarchivestatus", "base initial Turtle check"),
+        (0x002AC678, "turtlestorage_formatstart", "base Turtle format start"),
+        (0x002AC68C, "turtlestorage_formatpoll", "base Turtle format poll"),
+    ):
+        expect_branch(base_image, address, symbols[target_symbol], True, ARM_COND_AL, name)
+
+    # The following state begins the stock transaction-recovery implementation;
+    # the redirect must end before it and leave its entry untouched.
+    # 下一个状态是原版事务恢复实现；重定向必须在此之前结束并保持其入口不变。
+    expect_word(
+        image,
+        HOME_CAVE_END,
+        read_word(base_image, HOME_CAVE_END),
+        "transaction-recovery state entry",
+    )
 
     expect_word(base_image, 0x002B1AD0, 0xE92D40F8, "base title-state prologue")
     expect_word(base_image, 0x002A9810, 0xEB00435E, "base first-present flag getter")

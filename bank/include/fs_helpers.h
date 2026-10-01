@@ -46,6 +46,8 @@ s32 setSize(u32 handle,u64 size);
 s32 openFile(const char *path,u32 pathSize,u32 flags,u32 *handle);
 int resultIsNotFound(s32 result);
 s32 deleteFile(const char *path,u32 pathSize);
+s32 renameFile(const char *from,u32 fromSize,const char *to,u32 toSize);
+s32 getFileSize(const char *path,u32 pathSize,u64 *size);
 s32 readCompleteFile(const char *path,u32 pathSize,u32 expectedFileSize,u64 offset,
     void *data,u32 dataSize);
 int writeCompleteFile(const char *path,u32 pathSize,const void *data,u32 dataSize,u32 fileSize);

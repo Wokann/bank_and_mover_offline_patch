@@ -13,6 +13,7 @@
 .definelabel CombinePatch_CodeEnd, OfflinePatch_VersionStorageStart
 .definelabel CombinePatch_PayloadStart, OptionalRewardState_Update + 4
 .definelabel CombinePatch_PayloadEndLimit, 0x002B14E0
+.definelabel TurtleRedirect_PayloadEndLimit, 0x002A8760
 .definelabel CombinePatch_ModeStorage, 0x003ABFFC
 .definelabel CombinePatch_HidManager, 0x003DC3B4
 .definelabel CombinePatch_ModeOffline, 0
@@ -186,6 +187,23 @@
     nop
 .org BankSaveState_Initialize + 0x28
     bl CombinePatch_SelectSaveMessage
+
+// Redirect only the Turtle record's storage backend. The stock wrappers still
+// validate the object, set the loaded flag and map backend errors.
+// 仅重定向 Turtle 记录的存储后端。原版包装函数仍负责对象校验、loaded 标志和
+// 后端错误映射。
+.org TurtleStorage_LoadBackendCall
+    bl TurtleRedirect_LoadBackend
+.org TurtleStorage_SaveBackendCall
+    bl TurtleRedirect_SaveBackend
+.org Title_TurtleStorageCheckCall
+    bl TurtleRedirect_CheckBackend
+.org Initial_TurtleStorageCheckCall
+    bl TurtleRedirect_CheckBackend
+.org Initial_TurtleStorageFormatCall
+    bl TurtleRedirect_FormatBackend
+.org Initial_TurtleStorageFormatPollCall
+    bl TurtleRedirect_FormatPoll
 
 .org CombinePatch_CodeStart
 .area CombinePatch_CodeEnd-CombinePatch_CodeStart
@@ -388,7 +406,7 @@ OfflinePatch_VersionIdentifier:
 // 外层 Bank 流程钩子会在创建此状态前将 HOME 重定向至语言选择，因此其完整状态体
 // 可用于模式分发。
 .org HomeTransferState_Update
-.area 0x814
+.area TurtleRedirect_PayloadEndLimit-HomeTransferState_Update
 
 // Reset the title selector whenever its UI is created, then replace the stock
 // bottom HOME-help line. The narrow version pane remains completely native.
@@ -972,6 +990,14 @@ CombinePatch_DownloadCaptureTrampoline:
     ldr r8,=0x000BB528
     bx lr
     .pool
+
+// Import the C implementation of the redirected Turtle-record backend into
+// the remaining verified HOME code cave. Hook sites above remain assembly-only.
+// 将 Turtle 记录重定向后端的 C 实现导入剩余的已验证 HOME 代码空位；上方
+// hook 点仍仅保留汇编。
+TurtleRedirect_PayloadBegin:
+    .importobj "../build/turtle_redirect.o"
+TurtleRedirect_PayloadEnd:
 .endarea
 
 // Both patched routes complete this optional-reward state through the local

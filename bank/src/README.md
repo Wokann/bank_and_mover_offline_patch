@@ -59,6 +59,8 @@ Both modes use the same checked local-file implementation.
 | `sd:/3ds/Bank/bankdata.bak` | Previous complete file retained during commit |
 | `sd:/3ds/Bank/bankdata.bin.break` | Byte-for-byte preservation copy of an unusable primary file |
 | `sd:/3ds/Bank/bankdata.bak.break` | Byte-for-byte preservation copy of an unusable backup file |
+| `sd:/3ds/Bank/sav.bin` | Complete redirected local-record image (`0x200` bytes) |
+| `sd:/3ds/Bank/sav.tmp` | Complete staging image used before replacing the local record |
 
 The patch creates `sd:/3ds` and `sd:/3ds/Bank` when needed. Complete writes
 check file creation/opening, size setting, service results, flush behavior, and
@@ -69,6 +71,45 @@ Bank file.
 last known primary file. `bankdata.bak` is the previous committed generation,
 not a second live Bank. `.break` files are only preservation copies made when
 an existing invalid file cannot participate in recovery.
+
+### Local-record redirection
+
+Both patch modes redirect the persistence backend of the stock logical
+`data:/turtle` record to `sd:/3ds/Bank/sav.bin`. They neither replace nor
+directly parse the outer `00000001.sav`. Stock object clearing, language setup,
+transaction-field updates, checksum generation, validation, the loaded flag,
+and the upper-level initialization state machine remain in control. Only the
+storage backend used to check, load, format, and save the record is replaced.
+
+```text
+Inspect sav.bin
+    ├── present and exactly 0x200 bytes ─► load object ─► stock validator
+    ├── present but wrong-sized or invalid ─► stock first-use initialization
+    │                                         └── write sav.bin
+    └── missing
+          ├── complete sav.tmp ─► promote to sav.bin
+          └── no recoverable tmp ─► read-only attempt of stock data:/turtle
+                                      ├── valid ─► migrate to sav.bin
+                                      └── missing or invalid
+                                            └── stock first-use initialization
+                                                  └── write sav.bin
+```
+
+First-use initialization still lets the stock flow clear the object, apply the
+selected language, and invoke its normal save wrapper. Redirected formatting
+only resets `sav.bin` and `sav.tmp`; it does not fake object initialization or
+format the stock save archive. Once `sav.bin` is available, all later
+local-record reads and writes in both modes use it exclusively. An SD write
+failure is returned as a save failure and never falls back to modifying the
+stock save.
+
+`sav.bin` is a fixed `0x200`-byte logical-record image. The stock serialized
+object occupies `0x30` bytes, of which the first `0x2C` bytes are currently
+identified fields. See
+[`../include/turtle_redirect.h`](../include/turtle_redirect.h) for the declaration.
+Because the record can be migrated again from the stock save or rebuilt by the
+first-use flow, it uses only `sav.tmp` to prevent short writes and does not
+create `.bak` or `.break` files.
 
 ## Download Mode
 
@@ -268,11 +309,12 @@ Spanish, Korean, Simplified Chinese, and Traditional Chinese.
 |---|---|
 | `main.s` | Original-address hooks, mode dispatch, small trampolines, state routing, and placement of imported C objects |
 | `bankdata_redirect.c` | Checked Bank-data validation, recovery, loading, and local transaction implementation |
-| `fs_helpers.c` | Shared checked SD-filesystem implementation used by the Bankdata backend |
+| `fs_helpers.c` | Shared checked SD-filesystem implementation used by Bankdata and Turtle backends |
 | `offline_flow.c` | Local connection, disconnection, and save-display state updates |
 | `local_mileage.c` | Converts console time into the packed date consumed by the stock Poké Mile states; it does not replace the native point calculation |
 | `local_ticket.c` | Locally completes the entitlement/optional-reward state and supplies ticket fields without implementing Poké Mile calculation |
 | `patch_paths.c` | Path constants placed in the verified tail-code region |
+| `turtle_redirect.c` | Redirected Turtle-record backend placed in the verified HOME-code region |
 | `../include/bankdata_redirect.h` | Confirmed serialized Bankdata layout, partial native Bank views, redirection constants, and stock entry points |
 | `../include/fs_helpers.h` | Shared filesystem types, SDK entry points, and checked SD-helper declarations |
 | `../include/local_mileage.h` | Local mileage-date input declaration |
@@ -281,6 +323,7 @@ Spanish, Korean, Simplified Chinese, and Traditional Chinese.
 | `../include/patch_types.h` | Fixed-width primitive types shared by the injected C objects |
 | `../include/patch_paths.h` | Path declarations shared across the separately placed objects |
 | `../include/system_time.h` | Shared-memory system-time structure and addresses |
+| `../include/turtle_redirect.h` | Confirmed logical-record layout, backend result contract, stock entry points, and exported backend declarations |
 | `patch_messages.py` | Rebuilds and validates the ten localized LayeredFS archives |
 | `message_archive.py` | Self-contained GARC and encrypted message-file codec |
 | `verify_patch.py` | Verifies base hash, code ranges, hooks, IPS reconstruction, native instruction replay, and resources |
@@ -345,7 +388,7 @@ Example for a non-Windows host:
 make -C bank ARMIPS=/path/to/armips IPS_TOOL=/path/to/flips
 ```
 
-The build compiles the six C translation units into objects for two verified
+The build compiles the seven C translation units into objects for three verified
 injection regions, emits their disassemblies for inspection, imports them and patches the
 base image with armips, creates `code.ips` with Floating IPS, rebuilds the
 ten-language RomFS, and runs static verification. The complete output is:

@@ -11,5 +11,7 @@ extern const char tempPath[23];
 extern const char backupPath[23];
 extern const char brokenBankPath[29];
 extern const char brokenBackupPath[29];
+extern const char turtleSavePath[18];
+extern const char turtleTempPath[18];
 
 #endif
