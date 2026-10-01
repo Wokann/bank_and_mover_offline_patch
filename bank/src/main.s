@@ -4,10 +4,9 @@
 
 .include "../include/symbol.inc"
 
-// The baseline keeps the proven offline layout. Later mode wrappers branch to
-// these native entry points when download mode was selected on the title screen.
-// 基线保留已验证的离线布局。后续模式包装函数会在标题界面选定下载模式时跳回
-// 这些原版入口。
+// Offline behavior is the baseline. Mode wrappers branch to these native entry
+// points when Download Mode was selected on the title screen.
+// 离线行为作为基线；标题界面选定下载模式后，模式包装函数会跳转到这些原版入口。
 .definelabel OfflinePatch_VersionStorageSize, 0x40
 .definelabel OfflinePatch_VersionStorageStart, TextMappedEnd - OfflinePatch_VersionStorageSize
 .definelabel CombinePatch_CodeStart, 0x00313A40
@@ -367,14 +366,11 @@ CombinePatch_BankDataSyncEntry:
     pop {r4,pc}
     .pool
 
-// Keep broken-file paths outside the imported C payload.
-// 将损坏文件路径放到导入 C 载荷之外。
-.org 0x00313F80
-OfflinePatch_BrokenBankPath:
-    .asciiz "/3ds/Bank/bankdata.bin.break"
-.org 0x00313FA0
-OfflinePatch_BrokenBackupPath:
-    .asciiz "/3ds/Bank/bankdata.bak.break"
+// C-owned path data occupies this second verified injection region.
+// C 后端使用的路径数据放在第二个已验证注入区。
+CombinePatch_PathDataBegin:
+    .importobj "../build/patch_paths.o"
+CombinePatch_PathDataEnd:
 .endarea
 
 // Reserve the final 64 bytes of the mapped text segment as a zero-padded ASCII
@@ -980,13 +976,28 @@ CombinePatch_DownloadCaptureTrampoline:
 
 // Both patched routes complete this optional-reward state through the local
 // bypass. Its original body is therefore unreachable and is the verified
-// contiguous home for the common local-file object.
+// contiguous home for the shared FS, Bankdata, offline-flow, local-mileage,
+// and local-ticket objects.
 // 两条补丁路由都会通过本地跳过逻辑完成这个可选奖励状态。因此原函数体不可达，是
-// 共享本地文件对象经验证的连续容器。
+// 共用 FS、Bankdata、离线流程、本地里程输入与本地票据对象经验证的连续容器。
 .org CombinePatch_PayloadStart
 .area CombinePatch_PayloadEndLimit-CombinePatch_PayloadStart
 CombinePatch_PayloadBegin:
-    .importobj "../build/patch.o"
+FsHelpers_PayloadBegin:
+    .importobj "../build/fs_helpers.o"
+FsHelpers_PayloadEnd:
+BankdataRedirect_PayloadBegin:
+    .importobj "../build/bankdata_redirect.o"
+BankdataRedirect_PayloadEnd:
+OfflineFlow_PayloadBegin:
+    .importobj "../build/offline_flow.o"
+OfflineFlow_PayloadEnd:
+LocalMileage_PayloadBegin:
+    .importobj "../build/local_mileage.o"
+LocalMileage_PayloadEnd:
+LocalTicket_PayloadBegin:
+    .importobj "../build/local_ticket.o"
+LocalTicket_PayloadEnd:
 CombinePatch_PayloadEnd:
 .endarea
 

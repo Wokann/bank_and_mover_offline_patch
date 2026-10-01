@@ -102,6 +102,9 @@ sd:/3ds/Bank/bankdata.bin
                                 └── 传送盒为空 ─► 原版确认界面
 ```
 
+票据步骤只提供 Mover 运行时所需的使用期限日期、剩余天数／小时数和有效标志；它
+不是宝可里程计算。本补丁的 Mover 端没有本地宝可里程累计或奖励流程。
+
 原版候选转换状态继续负责读取来源游戏、筛选记录并构造传送候选；离线模式只绕过其中
 两处服务器合法性请求。
 
@@ -158,11 +161,15 @@ sd:/3ds/Bank/bankdata.bin
 | 文件 | 作用 |
 |---|---|
 | `main.s` | 标题模式锁定，以及每个离线钩子的模式分派 |
-| `patch.c` | 经过检查的本地银行文件与传送盒实现 |
+| `fs_helpers.c` | 本地载入与事务共用的带检查 SD 归档／文件原语 |
+| `bankdata_redirect.c` | 本地 Bankdata 载入、传送槽保留、资格状态，以及防崩溃临时写入、提交与回滚 |
+| `local_ticket.c` | 运行时离线票据与主机日历计算 |
+| `offline_flow.c` | 相互独立的网络、断开、远端检查、无传送与保存延时状态更新 |
+| `patch_paths.c` | 共用的 SD 路径常量 |
 | `patch_messages.py` | 为十套语言档案追加并验证标题／离线文本 |
 | `message_archive.py` | 自包含的 GARC 与加密消息文件编解码器 |
 | `verify_patch.py` | 验证基底哈希、代码区域、钩子、原版重放、IPS 还原与资源 |
-| `Makefile` | 编译共用离线实现、注入代码、创建 IPS、重建文本并写出发行目录 |
+| `Makefile` | 编译各功能对象、注入已审计代码区域、创建 IPS、重建文本并写出发行目录 |
 
 ## 独立编译与安装
 
@@ -214,8 +221,10 @@ make -C mover/src all
 make -C mover ARMIPS=/path/to/armips IPS_TOOL=/path/to/flips
 ```
 
-构建顺序为：编译 `patch.c` → 输出反汇编供检查 → armips 导入对象并修改基底镜像 →
-Floating IPS 对比生成 `code.ips` → 重建十套语言 RomFS → 执行静态验证。完整输出为：
+构建顺序为：在保留模块内内联的前提下，把各功能 C 模块分别编译成对象并为每个对象
+输出 `.s` 反汇编供检查 → armips 将多个对象连续导入已审计的可执行尾部并修改基底
+镜像 → Floating IPS 对比生成 `code.ips` → 重建十套语言 RomFS → 执行静态验证。
+完整输出为：
 
 ```text
 release/00040000000C9C00/

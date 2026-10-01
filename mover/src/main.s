@@ -381,6 +381,15 @@ CombinePatch_SelectDisconnectMessage:
     bx lr
     .pool
 
+// Place the shared filesystem module in the audited code cave. Keeping this
+// module out-of-line lets the Bankdata load and transaction modules reuse one
+// implementation without duplicating their low-level IPC helpers.
+// 将共用文件系统模块放入已审计的代码空位。该模块保持独立后，Bankdata
+// 载入与事务模块可共用同一套底层 IPC 辅助实现，无需重复。
+FsHelpers_PayloadBegin:
+    .importobj "../build/fs_helpers.o"
+FsHelpers_PayloadEnd:
+
 CombinePatch_CodeUsedEnd:
 .endarea
 
@@ -408,7 +417,23 @@ OfflinePatch_GetPokemonEntry:
     b MoverGetPokemonState_Update + 4
     .pool
 
-    .importobj "../build/patch.o"
+// Keep the remaining feature modules consecutive in the executable tail.
+// 其余功能模块在可执行尾部连续排列。
+BankdataRedirect_PayloadBegin:
+    .importobj "../build/bankdata_redirect.o"
+BankdataRedirect_PayloadEnd:
+
+LocalTicket_PayloadBegin:
+    .importobj "../build/local_ticket.o"
+LocalTicket_PayloadEnd:
+
+OfflineFlow_PayloadBegin:
+    .importobj "../build/offline_flow.o"
+OfflineFlow_PayloadEnd:
+
+PatchPaths_PayloadBegin:
+    .importobj "../build/patch_paths.o"
+PatchPaths_PayloadEnd:
 CombinePatch_OfflinePayloadUsedEnd:
 .endarea
 

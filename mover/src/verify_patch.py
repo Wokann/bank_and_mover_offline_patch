@@ -101,6 +101,11 @@ def main() -> None:
     sym = symbols(args.symbols)
     required = {
         "combinepatch_codeusedend", "combinepatch_offlinepayloadusedend",
+        "fshelpers_payloadbegin", "fshelpers_payloadend",
+        "bankdataredirect_payloadbegin", "bankdataredirect_payloadend",
+        "localticket_payloadbegin", "localticket_payloadend",
+        "offlineflow_payloadbegin", "offlineflow_payloadend",
+        "patchpaths_payloadbegin", "patchpaths_payloadend",
         "combinepatch_titletextinitialize", "combinepatch_titlestateupdate",
         "combinepatch_titleprocessmodetoggle", "combinepatch_networkupdate",
         "combinepatch_networkavailability", "combinepatch_ticketupdate",
@@ -114,9 +119,29 @@ def main() -> None:
     if missing:
         raise ValueError(f"missing armips symbols: {', '.join(missing)}")
     if not CAVE_START < sym["combinepatch_codeusedend"] <= CAVE_END:
-        raise ValueError("mode wrappers exceed the audited code cave")
+        raise ValueError("code-cave payload exceeds the audited range")
     if not PAYLOAD_START < sym["combinepatch_offlinepayloadusedend"] <= PAYLOAD_END:
         raise ValueError("offline payload exceeds the executable tail")
+    payload_objects = (
+        ("fshelpers_payloadbegin", "fshelpers_payloadend"),
+        ("bankdataredirect_payloadbegin", "bankdataredirect_payloadend"),
+        ("localticket_payloadbegin", "localticket_payloadend"),
+        ("offlineflow_payloadbegin", "offlineflow_payloadend"),
+        ("patchpaths_payloadbegin", "patchpaths_payloadend"),
+    )
+    for begin, end in payload_objects:
+        if sym[begin] >= sym[end]:
+            raise ValueError(f"empty or reversed payload object: {begin}")
+    if not CAVE_START < sym["fshelpers_payloadbegin"] < sym["fshelpers_payloadend"] <= CAVE_END:
+        raise ValueError("filesystem helper object exceeds the audited code cave")
+    tail_objects = payload_objects[1:]
+    if sym[tail_objects[0][0]] < PAYLOAD_START:
+        raise ValueError("first tail payload object precedes the executable tail")
+    for (_, previous_end), (next_begin, _) in zip(tail_objects, tail_objects[1:]):
+        if sym[previous_end] != sym[next_begin]:
+            raise ValueError("tail payload objects are not consecutive")
+    if sym[tail_objects[-1][1]] != sym["combinepatch_offlinepayloadusedend"]:
+        raise ValueError("offline payload end does not follow the final object")
 
     # Keep the marker in the final mapped text bytes. The remaining bytes stay
     # zero for a longer future identifier or metadata.

@@ -235,8 +235,21 @@
 
 | 文件 | 作用 |
 |---|---|
-| `main.s` | 标题模式锁定、动态钩子分发、捕获跳板、状态路由和选单处理 |
-| `patch.c` | 两种模式共用的、经过检查的本地文件实现 |
+| `main.s` | 原址 hook、模式分派、小型跳板、状态路由，以及各 C 对象的注入位置 |
+| `bankdata_redirect.c` | 经过检查的银行数据校验、恢复、载入与本地事务实现 |
+| `fs_helpers.c` | Bankdata 本地后端使用的共用带检查 SD 文件系统实现 |
+| `offline_flow.c` | 本地连接、断开连接与保存提示状态更新 |
+| `local_mileage.c` | 把主机时间转换成原版宝可里程状态读取的日期格式；不替代原版点数计算 |
+| `local_ticket.c` | 在本地完成使用权／可选奖励状态并提供票据字段；不实现宝可里程计算 |
+| `patch_paths.c` | 放入已验证代码尾部区域的路径常量 |
+| `../include/bankdata_redirect.h` | 已确认的 Bankdata 序列化布局、原版 Bank 局部视图、重定向常量与原版入口 |
+| `../include/fs_helpers.h` | 共用的文件系统类型、SDK 入口与带检查的 SD 辅助函数声明 |
+| `../include/local_mileage.h` | 本地里程日期输入声明 |
+| `../include/local_ticket.h` | 离线票据共享数据视图、使用权常量与状态入口 |
+| `../include/offline_flow.h` | 本地流程状态使用的原版计时器入口 |
+| `../include/patch_types.h` | 注入 C 对象共用的固定宽度基础类型 |
+| `../include/patch_paths.h` | 分别放置的对象所共用的路径声明 |
+| `../include/system_time.h` | 共享内存系统时间结构及地址 |
 | `patch_messages.py` | 重建并验证十套本地化 LayeredFS 档案 |
 | `message_archive.py` | 自包含的 GARC 与加密消息文件编解码器 |
 | `verify_patch.py` | 验证基底哈希、代码范围、钩子、IPS 还原、原指令重放与资源 |
@@ -295,8 +308,9 @@ make -C bank/src all
 make -C bank ARMIPS=/path/to/armips IPS_TOOL=/path/to/flips
 ```
 
-构建顺序为：编译 `patch.c` → 输出反汇编供检查 → armips 导入对象并修改基底镜像 →
-Floating IPS 对比生成 `code.ips` → 重建十套语言 RomFS → 执行静态验证。完整输出为：
+构建顺序为：把六个 C 编译单元分别编译成注入两个已验证区域的对象 → 输出各对象反汇编供检查
+→ armips 导入对象并修改基底镜像 → Floating IPS 对比生成 `code.ips` → 重建十套语言
+RomFS → 执行静态验证。完整输出为：
 
 ```text
 release/00040000000C9B00/

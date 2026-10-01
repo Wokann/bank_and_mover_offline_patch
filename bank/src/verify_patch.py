@@ -108,6 +108,18 @@ def expect_word(image: bytes, address: int, value: int, name: str) -> None:
         raise ValueError(f"{name}: expected {value:08X}, found {actual:08X}")
 
 
+def expect_bytes(image: bytes, address: int, value: bytes, name: str) -> None:
+    """Require one exact byte sequence at a mapped image address.
+
+    要求映射镜像地址处存在一段精确字节序列。
+    """
+    offset = image_offset(address)
+    if offset < 0 or offset + len(value) > len(image):
+        raise ValueError(f"{name}: address outside image")
+    if image[offset : offset + len(value)] != value:
+        raise ValueError(f"{name}: byte sequence mismatch")
+
+
 def expect_ldr_r0_literal(image: bytes, address: int, value: int, name: str) -> None:
     """Require an ARM ``ldr r0, [pc, #imm]`` that resolves to one fixed value.
 
@@ -181,6 +193,16 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
         "combinepatch_networkskipremotejobofficial",
         "combinepatch_payloadbegin",
         "combinepatch_payloadend",
+        "fshelpers_payloadbegin",
+        "fshelpers_payloadend",
+        "bankdataredirect_payloadbegin",
+        "bankdataredirect_payloadend",
+        "offlineflow_payloadbegin",
+        "offlineflow_payloadend",
+        "localmileage_payloadbegin",
+        "localmileage_payloadend",
+        "localticket_payloadbegin",
+        "localticket_payloadend",
         "combinepatch_networkupdate",
         "combinepatch_initialremoterecordupdate",
         "combinepatch_optionalrewardbypassupdate",
@@ -228,7 +250,12 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
         "combinepatch_selectdisconnectmessage",
         "combinepatch_disconnectwithlanguagesave",
         "combinepatch_bankdatasyncentry",
+        "offlinepatch_networkupdate",
+        "offlinepatch_postselectionconnectionupdate",
+        "offlinepatch_disconnectupdate",
+        "offlinepatch_initialremoterecordupdate",
         "offlinepatch_optionalrewardbypassupdate",
+        "localmileage_getcurrentdate",
         "offlinepatch_loadbankdata",
         "offlinepatch_savedisplaydelayupdate",
         "offlinepatch_createinitial",
@@ -241,6 +268,26 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
         "bankui_setmessageline",
         "waitingsound_stop",
         "offlinepatch_versionidentifier",
+        "combinepatch_pathdatabegin",
+        "combinepatch_pathdataend",
+        "openarchive",
+        "closearchive",
+        "pathcommand",
+        "renamepath",
+        "setsize",
+        "openfile",
+        "resultisnotfound",
+        "deletefile",
+        "readcompletefile",
+        "writecompletefile",
+        "emptypath",
+        "directory3ds",
+        "directorybank",
+        "bankpath",
+        "temppath",
+        "backuppath",
+        "brokenbankpath",
+        "brokenbackuppath",
     }
     missing = sorted(required - symbols.keys())
     if missing:
@@ -266,6 +313,21 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
         raise ValueError("local payload no longer starts after the optional-reward entry branch")
     if not payload_begin < payload_end <= OPTIONAL_REWARD_BODY_END:
         raise ValueError("local payload exceeds the optional-reward state body")
+    if not (
+        payload_begin
+        == symbols["fshelpers_payloadbegin"]
+        < symbols["fshelpers_payloadend"]
+        == symbols["bankdataredirect_payloadbegin"]
+        < symbols["bankdataredirect_payloadend"]
+        == symbols["offlineflow_payloadbegin"]
+        < symbols["offlineflow_payloadend"]
+        == symbols["localmileage_payloadbegin"]
+        < symbols["localmileage_payloadend"]
+        == symbols["localticket_payloadbegin"]
+        < symbols["localticket_payloadend"]
+        == payload_end
+    ):
+        raise ValueError("imported local-file payload objects are not contiguous or ordered")
 
     home_cave_symbols = (
         "combinepatch_networkavailability",
@@ -323,6 +385,16 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
         "combinepatch_selectdisconnectmessage",
         "combinepatch_disconnectwithlanguagesave",
         "combinepatch_bankdatasyncentry",
+        "combinepatch_pathdatabegin",
+        "combinepatch_pathdataend",
+        "emptypath",
+        "directory3ds",
+        "directorybank",
+        "bankpath",
+        "temppath",
+        "backuppath",
+        "brokenbankpath",
+        "brokenbackuppath",
     )
     for name in tail_cave_symbols:
         address = symbols[name]
@@ -330,17 +402,44 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
             raise ValueError(f"{name} is outside the executable tail cave")
 
     for name in (
+        "offlinepatch_networkupdate",
+        "offlinepatch_postselectionconnectionupdate",
+        "offlinepatch_disconnectupdate",
+        "offlinepatch_initialremoterecordupdate",
         "offlinepatch_optionalrewardbypassupdate",
+        "localmileage_getcurrentdate",
         "offlinepatch_loadbankdata",
         "offlinepatch_savedisplaydelayupdate",
         "offlinepatch_createinitial",
         "offlinepatch_stage",
         "offlinepatch_commit",
         "offlinepatch_rollback",
+        "openarchive",
+        "closearchive",
+        "pathcommand",
+        "renamepath",
+        "setsize",
+        "openfile",
+        "resultisnotfound",
+        "deletefile",
+        "readcompletefile",
+        "writecompletefile",
     ):
         address = symbols[name]
         if not payload_begin <= address < payload_end:
             raise ValueError(f"{name} is outside the imported local-file payload")
+
+    for name, value in {
+        "emptypath": b"\0",
+        "directory3ds": b"/3ds\0",
+        "directorybank": b"/3ds/Bank\0",
+        "bankpath": b"/3ds/Bank/bankdata.bin\0",
+        "temppath": b"/3ds/Bank/bankdata.tmp\0",
+        "backuppath": b"/3ds/Bank/bankdata.bak\0",
+        "brokenbankpath": b"/3ds/Bank/bankdata.bin.break\0",
+        "brokenbackuppath": b"/3ds/Bank/bankdata.bak.break\0",
+    }.items():
+        expect_bytes(image, symbols[name], value, name)
 
     hook_branches = (
         (0x002B1AD0, "combinepatch_titlescreenupdate", False, ARM_COND_AL, "title input and session latch"),
@@ -351,7 +450,7 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
         (0x002AF3B4, "combinepatch_selectinitialconnectionmessage", True, ARM_COND_AL, "initial connection message"),
         (0x002ACBDC, "combinepatch_initialremoterecordupdate", False, ARM_COND_AL, "initial remote record update"),
         (0x002ACE14, "combinepatch_selectpostselectionconnectionmessage", True, ARM_COND_AL, "initial-record reconnect message"),
-        (OPTIONAL_REWARD_STATE, "combinepatch_optionalrewardbypassupdate", False, ARM_COND_AL, "optional reward update"),
+        (OPTIONAL_REWARD_STATE, "combinepatch_optionalrewardbypassupdate", False, ARM_COND_AL, "optional reward bypass"),
         (0x002AF460, "combinepatch_bankdatasyncdispatch", False, ARM_COND_AL, "Bank data sync"),
         (0x002AFE50, "combinepatch_bankdatasyncinitialize", False, ARM_COND_AL, "Bank data-sync initializer"),
         (0x002A58B4, "combinepatch_selectpostselectionstate", False, ARM_COND_AL, "post-selection state"),

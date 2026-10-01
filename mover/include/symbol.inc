@@ -16,15 +16,10 @@
 .definelabel DataMappedEnd,                     0x0032A000
 
 ; -----------------------------------------------------------------------------
-; Bank object and fixed-size serialized file
-; Bank 对象和定长序列化文件
+; Bank object and serialized-file routines
+; Bank 对象与序列化文件函数
 ; -----------------------------------------------------------------------------
-.definelabel BANK_FILE_SIZE,                    0x000BB518
 .definelabel BankFile_Vtable,                   0x002E6DD0
-.definelabel TRANSFER_BOX_DATA_OFFSET,           0x000AAF14
-.definelabel TRANSFER_BOX_TAG_OFFSET,            0x000AD5FC
-.definelabel TRANSFER_BOX_SLOT_SIZE,             0x000000E8
-.definelabel TRANSFER_BOX_SLOT_COUNT,            30
 .definelabel BankFile_LoadBody,                 0x0024D868
 .definelabel BankFile_LoadLegacyBody,           0x0024D898
 .definelabel BankFile_IsCurrentVersion,         0x0025AE20
@@ -95,10 +90,13 @@
 .definelabel MoverSave_RollbackCall,             0x0024A420
 .definelabel MoverSave_AfterRollbackState,       0x0024A428
 
-; The current binary has no external code or data reference into this complete
-; unreachable function body. The combined patch uses it only for mode wrappers.
-; 当前二进制没有从该完整不可达函数体外部进入的代码或数据引用。合并补丁仅将其
-; 用于模式包装函数。
+; This range covers the leading portion of an unreferenced NEX/Quazal-style
+; global-registration routine. No external ARM branch or aligned code/data
+; pointer in the supported binary targets this range. The combined patch uses
+; it for mode wrappers and the shared filesystem module.
+; 该区域是一个未被引用的 NEX/Quazal 风格全局注册例程的前部。受支持镜像中没有
+; 外部 ARM 分支或对齐代码／数据指针指向该区域。合并补丁将其用于模式包装函数和共用
+; 文件系统模块。
 .definelabel MoverCombine_CodeCaveStart,          0x00261C74
 .definelabel MoverCombine_CodeCaveEnd,            0x00262C10
 
@@ -154,4 +152,3 @@
 .definelabel FSUSER_CMD_RENAME_FILE,              0x08050244
 .definelabel FSUSER_CMD_CLOSE_ARCHIVE,            0x080E0080
 .definelabel FSFILE_CMD_SET_SIZE,                0x08050080
-.definelabel SVC_SEND_SYNC_REQUEST,               0x32

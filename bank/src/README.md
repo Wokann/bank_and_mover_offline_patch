@@ -266,8 +266,21 @@ Spanish, Korean, Simplified Chinese, and Traditional Chinese.
 
 | File | Role |
 |---|---|
-| `main.s` | Title-mode latch, dynamic hook dispatch, capture trampoline, state routing, and menu handling |
-| `patch.c` | Shared checked local-file implementation used by both modes |
+| `main.s` | Original-address hooks, mode dispatch, small trampolines, state routing, and placement of imported C objects |
+| `bankdata_redirect.c` | Checked Bank-data validation, recovery, loading, and local transaction implementation |
+| `fs_helpers.c` | Shared checked SD-filesystem implementation used by the Bankdata backend |
+| `offline_flow.c` | Local connection, disconnection, and save-display state updates |
+| `local_mileage.c` | Converts console time into the packed date consumed by the stock Poké Mile states; it does not replace the native point calculation |
+| `local_ticket.c` | Locally completes the entitlement/optional-reward state and supplies ticket fields without implementing Poké Mile calculation |
+| `patch_paths.c` | Path constants placed in the verified tail-code region |
+| `../include/bankdata_redirect.h` | Confirmed serialized Bankdata layout, partial native Bank views, redirection constants, and stock entry points |
+| `../include/fs_helpers.h` | Shared filesystem types, SDK entry points, and checked SD-helper declarations |
+| `../include/local_mileage.h` | Local mileage-date input declaration |
+| `../include/local_ticket.h` | Offline-ticket shared-data view, entitlement constants, and state entry point |
+| `../include/offline_flow.h` | Stock timer entry points used by local flow states |
+| `../include/patch_types.h` | Fixed-width primitive types shared by the injected C objects |
+| `../include/patch_paths.h` | Path declarations shared across the separately placed objects |
+| `../include/system_time.h` | Shared-memory system-time structure and addresses |
 | `patch_messages.py` | Rebuilds and validates the ten localized LayeredFS archives |
 | `message_archive.py` | Self-contained GARC and encrypted message-file codec |
 | `verify_patch.py` | Verifies base hash, code ranges, hooks, IPS reconstruction, native instruction replay, and resources |
@@ -332,10 +345,10 @@ Example for a non-Windows host:
 make -C bank ARMIPS=/path/to/armips IPS_TOOL=/path/to/flips
 ```
 
-The build compiles `patch.c`, emits a disassembly for inspection, imports the
-object and patches the base image with armips, creates `code.ips` with Floating
-IPS, rebuilds the ten-language RomFS, and runs static verification. The complete
-output is:
+The build compiles the six C translation units into objects for two verified
+injection regions, emits their disassemblies for inspection, imports them and patches the
+base image with armips, creates `code.ips` with Floating IPS, rebuilds the
+ten-language RomFS, and runs static verification. The complete output is:
 
 ```text
 release/00040000000C9B00/

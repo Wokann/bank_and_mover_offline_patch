@@ -20,8 +20,7 @@ RELEASE_TITLE := $(RELEASE_ROOT)/$(TITLE_ID)
 RELEASE_IPS := $(RELEASE_TITLE)/code.ips
 RELEASE_ROMFS := $(RELEASE_TITLE)/romfs
 ROMFS_SOURCE ?= $(TARGET_ROOT)/rom/romfs
-OBJECT := $(BUILD)/patch.o
-DISASSEMBLY := $(BUILD)/patch.disasm.txt
+OBJECTS := $(patsubst %.c,$(BUILD)/%.o,$(wildcard *.c))
 SYMBOLS := $(BUILD)/armips-symbols.txt
 
 CC := $(DEVKITARM)/bin/arm-none-eabi-gcc
@@ -29,18 +28,21 @@ OBJDUMP := $(DEVKITARM)/bin/arm-none-eabi-objdump
 CFLAGS := -std=c11 -Os -march=armv6k -mtune=mpcore -marm -mfloat-abi=soft \
 	-ffreestanding -fno-builtin -fno-stack-protector -fno-unwind-tables \
 	-fno-asynchronous-unwind-tables -fomit-frame-pointer -fno-common \
-	-ffunction-sections -fdata-sections -Wall -Wextra -Werror
+	-ffunction-sections -fdata-sections -MMD -MP -Wall -Wextra -Werror \
+	-I$(TARGET_ROOT)/include
+
+-include $(OBJECTS:.o=.d)
 
 all: $(RELEASE_IPS) layeredfs verify
 
 $(BUILD):
 	mkdir -p "$@"
 
-$(OBJECT): patch.c | $(BUILD)
+$(BUILD)/%.o: %.c | $(BUILD)
 	"$(CC)" $(CFLAGS) -c "$<" -o "$@"
-	"$(OBJDUMP)" -dr -z "$@" > "$(DISASSEMBLY)"
+	"$(OBJDUMP)" -dr -z "$@" > "$(@:.o=.s)"
 
-$(PATCHED): FORCE main.s $(OBJECT) $(BASE)
+$(PATCHED): FORCE main.s $(OBJECTS) $(BASE)
 	"$(ARMIPS)" -erroronwarning -stat -sym "$(SYMBOLS)" main.s
 
 $(RELEASE_IPS): $(PATCHED)

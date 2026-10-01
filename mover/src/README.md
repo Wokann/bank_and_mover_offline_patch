@@ -113,6 +113,10 @@ Stock cartridge read, filtering, and Pokemon conversion
                                 └── Transfer Box empty ► stock confirmation UI
 ```
 
+The ticket step supplies Mover's runtime entitlement date, remaining-day/hour,
+and validity fields. It is not a Poké Mile calculation: Mover has no local
+Poké Mile accumulation or reward path in this patch.
+
 The native candidate-conversion state remains responsible for reading the
 source game, filtering records, and constructing transfer candidates. Only its
 two embedded server legality requests are bypassed in Offline Mode.
@@ -180,11 +184,15 @@ state object; the native state exit path performs cleanup.
 | File | Role |
 |---|---|
 | `main.s` | Title-mode latch and mode dispatch for every offline hook |
-| `patch.c` | Checked local Bank file and transfer-box implementation |
+| `fs_helpers.c` | Checked SD archive/file primitives shared by local loading and transactions |
+| `bankdata_redirect.c` | Local Bankdata loading, transfer-slot preservation, eligibility update, and crash-safe temporary write, commit, and rollback |
+| `local_ticket.c` | Runtime offline ticket and console-calendar calculation |
+| `offline_flow.c` | Independent network, disconnect, remote-check, no-transfer, and save-delay state updates |
+| `patch_paths.c` | Shared SD path constants |
 | `patch_messages.py` | Appends and validates title/offline text in all ten language archives |
 | `message_archive.py` | Self-contained GARC and encrypted message-file codec |
 | `verify_patch.py` | Verifies the base hash, code regions, hooks, native replay, IPS reconstruction, and resources |
-| `Makefile` | Compiles the shared offline implementation, injects code, creates IPS, rebuilds messages, and writes the release tree |
+| `Makefile` | Compiles the functional objects, injects them into audited code regions, creates IPS, rebuilds messages, and writes the release tree |
 
 ## Independent build and installation
 
@@ -241,10 +249,12 @@ Example for a non-Windows host:
 make -C mover ARMIPS=/path/to/armips IPS_TOOL=/path/to/flips
 ```
 
-The build compiles `patch.c`, emits a disassembly for inspection, imports the
-object and patches the base image with armips, creates `code.ips` with Floating
-IPS, rebuilds the ten-language RomFS, and runs static verification. The complete
-output is:
+The build compiles the functional C modules into separate objects while
+retaining module-local inlining, and emits an `.s` disassembly beside each
+object for inspection. armips imports those objects consecutively into the
+audited executable tail, Floating IPS creates `code.ips`, the ten-language
+RomFS is rebuilt, and the static verifier checks the complete result. The
+complete output is:
 
 ```text
 release/00040000000C9C00/

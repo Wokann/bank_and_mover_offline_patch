@@ -201,4 +201,3 @@
 .definelabel FSUSER_CMD_CREATE_DIRECTORY,        0x08090182
 .definelabel FSUSER_CMD_CLOSE_ARCHIVE,           0x080E0080
 .definelabel FSFILE_CMD_SET_SIZE,                0x08050080
-.definelabel SVC_SEND_SYNC_REQUEST,               0x32
