@@ -19,7 +19,11 @@ OPTIONAL_REWARD_BODY_END = 0x002B14E0
 HOME_CAVE_START = 0x002A7BF0
 HOME_CAVE_END = 0x002A8404
 TAIL_CAVE_START = 0x00313A40
-TAIL_CAVE_END = 0x00314000
+TEXT_MAPPED_END = 0x00314000
+VERSION_STORAGE_SIZE = 0x40
+VERSION_STORAGE_START = TEXT_MAPPED_END - VERSION_STORAGE_SIZE
+TAIL_CAVE_END = VERSION_STORAGE_START
+VERSION_IDENTIFIER = b"offline_patch_v0.9.0\0"
 ARM_COND_EQ = 0x0
 ARM_COND_NE = 0x1
 ARM_COND_AL = 0xE
@@ -236,10 +240,25 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
         "ui_setmessageline",
         "bankui_setmessageline",
         "waitingsound_stop",
+        "offlinepatch_versionidentifier",
     }
     missing = sorted(required - symbols.keys())
     if missing:
         raise ValueError(f"missing armips symbols: {', '.join(missing)}")
+
+    # Keep the marker at a stable address and reserve the complete zero-padded
+    # block for future compatibility metadata.
+    # 将标识固定在稳定地址，并为未来兼容性元数据保留完整的零填充区域。
+    if symbols["offlinepatch_versionidentifier"] != VERSION_STORAGE_START:
+        raise ValueError("offline patch version identifier moved")
+    version_offset = image_offset(VERSION_STORAGE_START)
+    expected_version_storage = VERSION_IDENTIFIER.ljust(VERSION_STORAGE_SIZE, b"\0")
+    if image[version_offset : version_offset + VERSION_STORAGE_SIZE] != expected_version_storage:
+        raise ValueError("offline patch version storage is malformed")
+    if base_image[version_offset : version_offset + VERSION_STORAGE_SIZE] != bytes(VERSION_STORAGE_SIZE):
+        raise ValueError("offline patch version storage no longer uses original padding")
+    if VERSION_STORAGE_START + VERSION_STORAGE_SIZE != TEXT_MAPPED_END:
+        raise ValueError("offline patch version storage no longer ends with mapped text")
 
     payload_begin = symbols["combinepatch_payloadbegin"]
     payload_end = symbols["combinepatch_payloadend"]

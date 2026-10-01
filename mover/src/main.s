@@ -4,10 +4,12 @@
 
 .include "../include/symbol.inc"
 
+.definelabel OfflinePatch_VersionStorageSize,   0x40
+.definelabel OfflinePatch_VersionStorageStart,  TextMappedEnd - OfflinePatch_VersionStorageSize
 .definelabel CombinePatch_CodeStart, MoverCombine_CodeCaveStart
 .definelabel CombinePatch_CodeEnd, MoverCombine_CodeCaveEnd
 .definelabel CombinePatch_OfflinePayloadStart, 0x0028D1B0
-.definelabel CombinePatch_OfflinePayloadEnd,   0x0028E000
+.definelabel CombinePatch_OfflinePayloadEnd,   OfflinePatch_VersionStorageStart
 .definelabel CombinePatch_ModeStorage,         0x00329FFC
 .definelabel CombinePatch_ModeOffline,         0
 .definelabel CombinePatch_ModeOriginal,        1
@@ -408,6 +410,16 @@ OfflinePatch_GetPokemonEntry:
 
     .importobj "../build/patch.o"
 CombinePatch_OfflinePayloadUsedEnd:
+.endarea
+
+// Reserve the final 64 bytes of the mapped text segment as a zero-padded ASCII
+// identifier. No runtime code reads it in the current version.
+// 将已映射 text 段的最后 64 字节预留为零填充 ASCII 标识。当前版本没有运行时代码
+// 读取它。
+.org OfflinePatch_VersionStorageStart
+.area OfflinePatch_VersionStorageSize, 0
+OfflinePatch_VersionIdentifier:
+    .asciiz "offline_patch_v0.9.0"
 .endarea
 
 .close

@@ -8,8 +8,10 @@
 // these native entry points when download mode was selected on the title screen.
 // 基线保留已验证的离线布局。后续模式包装函数会在标题界面选定下载模式时跳回
 // 这些原版入口。
+.definelabel OfflinePatch_VersionStorageSize, 0x40
+.definelabel OfflinePatch_VersionStorageStart, TextMappedEnd - OfflinePatch_VersionStorageSize
 .definelabel CombinePatch_CodeStart, 0x00313A40
-.definelabel CombinePatch_CodeEnd, 0x00314000
+.definelabel CombinePatch_CodeEnd, OfflinePatch_VersionStorageStart
 .definelabel CombinePatch_PayloadStart, OptionalRewardState_Update + 4
 .definelabel CombinePatch_PayloadEndLimit, 0x002B14E0
 .definelabel CombinePatch_ModeStorage, 0x003ABFFC
@@ -373,6 +375,16 @@ OfflinePatch_BrokenBankPath:
 .org 0x00313FA0
 OfflinePatch_BrokenBackupPath:
     .asciiz "/3ds/Bank/bankdata.bak.break"
+.endarea
+
+// Reserve the final 64 bytes of the mapped text segment as a zero-padded ASCII
+// identifier. No runtime code reads it in the current version.
+// 将已映射 text 段的最后 64 字节预留为零填充 ASCII 标识。当前版本没有运行时代码
+// 读取它。
+.org OfflinePatch_VersionStorageStart
+.area OfflinePatch_VersionStorageSize, 0
+OfflinePatch_VersionIdentifier:
+    .asciiz "offline_patch_v0.9.0"
 .endarea
 
 // The outer Bank-flow hook redirects HOME to language selection before this

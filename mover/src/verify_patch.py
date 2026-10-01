@@ -17,8 +17,12 @@ IMAGE_BASE = 0x00100000
 EXPECTED_BASE_SHA256 = "001C20ADA74016507C969BB44A0A50F8EDF803EC06A3FC46834263BA8DF0FD2F"
 CAVE_START = 0x00261C74
 CAVE_END = 0x00262C10
+TEXT_MAPPED_END = 0x0028E000
+VERSION_STORAGE_SIZE = 0x40
+VERSION_STORAGE_START = TEXT_MAPPED_END - VERSION_STORAGE_SIZE
+VERSION_IDENTIFIER = b"offline_patch_v0.9.0\0"
 PAYLOAD_START = 0x0028D1B0
-PAYLOAD_END = 0x0028E000
+PAYLOAD_END = VERSION_STORAGE_START
 
 
 def symbols(path: Path) -> dict[str, int]:
@@ -104,6 +108,7 @@ def main() -> None:
         "combinepatch_saveskipremotejob",
         "offlinepatch_networkupdate", "offlinepatch_stage", "offlinepatch_commit",
         "offlinepatch_rollback",
+        "offlinepatch_versionidentifier",
     }
     missing = sorted(required - sym.keys())
     if missing:
@@ -112,6 +117,21 @@ def main() -> None:
         raise ValueError("mode wrappers exceed the audited code cave")
     if not PAYLOAD_START < sym["combinepatch_offlinepayloadusedend"] <= PAYLOAD_END:
         raise ValueError("offline payload exceeds the executable tail")
+
+    # Keep the marker in the final mapped text bytes. The remaining bytes stay
+    # zero for a longer future identifier or metadata.
+    # 将标识固定在已映射 text 段的最后部分。其余字节保持为零，供未来更长的标识
+    # 或元数据使用。
+    if sym["offlinepatch_versionidentifier"] != VERSION_STORAGE_START:
+        raise ValueError("offline patch version identifier moved")
+    version_offset = VERSION_STORAGE_START - IMAGE_BASE
+    expected_version_storage = VERSION_IDENTIFIER.ljust(VERSION_STORAGE_SIZE, b"\0")
+    if patched[version_offset:version_offset + VERSION_STORAGE_SIZE] != expected_version_storage:
+        raise ValueError("offline patch version storage is malformed")
+    if base[version_offset:version_offset + VERSION_STORAGE_SIZE] != bytes(VERSION_STORAGE_SIZE):
+        raise ValueError("offline patch version storage no longer uses original padding")
+    if VERSION_STORAGE_START + VERSION_STORAGE_SIZE != TEXT_MAPPED_END:
+        raise ValueError("offline patch version storage no longer ends with mapped text")
 
     expected_base_words = {
         0x0024BA84: 0xEBFD4261,
