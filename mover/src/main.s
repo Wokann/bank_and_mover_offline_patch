@@ -417,8 +417,11 @@ OfflinePatch_GetPokemonEntry:
     b MoverGetPokemonState_Update + 4
     .pool
 
-// Keep the remaining feature modules consecutive in the executable tail.
-// 其余功能模块在可执行尾部连续排列。
+// Keep the remaining feature modules consecutive before 0x0028DD00. The
+// immediately following dedicated area is reserved for the external
+// Transporter Redirect Patch and must remain identical to the stock image.
+// 其余功能模块在 0x0028DD00 之前连续排列。紧随其后的独立区域
+// 专门保留给外部 Transporter Redirect Patch，必须与原版镜像保持一致。
 BankdataRedirect_PayloadBegin:
     .importobj "../build/bankdata_redirect.o"
 BankdataRedirect_PayloadEnd:
@@ -435,6 +438,15 @@ PatchPaths_PayloadBegin:
     .importobj "../build/patch_paths.o"
 PatchPaths_PayloadEnd:
 CombinePatch_OfflinePayloadUsedEnd:
+.endarea
+
+// Protect only the external patch's aligned 0xE0-byte payload allocation.
+// This area intentionally emits no bytes. 0x0028DDE0..0x0028DFC0 remains
+// available for future payloads maintained by this project.
+// 仅保护外部补丁对齐后的 0xE0 字节载荷区。该区域刻意不输出任何
+// 字节；0x0028DDE0..0x0028DFC0 仍可供本项目以后的载荷使用。
+.org 0x0028DD00
+.area 0xE0
 .endarea
 
 // Reserve the final 64 bytes of the mapped text segment as a zero-padded ASCII

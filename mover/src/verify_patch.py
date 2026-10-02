@@ -22,7 +22,14 @@ VERSION_STORAGE_SIZE = 0x40
 VERSION_STORAGE_START = TEXT_MAPPED_END - VERSION_STORAGE_SIZE
 VERSION_IDENTIFIER = b"offline_patch_v0.9.0\0"
 PAYLOAD_START = 0x0028D1B0
+TRANSPORTER_REDIRECT_AREA_START = 0x0028DD00
+TRANSPORTER_REDIRECT_AREA_SIZE = 0xE0
 PAYLOAD_END = VERSION_STORAGE_START
+TRANSPORTER_REDIRECT_HOOK_RANGES = (
+    (0x0021A7E0, 0x0021A7E4),
+    (0x0021AA0C, 0x0021AA24),
+    (0x0021AB50, 0x0021AB68),
+)
 
 
 def symbols(path: Path) -> dict[str, int]:
@@ -142,6 +149,32 @@ def main() -> None:
             raise ValueError("tail payload objects are not consecutive")
     if sym[tail_objects[-1][1]] != sym["combinepatch_offlinepayloadusedend"]:
         raise ValueError("offline payload end does not follow the final object")
+
+    # The external Transporter Redirect Patch replaces these three stock hook
+    # ranges and injects its SD-save payload at 0x0028DD00. Keep every byte
+    # untouched so independently generated IPS patches can be merged.
+    # 外部 Transporter Redirect Patch 会覆盖这三处原版钩子区域，并从
+    # 0x0028DD00 注入 SD 存档载荷。所有相关字节都必须保持不变，以便
+    # 独立生成的 IPS 补丁可以合并。
+    redirect_ranges = TRANSPORTER_REDIRECT_HOOK_RANGES + (
+        (
+            TRANSPORTER_REDIRECT_AREA_START,
+            TRANSPORTER_REDIRECT_AREA_START + TRANSPORTER_REDIRECT_AREA_SIZE,
+        ),
+    )
+    for start, end in redirect_ranges:
+        start_offset = start - IMAGE_BASE
+        end_offset = end - IMAGE_BASE
+        if patched[start_offset:end_offset] != base[start_offset:end_offset]:
+            raise ValueError(
+                f"Transporter Redirect Patch range was modified: {start:08X}-{end:08X}"
+            )
+    redirect_payload_offset = TRANSPORTER_REDIRECT_AREA_START - IMAGE_BASE
+    if base[
+        redirect_payload_offset:
+        redirect_payload_offset + TRANSPORTER_REDIRECT_AREA_SIZE
+    ] != bytes(TRANSPORTER_REDIRECT_AREA_SIZE):
+        raise ValueError("Transporter Redirect Patch reservation is not stock padding")
 
     # Keep the marker in the final mapped text bytes. The remaining bytes stay
     # zero for a longer future identifier or metadata.

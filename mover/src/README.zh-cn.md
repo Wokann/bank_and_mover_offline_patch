@@ -237,6 +237,16 @@ release/00040000000C9C00/
 `00040000000C9C00` 复制到 `SD:/luma/titles/`，启用 Luma 游戏补丁。实机使用前请备份
 SD 卡和来源游戏存档。
 
+## Transporter Redirect Patch 兼容性
+
+本补丁为 [DreamRadarCartRedirect 的 Transporter Redirect Patch](https://github.com/zaksabeast/DreamRadarCartRedirect/blob/b518a9868c23c69fe94c2818a9e600fd09c24a92/transporter.s)
+保留了原址钩子 `0x0021A7E0–0x0021A7E4`、`0x0021AA0C–0x0021AA24`、
+`0x0021AB50–0x0021AB68`，以及尾部载荷区 `0x0028DD00–0x0028DDE0`。
+这些字节在本补丁的输出中与受支持的原版镜像完全相同，且构建校验器会阻止以后的
+载荷误入该范围。因此，对同一个 v5.5.0 基底分别生成两份 IPS 后，可用支持
+非重叠记录的 IPS 合并工具组合。这个预留只保证与上述已审计版本的地址兼容；
+本项目不内置或重新发行该外部补丁。
+
 ## 外部开源参考
 
 - [zaksabeast/Transporter-Offline-Patch](https://github.com/zaksabeast/Transporter-Offline-Patch)

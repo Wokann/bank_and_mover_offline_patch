@@ -23,8 +23,12 @@ transaction rules, and independent build procedure.
 The last non-zero image byte in `.text` is before `0x0028D1AC`. The ARM-aligned
 usable tail is `0x0028D1B0–0x0028E000`, or `0xE50` bytes. Ghidra's last
 referenced instruction/data location is `0x0028D188`, and its last function
-ends at `0x0028D18F`. The current offline payload ends at `0x0028DFB1`, leaving
-only `0x4F` bytes at the mapped text boundary.
+ends at `0x0028D18F`. The current offline payload ends at `0x0028DBF1`.
+The `0xE0` bytes at `0x0028DD00–0x0028DDE0` form a dedicated area reserved for
+the Transporter Redirect Patch, and `0x0028DFC0–0x0028E000` holds this project's
+version identifier. Future project payloads may use both
+`0x0028D1B0–0x0028DD00` and `0x0028DDE0–0x0028DFC0`, with `0x2EF` bytes currently
+free in total.
 
 The zero-filled tails in `.rodata` (`0x002EBA58–0x002EC000`, `0x5A8` bytes)
 and `.data` (`0x003293FC–0x0032A000`, `0xC04` bytes) are non-executable and may

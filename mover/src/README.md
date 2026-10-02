@@ -268,6 +268,19 @@ sites, byte-for-byte IPS reconstruction, and all stock and added localized
 messages. Copy `00040000000C9C00` to `SD:/luma/titles/` and enable Luma game
 patching. Back up the SD card and source-game saves before real-console use.
 
+## Transporter Redirect Patch compatibility
+
+This patch leaves the stock hook ranges `0x0021A7E0–0x0021A7E4`,
+`0x0021AA0C–0x0021AA24`, and `0x0021AB50–0x0021AB68`, plus the executable-tail
+range `0x0028DD00–0x0028DDE0`, available for the
+[DreamRadarCartRedirect Transporter Redirect Patch](https://github.com/zaksabeast/DreamRadarCartRedirect/blob/b518a9868c23c69fe94c2818a9e600fd09c24a92/transporter.s).
+Those bytes remain identical to the supported stock image, and the build
+verifier prevents future payload growth from entering them. Two IPS files made
+against the same v5.5.0 base can therefore be combined with an IPS merger that
+supports disjoint records. This reservation guarantees address compatibility
+only with the audited external-patch revision; this project does not bundle or
+redistribute the external patch.
+
 ## External open-source references
 
 - [zaksabeast/Transporter-Offline-Patch](https://github.com/zaksabeast/Transporter-Offline-Patch)
