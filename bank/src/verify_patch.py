@@ -888,10 +888,16 @@ def verify_messages(source_romfs: Path, output_romfs: Path) -> None:
         output_stock_challenge_values = module.message_codec.read_message_line_values(
             output_message_file, module.UNLOCK_CHALLENGE_SOURCE_LINE
         )
-        if output_stock_challenge_values != source_challenge_values:
-            raise ValueError(f"stock unlock prompt changed in archive {archive}")
+        expected_support_values = module.build_support_reference_values(
+            source_challenge_values,
+            module.UNLOCK_SUPPORT_REFERENCE_LABELS[archive],
+        )
+        if output_stock_challenge_values != expected_support_values:
+            raise ValueError(f"support-reference prompt mismatch in archive {archive}")
         expected_unlock_values = module.build_unlock_prompt_values(
-            source_challenge_values, module.UNLOCK_CODE_LABELS[archive]
+            source_challenge_values,
+            module.UNLOCK_SUPPORT_REFERENCE_LABELS[archive],
+            module.UNLOCK_CODE_LABELS[archive],
         )
         output_unlock_values = module.message_codec.read_message_line_values(
             output_message_file, module.UNLOCK_CHALLENGE_LINE

@@ -55,6 +55,7 @@ def patch_message_file(
     replacements: dict[int, str],
     appended_lines: tuple[tuple[str, int], ...] = (),
     appended_value_lines: tuple[tuple[list[int], int], ...] = (),
+    value_replacements: dict[int, list[int]] | None = None,
 ) -> bytes:
     if len(data) < 0x18 or u16(data, 0) != 1 or u32(data, 12) != 0x10:
         raise ValueError("unsupported message-file header")
@@ -64,6 +65,11 @@ def patch_message_file(
     entries_offset = section_offset + 4
     lines: list[tuple[list[int], int]] = []
     line_key = 0x7C89
+    value_replacements = value_replacements or {}
+
+    overlap = replacements.keys() & value_replacements.keys()
+    if overlap:
+        raise ValueError(f"text and raw-value replacements overlap: {sorted(overlap)}")
 
     for index in range(line_count):
         entry_offset = entries_offset + index * 8
@@ -73,7 +79,9 @@ def patch_message_file(
         if len(encrypted) != length * 2:
             raise ValueError(f"message line {index} extends past the file")
         values = _decrypt_line(encrypted, line_key)
-        if index in replacements:
+        if index in value_replacements:
+            values = list(value_replacements[index])
+        elif index in replacements:
             values = _text_values(replacements[index])
         lines.append((values, flags))
         line_key = (line_key + 0x2983) & 0xFFFF

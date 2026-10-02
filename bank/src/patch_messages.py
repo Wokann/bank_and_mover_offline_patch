@@ -197,6 +197,13 @@ R_BUTTONS = {
     "0/1/3": "\ue005",
 }
 
+# The shared 3DS font provides native L and A glyphs, but no native 3DS
+# START glyph. U+E045 is the Wii Remote "+" button, so START stays as text.
+# 3DS 共享字体提供原生 L、A 键字形，但没有原生的 3DS START 字形。
+# U+E045 实际显示为 Wii Remote 的“+”键，因此 START 继续使用普通文本。
+L_BUTTON = "\ue004"
+A_BUTTON = "\ue000"
+
 # The Western stock HOME sentences leave too little room for a localized
 # mode-switch instruction inside the title pane's 54-character buffer.
 # 西欧语言的原版 HOME 句子会挤占标题窗格的 54 字符缓冲区，因此使用本地化短句为
@@ -319,36 +326,49 @@ DOWNLOAD_GAME_SELECTION_MESSAGES = {
 }
 
 UNLOCK_GAME_SELECTION_MESSAGES = {
-    "0/0/4": "ゲームをえらんで ボタンをおすとき、\nL + A + STARTを おしつづけて\nアンロックモードに はいります。",
-    "0/0/5": "ゲームを選んでボタンを押すとき、\nL + A + STARTを押し続けて\nアンロックモードに入ります。",
-    "0/0/6": "When confirming a game,\nhold L + A + Start to enter Unlock Mode.",
-    "0/0/7": "En confirmant un jeu,\nmaintenez L + A + Start pour ouvrir\nle mode Déverrouillage.",
-    "0/0/8": "Quando confermi un gioco,\ntieni L + A + Start per aprire\nla modalità Sblocco.",
-    "0/0/9": "Beim Bestätigen eines Spiels\nL + A + Start gedrückt halten,\num den Entsperrmodus zu öffnen.",
-    "0/1/0": "Al confirmar un juego,\nmantén L + A + Start para abrir\nel modo Desbloqueo.",
-    "0/1/1": "게임을 선택해 버튼을 누를 때\nL + A + Start를 계속 눌러\n잠금 해제 모드로 들어갑니다.",
-    "0/1/2": "选择游戏按下按钮的同时，\n按住L + A + Start 以进入解锁模式。",
-    "0/1/3": "選擇遊戲按下按鈕的同時，\n按住L + A + Start 以進入解鎖模式。",
+    "0/0/4": f"ゲームをえらんで ボタンをおすとき、\n{L_BUTTON} + {A_BUTTON} + STARTを おしつづけて\nアンロックモードに はいります。",
+    "0/0/5": f"ゲームを選んでボタンを押すとき、\n{L_BUTTON} + {A_BUTTON} + STARTを押し続けて\nアンロックモードに入ります。",
+    "0/0/6": f"When confirming a game,\nhold {L_BUTTON} + {A_BUTTON} + START to enter Unlock Mode.",
+    "0/0/7": f"En confirmant un jeu,\nmaintenez {L_BUTTON} + {A_BUTTON} + START pour ouvrir\nle mode Déverrouillage.",
+    "0/0/8": f"Quando confermi un gioco,\ntieni {L_BUTTON} + {A_BUTTON} + START per aprire\nla modalità Sblocco.",
+    "0/0/9": f"Beim Bestätigen eines Spiels\n{L_BUTTON} + {A_BUTTON} + START gedrückt halten,\num den Entsperrmodus zu öffnen.",
+    "0/1/0": f"Al confirmar un juego,\nmantén {L_BUTTON} + {A_BUTTON} + START para abrir\nel modo Desbloqueo.",
+    "0/1/1": f"게임을 선택해 버튼을 누를 때\n{L_BUTTON} + {A_BUTTON} + START를 계속 눌러\n잠금 해제 모드로 들어갑니다.",
+    "0/1/2": f"选择游戏按下按钮的同时，\n按住{L_BUTTON} + {A_BUTTON} + START 以进入解锁模式。",
+    "0/1/3": f"選擇遊戲按下按鈕的同時，\n按住{L_BUTTON} + {A_BUTTON} + START 以進入解鎖模式。",
+}
+
+UNLOCK_SUPPORT_REFERENCE_LABELS = {
+    "0/0/4": "サポートに つたえる ばんごう：",
+    "0/0/5": "サポートに伝える番号：",
+    "0/0/6": "Support reference number:",
+    "0/0/7": "Numéro pour l’assistance :",
+    "0/0/8": "Numero per l'assistenza:",
+    "0/0/9": "Nummer für den Support:",
+    "0/1/0": "Número para soporte:",
+    "0/1/1": "고객 지원용 번호:",
+    "0/1/2": "提供给客服的编号：",
+    "0/1/3": "提供給客服的編號：",
 }
 
 UNLOCK_CODE_LABELS = {
-    "0/0/4": "このコードを にゅうりょく: ",
-    "0/0/5": "この解除コードを入力: ",
-    "0/0/6": "Enter this unlock code: ",
-    "0/0/7": "Entrez ce code : ",
-    "0/0/8": "Inserisci questo codice: ",
-    "0/0/9": "Diesen Code eingeben: ",
-    "0/1/0": "Introduce este código: ",
-    "0/1/1": "이 잠금 해제 코드 입력: ",
-    "0/1/2": "输入此解锁码: ",
-    "0/1/3": "輸入此解鎖碼: ",
+    "0/0/4": "アンロックコードを にゅうりょく：",
+    "0/0/5": "解除コードを入力：",
+    "0/0/6": "Enter unlock code: ",
+    "0/0/7": "Entrez le code de déblocage : ",
+    "0/0/8": "Inserisci il codice di sblocco: ",
+    "0/0/9": "Entsperrcode eingeben: ",
+    "0/1/0": "Introduce el código de desbloqueo: ",
+    "0/1/1": "잠금 해제 코드 입력: ",
+    "0/1/2": "请输入解锁码：",
+    "0/1/3": "請輸入解鎖碼：",
 }
 
 
-def build_unlock_prompt_values(source_values: list[int], label: str) -> list[int]:
-    """Append a third line that expands number register 1.
+def unlock_number_tag(source_values: list[int]) -> list[int]:
+    """Extract the stock challenge-number expansion tag.
 
-    在原消息后追加展开数字寄存器 1 的第三行。
+    提取原版挑战编号的数字展开标签。
     """
     tag_prefix = (0x0010,0x0003,0x0207)
     tag_index = next(
@@ -361,23 +381,64 @@ def build_unlock_prompt_values(source_values: list[int], label: str) -> list[int
     )
     if tag_index < 0:
         raise ValueError("challenge message has no number-register tag")
+    return list(source_values[tag_index : tag_index + 5])
 
-    # Keep both parameters of the stock challenge-number tag except for the
-    # register ID itself. Some language archives use a nonzero second parameter.
-    # 除寄存器编号外保留原挑战码标签的两个参数；部分语言档案的第二参数不为零。
-    tag_end = tag_index + 5
-    values = list(source_values[:tag_end])
-    values.append(0x000A)
-    encoded_label = label.encode("utf-16le")
-    values.extend(
-        int.from_bytes(encoded_label[index : index + 2], "little")
-        for index in range(0, len(encoded_label), 2)
-    )
-    values.extend((0x0010, 0x0003, 0x0207, 0x0001, source_values[tag_index + 4]))
+
+def text_code_units(text: str) -> list[int]:
+    """Encode text as unterminated UTF-16 code units.
+
+    将文本编码为不带终止符的 UTF-16 代码单元。
+    """
+    encoded = text.encode("utf-16le")
+    return [
+        int.from_bytes(encoded[index : index + 2], "little")
+        for index in range(0, len(encoded), 2)
+    ]
+
+
+def finish_message_values(values: list[int]) -> list[int]:
+    """Append the terminator and preserve the message-file alignment.
+
+    追加终止符并保持消息文件所需的对齐。
+    """
+    values = list(values)
     values.append(0)
     if len(values) & 1:
         values.append(0)
     return values
+
+
+def build_support_reference_values(source_values: list[int], label: str) -> list[int]:
+    """Build the corrected two-line support-reference prompt.
+
+    构建修正后的两行客服参考编号提示。
+    """
+    values = text_code_units(label)
+    values.append(0x000A)
+    values.extend(unlock_number_tag(source_values))
+    return finish_message_values(values)
+
+
+def build_unlock_prompt_values(
+    source_values: list[int], support_label: str, unlock_label: str
+) -> list[int]:
+    """Build the corrected prompt and append number register 1.
+
+    构建修正后的提示，并追加展开数字寄存器 1 的第三行。
+    """
+    # Keep both parameters of the stock challenge-number tag except for the
+    # register ID itself. Some language archives use a nonzero second parameter.
+    # 除寄存器编号外保留原挑战码标签的两个参数；部分语言档案的第二参数不为零。
+    challenge_tag = unlock_number_tag(source_values)
+    unlock_tag = list(challenge_tag)
+    unlock_tag[3] = 1
+    values = text_code_units(support_label)
+    values.append(0x000A)
+    values.extend(challenge_tag)
+    values.append(0x000A)
+    values.extend(text_code_units(unlock_label))
+    values.extend(unlock_tag)
+    return finish_message_values(values)
 
 
 def verify_kana_archive_messages() -> None:
@@ -407,6 +468,7 @@ def verify_kana_archive_messages() -> None:
         DOWNLOAD_GAME_SELECTION_MESSAGES[archive],
         UNLOCK_MENU_GREETINGS[archive],
         UNLOCK_GAME_SELECTION_MESSAGES[archive],
+        UNLOCK_SUPPORT_REFERENCE_LABELS[archive],
         UNLOCK_CODE_LABELS[archive],
     )
     for text in texts:
@@ -463,8 +525,13 @@ def main() -> None:
         unlock_challenge_source = message_codec.read_message_line_values(
             original, UNLOCK_CHALLENGE_SOURCE_LINE
         )
+        unlock_support_reference = build_support_reference_values(
+            unlock_challenge_source, UNLOCK_SUPPORT_REFERENCE_LABELS[archive]
+        )
         unlock_challenge = build_unlock_prompt_values(
-            unlock_challenge_source, UNLOCK_CODE_LABELS[archive]
+            unlock_challenge_source,
+            UNLOCK_SUPPORT_REFERENCE_LABELS[archive],
+            UNLOCK_CODE_LABELS[archive],
         )
         if args.title_r_glyph_test:
             # Diagnostic archive: isolate private-use glyph rendering from
@@ -525,6 +592,9 @@ def main() -> None:
                 (UNLOCK_GAME_SELECTION_MESSAGES[archive], game_selection_flags),
             ),
             ((unlock_challenge, unlock_challenge_flags),),
+            value_replacements={
+                UNLOCK_CHALLENGE_SOURCE_LINE: unlock_support_reference,
+            },
         )
         greeting_entry = entries[MENU_MESSAGE_FILE_INDEX]
         greeting_original = greeting_entry.files[0]
