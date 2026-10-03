@@ -252,7 +252,11 @@ CombinePatch_Gen5Validation:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12]
     cmp r12,#CombinePatch_ModeOffline
-    beq MoverGetPokemon_Gen5LocalContinuation
+    bne @@original
+    mov r0,r5
+    bl OfflinePatch_PrepareGen5Validation
+    b MoverGetPokemon_Gen5LocalContinuation
+@@original:
     ldr r0,=0x003293A8
     b MoverGetPokemon_SkipGen5RemoteValidation + 4
 
@@ -260,7 +264,11 @@ CombinePatch_Gen12Validation:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12]
     cmp r12,#CombinePatch_ModeOffline
-    beq MoverGetPokemon_Gen12LocalContinuation
+    bne @@original
+    mov r0,r5
+    bl OfflinePatch_PrepareGen12Validation
+    b MoverGetPokemon_Gen12LocalContinuation
+@@original:
     ldr r0,=0x003293A8
     b MoverGetPokemon_SkipGen12RemoteValidation + 4
 
@@ -447,6 +455,16 @@ CombinePatch_OfflinePayloadUsedEnd:
 // 字节；0x0028DDE0..0x0028DFC0 仍可供本项目以后的载荷使用。
 .org 0x0028DD00
 .area 0xE0
+.endarea
+
+// The per-slot local validation adapter occupies this project's free tail
+// immediately after the external redirect reservation.
+// 逐槽本地校验适配器放在外部重定向补丁保留区之后的本项目可用尾部空间。
+.org 0x0028DDE0
+.area OfflinePatch_VersionStorageStart-0x0028DDE0
+LocalValidation_PayloadBegin:
+    .importobj "../build/local_validation.o"
+LocalValidation_PayloadEnd:
 .endarea
 
 // Reserve the final 64 bytes of the mapped text segment as a zero-padded ASCII

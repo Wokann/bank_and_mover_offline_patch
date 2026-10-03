@@ -37,6 +37,21 @@ int OfflinePatch_DisconnectUpdate(MoverStateView *state)
 __attribute__((used,noinline,section(".text.offline.04_remote_check")))
 int OfflinePatch_RemoteCheckUpdate(MoverStateView *state)
 {
+    MoverCommonDataPrefixView *shared=
+        (MoverCommonDataPrefixView *)state->sharedData;
+    if (shared) {
+        /* Offline mode has no remote transaction. Clear data that may remain
+           after returning from an original-mode attempt in the same process. */
+        /* 离线模式没有远端事务。清除同一进程内从原版模式返回后可能残留的
+           事务数据。 */
+        shared->transaction.dataId=0;
+        shared->transaction.currentVersion=0;
+        shared->transaction.updateVersion=0;
+        shared->transaction.size=0;
+        shared->transaction.reserved14=0;
+        shared->transaction.transactionPassword=0;
+        shared->bankStatus=MOVER_BANK_STATUS_READY;
+    }
     state->phase=MOVER_REMOTE_CHECK_PHASE_COMPLETE;
     return MOVER_STATE_UPDATE_FINISHED;
 }

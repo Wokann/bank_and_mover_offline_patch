@@ -99,11 +99,13 @@ Connect to local offline Bank data (at least 2 seconds)
         ▼
 Stock cartridge read, filtering, and Pokemon conversion
         │
-        ├── Gen 5 legality request ──────► verified local continuation
-        └── Gen 1/2 legality request ────► verified local continuation
+        ├── Gen 5: mark empty slots as stock result 20;
+        │          run stock local checks for non-empty slots
+        └── Gen 1/2: clear stale server results;
+                    retain stock null-slot and local checks
                                               │
                                               ▼
-                               Complete remote-check state locally
+                  Clear stale remote transaction and complete check locally
                                               │
                                               ▼
                          Load and validate complete bankdata.bin
@@ -118,8 +120,24 @@ and validity fields. It is not a Poké Mile calculation: Mover has no local
 Poké Mile accumulation or reward path in this patch.
 
 The native candidate-conversion state remains responsible for reading the
-source game, filtering records, and constructing transfer candidates. Only its
-two embedded server legality requests are bypassed in Offline Mode.
+source game, filtering records, and constructing transfer candidates. After
+bypassing its two embedded server legality requests, Offline Mode reconstructs
+only the per-slot results required by the native continuation. A Gen 5 record
+matching the complete native empty-slot template receives no-data result `20`;
+every other record receives `0` and continues through the native local checks.
+Those checks cover eggs, fused forms, origin/event combinations, level and
+location consistency, language/origin values, and older-origin ability
+consistency. Held items are reported and removed rather than treated as a fatal
+Gen 5 failure. The VC converter already skips null objects before reading a
+result, then locally rejects eggs and held items, so all 30 results are cleared
+there. This prevents empty slots from producing the can't-send warning without
+hiding the retained native local failures for occupied slots. Remote-only
+legality and name-normalization decisions are not reproduced in Offline Mode.
+
+The offline remote-check state also clears transaction parameters left by a
+prior Original Mode attempt in the same process and sets the shared Bank status
+to its known ready value. Original Mode still obtains fresh values from
+the server.
 
 Before loading `bankdata.bin`, the patch preserves candidates in native
 Transfer Slot objects. After validating the complete local Bank, it restores
@@ -187,6 +205,7 @@ state object; the native state exit path performs cleanup.
 | `fs_helpers.c` | Checked SD archive/file primitives shared by local loading and transactions |
 | `bankdata_redirect.c` | Local Bankdata loading, transfer-slot preservation, eligibility update, and crash-safe temporary write, commit, and rollback |
 | `local_ticket.c` | Runtime offline ticket and console-calendar calculation |
+| `local_validation.c` | Reconstructs the Gen 5 empty-slot result and isolates Gen 5/VC per-slot server results |
 | `offline_flow.c` | Independent network, disconnect, remote-check, no-transfer, and save-delay state updates |
 | `patch_paths.c` | Shared SD path constants |
 | `patch_messages.py` | Appends and validates title/offline text in all ten language archives |

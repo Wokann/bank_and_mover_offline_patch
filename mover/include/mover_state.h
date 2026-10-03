@@ -5,6 +5,25 @@
 
 struct MoverBankRuntimeObjectView;
 
+/* Prefix of the shared flow data populated by the remote transaction query.
+   The explicit padding preserves the original ARM layout before the final
+   64-bit transaction password. */
+/* 远端事务查询所填充的共用流程数据前缀。显式填充用于保持最后一个 64 位
+   事务密码之前的原版 ARM 布局。 */
+typedef struct MoverTransactionParamView {
+    u64 dataId;
+    u32 currentVersion;
+    u32 updateVersion;
+    u32 size;
+    u32 reserved14;
+    u64 transactionPassword;
+} MoverTransactionParamView;
+
+typedef struct MoverCommonDataPrefixView {
+    MoverTransactionParamView transaction;
+    u32 bankStatus;
+} MoverCommonDataPrefixView;
+
 /* Confirmed fields shared by the patched Mover state-machine objects. */
 /* 补丁涉及的 Mover 状态机对象中已确认的共用字段。 */
 typedef struct MoverNetworkContextView {
@@ -41,6 +60,10 @@ enum MoverStateUpdateResult {
 enum MoverNetworkConnectionValue {
     MOVER_NETWORK_DISCONNECTED = 0,
     MOVER_NETWORK_CONNECTED = 1
+};
+
+enum MoverBankStatusValue {
+    MOVER_BANK_STATUS_READY = 50
 };
 
 /* These phase values belong to different native state classes and therefore

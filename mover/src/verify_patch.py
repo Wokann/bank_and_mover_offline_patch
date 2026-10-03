@@ -24,6 +24,9 @@ VERSION_IDENTIFIER = b"offline_patch_v1.0.0\0"
 PAYLOAD_START = 0x0028D1B0
 TRANSPORTER_REDIRECT_AREA_START = 0x0028DD00
 TRANSPORTER_REDIRECT_AREA_SIZE = 0xE0
+LOCAL_VALIDATION_AREA_START = (
+    TRANSPORTER_REDIRECT_AREA_START + TRANSPORTER_REDIRECT_AREA_SIZE
+)
 PAYLOAD_END = VERSION_STORAGE_START
 TRANSPORTER_REDIRECT_HOOK_RANGES = (
     (0x0021A7E0, 0x0021A7E4),
@@ -111,6 +114,7 @@ def main() -> None:
         "fshelpers_payloadbegin", "fshelpers_payloadend",
         "bankdataredirect_payloadbegin", "bankdataredirect_payloadend",
         "localticket_payloadbegin", "localticket_payloadend",
+        "localvalidation_payloadbegin", "localvalidation_payloadend",
         "offlineflow_payloadbegin", "offlineflow_payloadend",
         "patchpaths_payloadbegin", "patchpaths_payloadend",
         "combinepatch_titletextinitialize", "combinepatch_titlestateupdate",
@@ -119,7 +123,8 @@ def main() -> None:
         "combinepatch_eligibilityupdate", "combinepatch_getpokemonupdate",
         "combinepatch_saveskipremotejob",
         "offlinepatch_networkupdate", "offlinepatch_stage", "offlinepatch_commit",
-        "offlinepatch_rollback",
+        "offlinepatch_rollback", "offlinepatch_preparegen5validation",
+        "offlinepatch_preparegen12validation",
         "offlinepatch_versionidentifier",
     }
     missing = sorted(required - sym.keys())
@@ -149,6 +154,13 @@ def main() -> None:
             raise ValueError("tail payload objects are not consecutive")
     if sym[tail_objects[-1][1]] != sym["combinepatch_offlinepayloadusedend"]:
         raise ValueError("offline payload end does not follow the final object")
+    if not (
+        LOCAL_VALIDATION_AREA_START
+        <= sym["localvalidation_payloadbegin"]
+        < sym["localvalidation_payloadend"]
+        <= VERSION_STORAGE_START
+    ):
+        raise ValueError("local-validation object exceeds its audited tail area")
 
     # The external Transporter Redirect Patch replaces these three stock hook
     # ranges and injects its SD-save payload at 0x0028DD00. Keep every byte
@@ -259,6 +271,33 @@ def main() -> None:
         target, actual_link, actual_condition = branch_target(patched, address)
         if (target, actual_link, actual_condition) != (sym[name], link, condition):
             raise ValueError(f"incorrect hook at {address:08X}")
+
+    validation_routes = (
+        (
+            "combinepatch_gen5validation",
+            "offlinepatch_preparegen5validation",
+            0x00245800,
+            0x0024572C,
+        ),
+        (
+            "combinepatch_gen12validation",
+            "offlinepatch_preparegen12validation",
+            0x002461D0,
+            0x002460BC,
+        ),
+    )
+    for wrapper_name, helper_name, local_continuation, original_continuation in validation_routes:
+        wrapper = sym[wrapper_name]
+        expected_branches = (
+            (wrapper + 0x0C, wrapper + 0x1C, False, 0x1),
+            (wrapper + 0x14, sym[helper_name], True, 0xE),
+            (wrapper + 0x18, local_continuation, False, 0xE),
+            (wrapper + 0x20, original_continuation, False, 0xE),
+        )
+        for address, target, link, condition in expected_branches:
+            actual_target, actual_link, actual_condition = branch_target(patched, address)
+            if (actual_target, actual_link, actual_condition) != (target, link, condition):
+                raise ValueError(f"incorrect validation route at {address:08X}")
 
     messages = load_helper(Path(__file__).with_name("patch_messages.py"))
     for archive in messages.ARCHIVES:
