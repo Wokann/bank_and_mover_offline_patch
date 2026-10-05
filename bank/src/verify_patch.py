@@ -15,7 +15,9 @@ from pathlib import Path
 IMAGE_BASE = 0x00100000
 EXPECTED_BASE_SHA256 = "2DCE4796F54807CF8A67F1CE6297BF472D969B30ED7A7E8E25C2A6C2BDC40ABF"
 OPTIONAL_REWARD_STATE = 0x002B0270
-OPTIONAL_REWARD_BODY_END = 0x002B14E0
+OPTIONAL_REWARD_BODY_END = 0x002B1AD0
+HOME_BOX_CAVE_START = 0x00285BA8
+HOME_BOX_CAVE_END = 0x0028711C
 HOME_CAVE_START = 0x002A7BF0
 HOME_CAVE_END = 0x002A8760
 TAIL_CAVE_START = 0x00313A40
@@ -332,10 +334,20 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
 
     payload_begin = symbols["combinepatch_payloadbegin"]
     payload_end = symbols["combinepatch_payloadend"]
-    if payload_begin != OPTIONAL_REWARD_STATE + 4:
-        raise ValueError("local payload no longer starts after the optional-reward entry branch")
-    if not payload_begin < payload_end <= OPTIONAL_REWARD_BODY_END:
-        raise ValueError("local payload exceeds the optional-reward state body")
+    if payload_begin != HOME_BOX_CAVE_START:
+        raise ValueError("local payload no longer starts in the HOME box-selection UI region")
+    if not payload_begin < payload_end <= HOME_BOX_CAVE_END:
+        raise ValueError("local payload exceeds the HOME box-selection UI region")
+    reward_body_start = image_offset(OPTIONAL_REWARD_STATE + 4)
+    reward_body_end = image_offset(OPTIONAL_REWARD_BODY_END)
+    if image[reward_body_start:reward_body_end] != base_image[reward_body_start:reward_body_end]:
+        raise ValueError("native entitlement state body or companion functions were modified")
+    expect_word(
+        image,
+        HOME_BOX_CAVE_END,
+        read_word(base_image, HOME_BOX_CAVE_END),
+        "UI function after the HOME box-selection cave",
+    )
     if not (
         payload_begin
         == symbols["fshelpers_payloadbegin"]

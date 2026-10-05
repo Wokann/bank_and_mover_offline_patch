@@ -12,8 +12,8 @@
 .definelabel OfflinePatch_VersionStorageStart, TextMappedEnd - OfflinePatch_VersionStorageSize
 .definelabel CombinePatch_CodeStart, 0x00313A40
 .definelabel CombinePatch_CodeEnd, OfflinePatch_VersionStorageStart
-.definelabel CombinePatch_PayloadStart, OptionalRewardState_Update + 4
-.definelabel CombinePatch_PayloadEndLimit, 0x002B14E0
+.definelabel CombinePatch_PayloadStart, 0x00285BA8
+.definelabel CombinePatch_PayloadEndLimit, 0x0028711C
 .definelabel TurtleRedirect_PayloadEndLimit, 0x002A8760
 .definelabel CombinePatch_ModeStorage, 0x003ABFFC
 .definelabel CombinePatch_HidManager, 0x003DC3B4
@@ -1189,12 +1189,13 @@ TurtleRedirect_PayloadBegin:
 TurtleRedirect_PayloadEnd:
 .endarea
 
-// All patched routes complete this optional-reward state through the local
-// bypass. Its original body is therefore unreachable and is the verified
-// contiguous home for the shared FS, Bankdata, offline-flow, local-mileage,
-// local-ticket, and unlock-display objects.
-// 所有补丁路线都会通过本地跳过逻辑完成这个可选奖励状态。因此原函数体不可达，是
-// 共用 FS、Bankdata、离线流程、本地里程、本地票据与解锁显示对象经验证的连续容器。
+// Both HOME entry routes are blocked in every mode. Use only its dedicated
+// box-selection UI region, stopping before the next unrelated UI function.
+// The entitlement state body remains intact; its entry still uses the local
+// bypass in all modes.
+// 三个模式均已封堵 HOME 的两条入口。这里只使用 HOME 专用的盒子选择 UI 区域，
+// 不覆盖紧邻的其他 UI 函数。使用权状态的原函数体保持完整；入口在所有模式下仍
+// 使用现有的本地跳过逻辑。
 .org CombinePatch_PayloadStart
 .area CombinePatch_PayloadEndLimit-CombinePatch_PayloadStart
 CombinePatch_PayloadBegin:

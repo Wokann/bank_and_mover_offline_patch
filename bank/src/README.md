@@ -373,10 +373,85 @@ Spanish, Korean, Simplified Chinese, and Traditional Chinese.
 | `verify_patch.py` | Verifies base hash, code ranges, hooks, IPS reconstruction, native instruction replay, and resources |
 | `Makefile` | Compiles, injects, creates the IPS, rebuilds messages, and writes the Luma release tree |
 
-The patch leaves `0x00313910–0x00313A3F` unused because Luma installs its
-LayeredFS redirection payload from the title's original `.text` end. Patch code
-starts after that reserved area and remains below the executable limit at
-`0x00314000`.
+### Injection-space provenance and bounds
+
+All addresses below are runtime virtual addresses, not IPS file offsets. Ranges
+use `[start, end)`: the start is included and the end is excluded. Layout
+definitions are in [`main.s`](main.s) and
+[`symbol.inc`](../include/symbol.inc); actual placements after a build are in
+`bank/build/armips-symbols.txt`.
+
+The original executable has the following segment bounds. This patch neither
+enlarges the ExHeader segment sizes nor moves the following segments.
+
+| Original segment | Start | Declared size | Declared content end | End of 4 KiB page mapping | Permissions |
+| --- | --- | --- | --- | --- | --- |
+| `.text` | `0x00100000` | `0x00213910` | `0x00313910` | `0x00314000` | Read, execute |
+| `.rodata` | `0x00314000` | `0x00055370` | `0x00369370` | `0x0036A000` | Read-only, non-executable |
+| `.data` | `0x0036A000` | `0x00041ACC` | `0x003ABACC` | `0x003AC000` | Read/write, non-executable |
+
+The patch uses in-place edits, reclaimed disabled functions, and existing
+last-page padding. These are distinct sources of space; reclaimed functions
+were not unused gaps in the original image.
+
+| Address range | Provenance and original purpose | Current use and boundary constraints |
+| --- | --- | --- |
+| Scattered in-place hooks in `main.s` | Instructions at original function entries, call sites, or branches | Change jumps, conditions, or a few instructions; wrappers replay overwritten instructions where necessary. A hook does not make the whole original function reclaimable. |
+| `[0x00285BA8, 0x0028711C)` | Reclaimed disabled code: input, update, construction, and cleanup functions of the dedicated HOME box-selection UI; original span `0x1574` (5492 bytes) | Holds six C objects for FS, Bankdata, offline flow, local mileage, local entitlement, and unlock display. Ordinary box and shared functions are excluded. `0x0028711C` starts an adjacent normal UI function and must not be overwritten. |
+| `[0x002A7BF0, 0x002A8404)` | Reclaimed disabled code: state 27 HOME operation control and its creation, initialization, and cleanup functions | Assembly dispatch, wrappers, and trampolines end at `0x002A82E4`. The Turtle backend starts there and continues into the reclaimed region in the next row. |
+| `[0x002A8404, 0x002A8760)` | Reclaimed disabled code: state 14 eShop launch UI and companion functions | Holds the rest of the Turtle backend. These two reclaimed regions total `0xB70` (2928 bytes) and are fully occupied. `0x002A8760` is the native transaction-recovery entry, which remains intact and must not be overwritten. |
+| `[0x002B0270, 0x002B0274)` | In-place edit: entry of the state 15 entitlement-check update function | One branch enters the existing local bypass; all three modes still use this entry behavior. |
+| `[0x002B0274, 0x002B1AD0)` | Preserved: original state 15 body and companion functions | Matches the original image and is not payload space. Preserving the body does not mean online entitlement checks are currently enabled. |
+| `[0x00313910, 0x00313A40)` | Existing padding in the last `.text` page | Reserves `0x130` (304 bytes) for Luma LayeredFS; this patch does not write here. `0x00313A40` is this project's chosen separation boundary, not a fixed Luma address. |
+| `[0x00313A40, 0x00313FC0)` | Existing padding in the last `.text` page; span `0x580` (1408 bytes) | Holds tail assembly and `patch_paths.o`, ending at `0x00313E2B`. The remaining padding is unused by this project. |
+| `[0x00313FC0, 0x00314000)` | Existing padding in the last `.text` page | A 64-byte version-identifier slot containing `offline_patch_v1.0.0` with zero padding; it does not currently affect runtime behavior. It must not cross the `.rodata` start at `0x00314000`. |
+| `[0x003ABFFC, 0x003AC000)` | Verified final four spare bytes in the original `.data` page | Fixed storage for the session mode, download-captured flag, previous title R-key state, and selected title mode. This is not dynamically allocated heap memory and contains no executable code. |
+
+All three modes block both the menu HOME entry and the direct HOME entry offered
+when no usable game save exists. The eShop download entry is also disabled in
+every mode. Only functions exclusive to these disabled paths are reclaimed;
+shared SDK functions, ordinary box functions, and other screens remain intact.
+
+Current C-object and tail-area placements are listed below, including alignment
+padding between objects.
+
+| Content | Actual range | Size |
+| --- | --- | --- |
+| `fs_helpers.o` | `[0x00285BA8, 0x00286150)` | `0x5A8` (1448 bytes) |
+| `bankdata_redirect.o` | `[0x00286150, 0x002867AC)` | `0x65C` (1628 bytes) |
+| `offline_flow.o` | `[0x002867AC, 0x002868CC)` | `0x120` (288 bytes) |
+| `local_mileage.o` | `[0x002868CC, 0x00286CF0)` | `0x424` (1060 bytes) |
+| `local_ticket.o` | `[0x00286CF0, 0x00286D50)` | `0x60` (96 bytes) |
+| `unlock_mode.o` | `[0x00286D50, 0x00286DA0)` | `0x50` (80 bytes) |
+| Assembly wrappers and trampolines in reclaimed code | `[0x002A7BF0, 0x002A82E4)` | `0x6F4` (1780 bytes) |
+| `turtle_redirect.o` | `[0x002A82E4, 0x002A8760)` | `0x47C` (1148 bytes) |
+| `.text` tail assembly | `[0x00313A40, 0x00313D78)` | `0x338` (824 bytes) |
+| `patch_paths.o` | `[0x00313D78, 0x00313E2B)` | `0xB3` (179 bytes) |
+
+The six C objects occupy `0x11F8` (4600 bytes), leaving
+`[0x00286DA0, 0x0028711C)`, or `0x37C` (892 bytes). This remainder still
+contains disabled HOME functions, not natural zero padding. The tail area leaves
+`[0x00313E2B, 0x00313FC0)`, or `0x195` (405 bytes). For 4-byte-aligned ARM
+code, the usable start is `0x00313E2C`, leaving `0x194` (404 bytes).
+
+Only `0x6F0` (1776 bytes) separate the declared `.text` content end from its
+mapped end. This is unused space in the last mapped page, not an additional
+allocated page. Luma installs LayeredFS after applying IPS and does not
+automatically avoid IPS-written ranges, so this project separately reserves the
+304 bytes above. With this layout, LayeredFS path strings use the 39 bytes at
+`[0x00369370, 0x00369397)` in the `.rodata` tail, separately from the executable
+payload in `.text`; this patch does not occupy that range. See the
+[Luma loader](https://github.com/LumaTeam/Luma3DS/blob/master/sysmodules/loader/source/loader.c)
+and [LayeredFS installation logic](https://github.com/LumaTeam/Luma3DS/blob/master/sysmodules/loader/source/patcher.c).
+If the Luma implementation or original segment layout changes, recheck the
+payload size and placement rather than assuming this separation boundary is
+valid for every version.
+
+Other zero-filled bytes in the `.rodata` and `.data` tails are not automatically
+safe spare space, and neither segment is executable. This patch allocates no
+additional heap space for injected code. Before adding payloads, check `.area`
+limits, actual build symbols, and adjacent original functions; zero runs or a
+bypassed entry alone do not justify enlarging a reclaimed region.
 
 ## Independent build and installation
 
