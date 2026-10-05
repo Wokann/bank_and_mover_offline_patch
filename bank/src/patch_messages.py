@@ -16,6 +16,7 @@ ARCHIVES = (
     "0/0/9", "0/1/0", "0/1/1", "0/1/2", "0/1/3",
 )
 MESSAGE_FILE_INDEX = 39
+NO_GAME_RECORD_LINE = 0
 INTERNET_CONNECTION_LINE = 12
 BANK_CONNECTION_LINE = 14
 SAVE_LINE = 8
@@ -408,6 +409,22 @@ def finish_message_values(values: list[int]) -> list[int]:
     return values
 
 
+def build_no_game_prompt_values(source_values: list[int]) -> list[int]:
+    """Keep both stock no-game pages and their confirmation waits.
+
+    保留原版无游戏提示的前两页及按键等待，去掉最后的 HOME 询问。
+    """
+    page_break = [0x0010, 0x0001, 0xBE01]
+    page_ends = [
+        index
+        for index in range(len(source_values) - 2)
+        if source_values[index : index + 3] == page_break
+    ]
+    if len(page_ends) != 2:
+        raise ValueError("no-game message must contain two stock page breaks")
+    return finish_message_values(source_values[:page_ends[1] + len(page_break)])
+
+
 def build_support_reference_values(source_values: list[int], label: str) -> list[int]:
     """Build the corrected two-line support-reference prompt.
 
@@ -533,6 +550,9 @@ def main() -> None:
             UNLOCK_SUPPORT_REFERENCE_LABELS[archive],
             UNLOCK_CODE_LABELS[archive],
         )
+        no_game_prompt = build_no_game_prompt_values(
+            message_codec.read_message_line_values(original, NO_GAME_RECORD_LINE)
+        )
         if args.title_r_glyph_test:
             # Diagnostic archive: isolate private-use glyph rendering from
             # multiline layout and localized text length.
@@ -593,6 +613,7 @@ def main() -> None:
             ),
             ((unlock_challenge, unlock_challenge_flags),),
             value_replacements={
+                NO_GAME_RECORD_LINE: no_game_prompt,
                 UNLOCK_CHALLENGE_SOURCE_LINE: unlock_support_reference,
             },
         )
@@ -671,6 +692,10 @@ def main() -> None:
             raise ValueError(f"download-menu greeting verification failed for {archive}")
         if rebuilt_greetings[UNLOCK_MENU_GREETING_LINE] != unlock_menu_greeting:
             raise ValueError(f"unlock-menu greeting verification failed for {archive}")
+        if message_codec.read_message_line_values(
+            rebuilt_entries[MESSAGE_FILE_INDEX].files[0], NO_GAME_RECORD_LINE
+        ) != no_game_prompt:
+            raise ValueError(f"no-game prompt verification failed for {archive}")
         if message_codec.read_message_line_values(
             rebuilt_entries[MESSAGE_FILE_INDEX].files[0], UNLOCK_CHALLENGE_LINE
         ) != unlock_challenge:

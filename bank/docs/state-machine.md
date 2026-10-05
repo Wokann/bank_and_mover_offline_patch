@@ -218,6 +218,7 @@ the middle, states 18 and 17 resolve the persisted state on a later use.
 
 | Node | Stock | Download Mode | Offline Mode | Unlock Mode |
 |---|---|---|---|---|
+| state 3 without usable game data | Ask whether to move directly to HOME after the warning | Keep the missing-data/Pokédex warning, then return to the title | Same as Download Mode | Same as Download Mode |
 | Turtle backend | Stock `data:/turtle` storage | Redirected to `sd:/3ds/Bank/sav.bin` | Redirected to the same `sav.bin` | Redirected to the same `sav.bin` |
 | state 5 | Real connection | Stock | Complete the session locally; no remote job | Stock |
 | state 8 | Server account summary | Stock | Classify existing/first-use from local `bankdata.bin/.bak` | Stock |
@@ -239,6 +240,15 @@ no-save exit. HOME, support-code, and Mover/eShop menu operations are also
 disabled or redirected by the patch. Because the Turtle backend is redirected
 globally, server transaction descriptors written in Download Mode are stored
 in `sav.bin`, not the stock logical-record backend.
+
+With no usable game data, `0x002AC958` branches to the existing failure substate
+at `0x002ACA90` after the stock message completes and its text is cleared.
+Result `3` returns through `state 3 → 20 → 2` without creating HOME choices,
+setting the HOME direct-entry flag, or starting a network session. All ten
+language archives retain the first two stock warning pages and both page-break /
+input-wait tags. The second page must be confirmed before returning to the
+title; only the final HOME question is removed. The feature-menu HOME entry
+still redirects to language selection.
 
 Unlock Mode follows the stock state 11/18/17 transaction-recovery branches. At
 the stock state-18 challenge screen, the server response already owns a vector

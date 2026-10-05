@@ -513,6 +513,7 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
         (0x002AE864, "combinepatch_bankcreatesuccess", False, ARM_COND_NE, "first-use success"),
         (0x002A57C8, "combinepatch_rewardresult", False, ARM_COND_EQ, "mode-specific reward result"),
         (0x002A56F0, "combinepatch_homeresult", False, ARM_COND_EQ, "HOME redirect"),
+        (0x002AC958, "initialgamecheck_failuretransition", False, ARM_COND_AL, "no-game HOME entry bypass"),
         (0x002A58CC, "combinepatch_result21", False, ARM_COND_EQ, "language result"),
         (0x002A57E0, "combinepatch_result5", False, ARM_COND_EQ, "no-save result"),
         (0x002A57F0, "combinepatch_result6or12", False, ARM_COND_EQ, "result six or twelve"),
@@ -570,6 +571,13 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
     )
 
     expect_word(base_image, 0x002B1AD0, 0xE92D40F8, "base title-state prologue")
+    expect_word(base_image, 0x002AC958, 0xE5945040, "base no-game HOME choice setup")
+    # Keep message completion/cleanup and the existing failure transition intact.
+    # 保持提示完成／清理以及现有失败返回路径不变。
+    for start, end in ((0x002AC924, 0x002AC958), (0x002ACA90, 0x002ACAA4)):
+        start_offset, end_offset = image_offset(start), image_offset(end)
+        if image[start_offset:end_offset] != base_image[start_offset:end_offset]:
+            raise ValueError("native no-game message or failure path was modified")
     expect_word(base_image, 0x002A9810, 0xEB00435E, "base first-present flag getter")
     expect_word(image, 0x002A9810, 0xEB00435E, "native first-present flag getter")
     expect_branch(
@@ -818,6 +826,21 @@ def verify_messages(source_romfs: Path, output_romfs: Path) -> None:
         output_message_file = output_entries[module.MESSAGE_FILE_INDEX].files[0]
         source_lines = module.message_codec.read_message_lines(source_message_file)
         output_lines = module.message_codec.read_message_lines(output_message_file)
+        expected_no_game_values = module.build_no_game_prompt_values(
+            module.message_codec.read_message_line_values(
+                source_message_file, module.NO_GAME_RECORD_LINE
+            )
+        )
+        no_game_values = module.message_codec.read_message_line_values(
+            output_message_file, module.NO_GAME_RECORD_LINE
+        )
+        if no_game_values != expected_no_game_values:
+            raise ValueError(f"no-game prompt mismatch in archive {archive}")
+        no_game_end = len(no_game_values)
+        while no_game_end and no_game_values[no_game_end - 1] == 0:
+            no_game_end -= 1
+        if no_game_values[no_game_end - 3:no_game_end] != [0x0010, 0x0001, 0xBE01]:
+            raise ValueError(f"no-game final confirmation wait missing in archive {archive}")
         title_home = module.SHORT_TITLE_HOME_MESSAGES.get(
             archive, source_lines[module.TITLE_HOME_LINE]
         )

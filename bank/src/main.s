@@ -122,6 +122,11 @@
     beq CombinePatch_RewardResult
 .org BankFlow_SelectNextState + 0x170
     beq CombinePatch_HomeResult
+.org InitialGameCheck_NoGameChoiceSetup
+    // After the native no-game message finishes and is cleared, return through
+    // the existing failure substate instead of creating the HOME choice UI.
+    // 原版无游戏提示显示完毕并清理后，走现成的失败子状态，不创建 HOME 选项。
+    b InitialGameCheck_FailureTransition
 .org BankFlow_SelectNextState + 0x34C
     beq CombinePatch_Result21
 
@@ -539,10 +544,10 @@ OfflinePatch_VersionIdentifier:
     .asciiz "offline_patch_v1.0.0"
 .endarea
 
-// The outer Bank-flow hook redirects HOME to language selection before this
-// state is created. Its full state body is therefore available for mode dispatch.
-// 外层 Bank 流程钩子会在创建此状态前将 HOME 重定向至语言选择，因此其完整状态体
-// 可用于模式分发。
+// The feature-menu HOME result redirects to language selection, while the
+// no-game path returns to the title. Neither route can create this state.
+// 功能选单中的 HOME 结果改走语言选择，无游戏路径则返回标题，两条入口均不会
+// 创建此状态。
 .org HomeTransferState_Update
 .area TurtleRedirect_PayloadEndLimit-HomeTransferState_Update
 

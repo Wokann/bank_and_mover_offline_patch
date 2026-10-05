@@ -49,6 +49,8 @@
 .definelabel BankMenuState_SelectionCallback,   0x002A6C8C
 .definelabel BankMenuState_ModeGreetingCall0,   0x002A6824
 .definelabel BankMenuState_ModeGreetingCall5,   0x002A6978
+.definelabel InitialGameCheck_NoGameChoiceSetup, 0x002AC958
+.definelabel InitialGameCheck_FailureTransition, 0x002ACA90
 .definelabel GameSelectionState_MessageIdLoad,    0x002ADD0C
 ; Stock call that binds message line 34 after challenge register 0 is ready.
 ; 原版挑战码寄存器 0 就绪后绑定消息第 34 行的调用点。
