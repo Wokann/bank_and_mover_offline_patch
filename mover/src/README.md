@@ -122,17 +122,58 @@ Poké Mile accumulation or reward path in this patch.
 The native candidate-conversion state remains responsible for reading the
 source game, filtering records, and constructing transfer candidates. After
 bypassing its two embedded server legality requests, Offline Mode reconstructs
-only the per-slot results required by the native continuation. A Gen 5 record
-matching the complete native empty-slot template receives no-data result `20`;
-every other record receives `0` and continues through the native local checks.
-Those checks cover eggs, fused forms, origin/event combinations, level and
-location consistency, language/origin values, and older-origin ability
-consistency. Held items are reported and removed rather than treated as a fatal
-Gen 5 failure. The VC converter already skips null objects before reading a
-result, then locally rejects eggs and held items, so all 30 results are cleared
-there. This prevents empty slots from producing the can't-send warning without
-hiding the retained native local failures for occupied slots. Remote-only
-legality and name-normalization decisions are not reproduced in Offline Mode.
+the per-slot results required by the native continuation. The Gen 5 classifier
+honors native flags and block order while decoding temporary values and checking
+the record checksum. Explicit exclusion flags, checksum failures, and unsupported
+species receive generic rejection result `1`; intact species-0 records receive
+`20`; remaining nonempty species `1–649` receive `0` for native local checks.
+An empty slot need not match a complete byte template. Source records, names,
+control flags, and checksums are never rewritten. An unavailable source follows
+the native read-error message and exit path, not a synthetic empty/candidate
+result. The VC null/item/egg decisions remain unchanged; all 30 stale results
+are cleared. Unknown server-only legality rules and name normalization are not
+recreated in Offline Mode.
+
+### Gen 5 original and offline order
+
+| Stage | Original | Offline |
+|---|---|---|
+| Source load | Validate the source save and select its redundant side | Native flow retained |
+| Before submission | Obtain 30 raw records before the 14 checks or transfer conversion | Read-only decode and integrity-check the same records |
+| Per-slot results | Submit raw records, validate the response, obtain per-slot decisions | Replace all results with `0`, `20`, or `1`; an unavailable source is a whole-flow error |
+| After submission | Skip empty slots, report rejections, run the 14 checks on other candidates | Resume the same native postprocessing entry |
+| Conversion/confirmation | Convert accepted records, enqueue in-memory transfer slots and source mappings, display warnings and confirmation | Native flow retained; the classifier never clears source slots |
+| Save | Remote stage, source-game save, remote commit or rollback | Retain the local bankdata transaction below |
+
+Result `0` is not final transfer approval. The classifier does not duplicate
+the transfer-condition checks that follow. See
+[Per-slot transfer decisions](../docs/code-analysis.md#per-slot-transfer-decisions)
+for the full order, fields, and algorithms.
+
+### Retained 14 local checks
+
+Every check runs before the combined failure mask is interpreted. The
+classifier does not replace these rules.
+
+| Number | Check | Native handling |
+|---:|---|---|
+| 1 | Egg flag | Reject eggs |
+| 2 | Fused Kyurem form | Reject fused forms |
+| 3 | Held item | Nonfatal; report and remove the item |
+| 4 | Original Trainer name check position | Always succeeds locally; no new name handling |
+| 5 | Nickname check position | Always succeeds locally; no new name handling |
+| 6 | Species/origin-version combination | Reject combinations outside the native allowlist |
+| 7 | Event marker and selected origin Trainer IDs | Reject inconsistent native combinations |
+| 8 | Met/acquisition level | Reject zero |
+| 9 | Hatch location, acquisition level, origin generation | Reject inconsistent combinations |
+| 10 | Minimum capture level for non-hatched records | Reject values below the species requirement |
+| 11 | Language ID | Apply supported-language checks and the native special-origin exception |
+| 12 | Origin version | Reject zero |
+| 13 | Legacy origin and migration/met location | Reject combinations outside the native rules |
+| 14 | Legacy origin and hidden-ability marker | Reject incompatible combinations |
+
+Rejected records are excluded from this transfer's candidates, not erased from
+their source save. The classifier never resets them to empty slots.
 
 The offline remote-check state also clears transaction parameters left by a
 prior Original Mode attempt in the same process and sets the shared Bank status
@@ -205,7 +246,7 @@ state object; the native state exit path performs cleanup.
 | `fs_helpers.c` | Checked SD archive/file primitives shared by local loading and transactions |
 | `bankdata_redirect.c` | Local Bankdata loading, transfer-slot preservation, eligibility update, and crash-safe temporary write, commit, and rollback |
 | `local_ticket.c` | Runtime offline ticket and console-calendar calculation |
-| `local_validation.c` | Reconstructs the Gen 5 empty-slot result and isolates Gen 5/VC per-slot server results |
+| `local_validation.c` | Read-only Gen 5 integrity/empty-slot classification and Gen 5/VC per-slot result isolation |
 | `offline_flow.c` | Independent network, disconnect, remote-check, no-transfer, and save-delay state updates |
 | `patch_paths.c` | Shared SD path constants |
 | `patch_messages.py` | Appends and validates title/offline text in all ten language archives |

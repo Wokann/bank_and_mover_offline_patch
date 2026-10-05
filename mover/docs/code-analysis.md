@@ -1,9 +1,8 @@
 # Poke Mover Code Analysis
 
-This document records static-analysis conclusions about the supported stock
-binary only; it does not describe patch design or build instructions. See
-[`../src/README.md`](../src/README.md) for the maintained implementation,
-transaction rules, and independent build procedure.
+This document analyzes the supported stock binary and compares its execution
+order with the offline adaptation. See [`../src/README.md`](../src/README.md)
+for build instructions and transaction rules.
 
 ## Target and memory layout
 
@@ -24,11 +23,11 @@ The last non-zero image byte in `.text` is before `0x0028D1AC`. The ARM-aligned
 usable tail is `0x0028D1B0–0x0028E000`, or `0xE50` bytes. Ghidra's last
 referenced instruction/data location is `0x0028D188`, and its last function
 ends at `0x0028D18F`. The first current offline payload ends at `0x0028DC3D`,
-and the per-slot local-validation payload occupies `0x0028DDE0–0x0028DEB4`.
+and the per-slot local-validation payload occupies `0x0028DDE0–0x0028DF54`.
 The `0xE0` bytes at `0x0028DD00–0x0028DDE0` form a dedicated area reserved for
 the Transporter Redirect Patch, and `0x0028DFC0–0x0028E000` holds this project's
 version identifier. Future project payloads may use both
-`0x0028D1B0–0x0028DD00` and `0x0028DDE0–0x0028DFC0`, with `0x1CF` bytes currently
+`0x0028D1B0–0x0028DD00` and `0x0028DDE0–0x0028DFC0`, with `0x12F` bytes currently
 free in total.
 
 The zero-filled tails in `.rodata` (`0x002EBA58–0x002EC000`, `0x5A8` bytes)
@@ -92,8 +91,9 @@ layers:
 
 1. The source save must load and pass the native integrity checks; a Gen 5 save
    also selects a usable redundant side.
-2. Original Mode converts the source data into at most 30 candidates and submits
-   them to the remote service. After validating the response, the client obtains
+2. For Gen 5, Original Mode submits all 30 raw BOX1 records, including empty
+   slots, before running the 14 local checks or converting transfer records. VC
+   converts its candidates earlier. After validating the response, the client obtains
    one 32-bit result code for each of the 30 slots. A code tells the client to
    accept, skip an empty slot, reject on the server's decision, or normalize the
    nickname and/or Original Trainer name. The server's actual checks are not
@@ -112,7 +112,9 @@ per-slot decision code, not another Pokemon record and not the Gen 5 local
 14-check failure mask.
 
 In Offline Mode, this patch replaces only the unavailable layer-2 array: Gen 5
-empty records receive `20` and nonempty candidates receive `0`; VC writes `0`
+records are read-only classified for integrity: valid empty records receive
+`20`, nonempty candidates receive `0`, and explicit failures receive generic
+rejection result `1`; VC writes `0`
 after its earlier null-object skip. Layers 1, 3, and 4 retain their native flows.
 Local validation therefore still runs, but server-only rejections and name
 normalizations cannot be reproduced.
@@ -213,18 +215,58 @@ It does not run the Gen 5 14-entry local table.
 ### What this patch changes
 
 Original Mode submits all 30 candidates and, after validating the reply,
-replaces the complete result array. Offline Mode cannot obtain that array, but
-leaving it zeroed is incorrect for Gen 5: a native empty slot is a fixed
-template, not 136 zero bytes. Treating that encrypted empty-record body as
-result `0` runs it through the 14 checks and can produce the aggregate
-can't-send warning.
+replaces the complete result array. Source accessor `0x0019A6D8` directly
+locates BOX1 in the selected save side without normalizing empty records.
+`0x002B3FD4` is the template used to clear successfully transferred source
+slots, not a unique representation of every input empty slot.
 
-The patch makes only these adaptations:
+At the Gen 5 remote-request site `0x00245728`, Offline Mode performs this
+read-only classification:
 
-- At the Gen 5 remote-request site `0x00245728`, Offline Mode compares every
-  `0x88`-byte record with the complete native empty-slot template. Exact matches
-  receive result `20`; all other records receive `0`. Native local processing
-  resumes at `0x00245800`.
+1. Retain the preceding native save-block validation and redundant-side
+   selection. An unavailable source sets read-error substate `13` and returns
+   through `0x00246368` for the frame. The native error message, acknowledgment,
+   and exit path then run instead of candidate conversion.
+2. Read the native PID, control flags, checksum, and 64 body words. The native
+   exclusion bit `0x04` produces rejection result `1`.
+3. Honor decoded-body control bit `0x02`. Otherwise seed the decoder with the
+   stored checksum, update `seed = seed * 0x41C64E6D + 0x6073` with 32-bit
+   wraparound for each word, and XOR with `seed >> 16`. Only temporary values
+   are decoded; source bytes, control flags, and checksums are not rewritten.
+4. The low 16 bits of the sum of the decoded words must match the stored
+   checksum, or the result is `1`. Record checksums and save-block checksums
+   are independent; the patch does not repair either checksum.
+5. Use `(PID >> 13) & 31` with native block-order table `0x002B42E4` to locate
+   the species. A checksum-valid species `0` receives `20`; species `1–649`
+   receive `0`; other species receive `1`. An empty slot need not match a
+   complete byte template or have every remaining field zero. Level, language,
+   origin-version, and name rules are not applied before the empty-slot skip.
+6. Replace all 30 results before resuming native processing at `0x00245800`.
+   Result `1` is only a local generic rejection value; it does not reproduce
+   a specific server error code or the server's complete legality algorithm.
+
+### Original and offline execution order
+
+| Step | Gen 5 Original Mode | Gen 5 Offline Mode |
+|---|---|---|
+| Load source | Native read, save-block validation, redundant-side selection | Unchanged |
+| Prepare 30 slots | Copy raw `0x88`-byte records, including empty slots | Read-only integrity and species classification of the same buffer |
+| Obtain per-slot results | Send request, wait for and validate reply, consume 30 results | Fill `0`, `20`, or `1`; source failure follows the native error path |
+| Begin postprocessing | Clear in-memory candidate slots, warnings, and source-slot mapping | Resume the same native entry |
+| Consume results | Skip `20` without warning; reject failures; continue allowed records | Same branches |
+| Prepare nonempty record | Copy to temporary storage, apply remote name fixes, ensure decoding and block locations | Native copying/decoding retained; no name-fix codes generated |
+| Local decisions | Run all 14 checks and interpret the combined failure mask | Unchanged; see the complete table above |
+| Convert and enqueue | Convert successful records, write in-memory transfer slots and source mapping | Unchanged |
+| Confirm and save | Display warnings/confirmation, then run the native save transaction | Retain the existing local bankdata transaction; classification never edits source records |
+
+Result `0` permits further checks; it is not final transfer approval. Rejected
+records never enter the successful source-slot mapping. A can't-send warning
+excludes a candidate from this transfer, not from its source save. Successfully
+enqueued candidates are handled later by the native confirmed-transfer save
+flow.
+
+The remaining adaptations are:
+
 - At the VC remote-request site `0x002460B8`, Offline Mode writes `0` to all 30
   results and resumes at `0x002461D0`. VC already skips null candidates before
   consulting the result, so a synthetic result `20` is unnecessary.
@@ -235,10 +277,11 @@ The patch makes only these adaptations:
   functions, failure-bit postprocessing, VC null/item/egg logic, and candidate
   insertion are unchanged.
 
-Offline Mode consequently retains every local check above but does not recreate
-server-only rejection and name-normalization results. Clearing stale remote
-transaction parameters in the same commit is session-state isolation, not a
-Pokemon legality check.
+Offline Mode retains every native local check and adds locally verifiable
+record integrity and empty-slot classification. Unknown server-only rejection
+rules and name normalization are not recreated. Clearing stale remote
+transaction parameters is session-state isolation, not a Pokemon legality
+check.
 
 ## BankObject and bankdata
 

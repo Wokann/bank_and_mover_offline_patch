@@ -257,6 +257,8 @@ CombinePatch_Gen5Validation:
     bne @@original
     mov r0,r5
     bl OfflinePatch_PrepareGen5Validation
+    cmp r0,#0
+    beq MoverGetPokemon_UpdateWaitingReturn
     b MoverGetPokemon_Gen5LocalContinuation
 @@original:
     ldr r0,=0x003293A8

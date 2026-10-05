@@ -216,6 +216,7 @@ def main() -> None:
         0x002455D0: 0xE92D4FF0,
         0x00246A5C: 0xE3A0100F,
         0x00245728: 0xE59F0C74,
+        0x00246368: 0xE28DD0FC,
         0x002460B8: 0xE59F02E4,
         0x00248360: 0xE92D4070,
         0x00248500: 0xE3A0100F,
@@ -291,15 +292,30 @@ def main() -> None:
     for wrapper_name, helper_name, local_continuation, original_continuation in validation_routes:
         wrapper = sym[wrapper_name]
         expected_branches = (
-            (wrapper + 0x0C, wrapper + 0x1C, False, 0x1),
+            (wrapper + 0x0C, wrapper + (0x24 if wrapper_name ==
+                "combinepatch_gen5validation" else 0x1C), False, 0x1),
             (wrapper + 0x14, sym[helper_name], True, 0xE),
-            (wrapper + 0x18, local_continuation, False, 0xE),
-            (wrapper + 0x20, original_continuation, False, 0xE),
+            (wrapper + (0x20 if wrapper_name == "combinepatch_gen5validation"
+                else 0x18), local_continuation, False, 0xE),
+            (wrapper + (0x28 if wrapper_name == "combinepatch_gen5validation"
+                else 0x20), original_continuation, False, 0xE),
         )
         for address, target, link, condition in expected_branches:
             actual_target, actual_link, actual_condition = branch_target(patched, address)
             if (actual_target, actual_link, actual_condition) != (target, link, condition):
                 raise ValueError(f"incorrect validation route at {address:08X}")
+        if wrapper_name == "combinepatch_gen5validation":
+            if word(patched, wrapper + 0x18) != 0xE3500000:
+                raise ValueError("Gen 5 validation does not test preparation failure")
+            if branch_target(patched, wrapper + 0x1C) != (0x00246368, False, 0x0):
+                raise ValueError("Gen 5 source failure does not return through stock cleanup")
+
+    # Keep the native local checks, conversion, and result consumer unchanged.
+    # 保持原版本地检查、转换器和逐槽结果消费代码不变。
+    for start, end in ((0x00241574, 0x0024212C), (0x00242F8C, 0x00243448),
+                       (0x00245800, 0x002460B8), (0x002461C8, 0x00246A2C)):
+        if patched[start - IMAGE_BASE:end - IMAGE_BASE] != base[start - IMAGE_BASE:end - IMAGE_BASE]:
+            raise ValueError(f"native validation/conversion range changed: {start:08X}-{end:08X}")
 
     messages = load_helper(Path(__file__).with_name("patch_messages.py"))
     for archive in messages.ARCHIVES:

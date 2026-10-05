@@ -72,6 +72,8 @@
 ; 原版候选转换状态中嵌入的远端合法性检查。
 .definelabel MoverGetPokemon_SkipGen5RemoteValidation, 0x00245728
 .definelabel MoverGetPokemon_Gen5LocalContinuation,    0x00245800
+.definelabel MoverGetPokemon_UpdateWaitingReturn,    0x00246368
+.definelabel MoverGen5_BlockOrderTable,               0x002B42E4
 .definelabel MoverGetPokemon_SkipGen12RemoteValidation,0x002460B8
 .definelabel MoverGetPokemon_Gen12LocalContinuation,   0x002461D0
 
