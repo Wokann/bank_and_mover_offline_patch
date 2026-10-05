@@ -62,6 +62,8 @@
     b CombinePatch_Gen12Validation
 .org MoverNoTransferState_Update
     b CombinePatch_NoTransferUpdate
+.org MoverNoTransfer_BankMessageIdLoad
+    bl CombinePatch_SelectBankConnectMessage
 .org MoverDisconnectState_Update
     b CombinePatch_DisconnectUpdate
 .org MoverDisconnectState_Initialize + 0x54

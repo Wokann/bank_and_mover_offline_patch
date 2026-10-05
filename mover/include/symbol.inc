@@ -61,6 +61,7 @@
 .definelabel MoverRemoteCheckState_Update,      0x00248814
 .definelabel MoverTransferEligibilityState_Update, 0x00248C68
 .definelabel MoverNoTransferState_Update,         0x00248360
+.definelabel MoverNoTransfer_BankMessageIdLoad,   0x00248500
 .definelabel MoverTransferCommitState_Update,      0x0024A0C4
 .definelabel MoverDownload_ConsumeBankData,        0x0025C978
 .definelabel MoverGetPokemonState_Update,           0x002455D0
