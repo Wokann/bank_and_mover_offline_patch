@@ -24,7 +24,7 @@ The ExHeader declares the `.text` content end at `0x0028D1AC`, while the last
 mapped page ends at `0x0028E000`. Ghidra's last referenced instruction/data
 location is `0x0028D188`, and its last function ends at `0x0028D18F`.
 Luma installs its LayeredFS payload at the declared content end when the page
-padding is sufficient, after applying IPS. This project leaves
+padding is sufficient, after applying code patches. This project leaves
 `0x0028D1AC–0x0028D2DC` (`0x130` bytes) untouched for it and aligns its own tail
 start to `0x0028D2E0`. The inspected Luma payload is `0x114` bytes; this reservation
 must be rechecked if that payload grows. See the official
@@ -36,23 +36,65 @@ The project tail area is `0x0028D2E0–0x0028DFC0`; the final
 identifier. The integrated Gen 5 source redirect owns the native cartridge I/O
 hooks, so the external Transporter Redirect Patch's `0xE0` reservation is
 removed. Assembly limits and static verification still protect LayeredFS and
-the version marker.
+the version marker. All feature objects use the added-page layout below;
+environment detection changes only the startup permission-result policy.
 
 `0x00261C74–0x00262C10` is part of an active native global-registration
 initializer, not a reclaimable gap. Startup enters `0x00102ADC`, which walks
 the PREL32 constructor table at `0x002EB744–0x002EBA58`. Entry `0x002EB7BC`
 stores `0xFFF764B8`; adding it to the entry address gives `0x00261C74`.
 This call is indirect and therefore absent from direct-branch and absolute-pointer
-searches. The current mode wrappers, shared FS, and NDS scanner overwrite this
-initializer while its constructor-table entry remains unchanged. This is a
-known startup risk, not a safe code cave. Disabling exception handling to
-continue execution does not establish safety. No native ticket-job or
-free-campaign function is reclaimed.
+searches. The entire initializer and constructor table match the stock image
+byte for byte. No native ticket-job or free-campaign function is reclaimed.
 
 | Payload area | Modules | Used end / remaining space |
 |---|---|---|
-| Overwritten initializer `0x00261C74–0x00262C10` | ARM dispatch and native trampolines, shared FS, NDS scanner | `0x00262BB8` / `0x58` bytes |
-| Text tail `0x0028D2E0–0x0028DFC0` | ARM entries, local ticket, Bankdata, offline flow, paths, classification, UTF-16 FS | `0x0028DFA6` / `0x1A` bytes |
+| Text tail `0x0028D2E0–0x0028DFC0`: mapped executable padding | Startup trampoline and automatic-environment `code_expansion.o` | `0x0028D3B0` / `0xC10` bytes |
+| Added pages `0x00365000–0x00367000`: extended data, executable after startup | All mode wrappers, native trampolines, and feature objects | `0x00366C06` / `0x3FA` bytes |
+
+The startup hook redirects only the call at `0x00100010` to the small loader.
+It preserves `r0–r12/LR`, duplicates the current-process pseudo-handle with SVC
+`0x27`, queries SVC `0x2A` for the environment, and uses the real handle for
+SVC `0x70` (operation `6`, permission `7`) on
+the two added pages, closes the handle, restores registers, and continues the
+native constructor walker at `0x00102ADC` in Thumb state. Hardware errors stop
+through SVC Break. Only the identified-Azahar compatibility case below may
+continue without a successful permission change.
+
+The matching ExHeader retains all original segment bases and text/rodata sizes.
+It extends data to `0x7B` pages, ending at `0x00367000`, sets BSS size to zero,
+and grants only required SVC bits while preserving existing descriptors.
+Original BSS is explicit zero-filled image data at unchanged addresses;
+`0x00364000–0x00365000` is also a zero-filled RW separator, not an unmapped
+guard page. This title already allows `0x23/0x27/0x2A/0x3C`, so only `0x70`
+is added. The design follows
+[Magikoopa's data-tail expansion](https://github.com/RicBent/Magikoopa/blob/master/MagikoopaUI/patchmaker.cpp),
+but retains the actual text size so Luma's LayeredFS injection point does not move.
+The added pages load as RW data and alone become executable; old data/BSS and
+the rest of the process are not globally made executable.
+
+### Shared BPS loading and automatic environment handling
+
+The BPS source length is `0x22A000`, target length is `0x267000`, and metadata
+length is zero. Luma allocates the target range from the expanded ExHeader before
+patching; unmodified Azahar's BPS implementation resizes its image to the target
+length before reconstructing it. Both obtain the same bytes and map data through
+`0x00367000`. The original BSS-clear bounds `0x003293FC–0x003638A4` remain intact.
+See [Luma's BPS decoder](https://github.com/LumaTeam/Luma3DS/blob/master/sysmodules/loader/source/bps_patcher.cpp)
+and [Azahar's BPS resizing](https://github.com/azahar-emu/azahar/blob/9e6f523a57fac9564ac0bf8286db3c3702d301ec/src/core/file_sys/patch.cpp#L260-L280).
+
+`GetSystemInfo(0x20000, 0)` identifies Azahar only when its result is `0`, output
+low word is `2`, and high word is `0`. Luma hardware returns `1` and output `0`,
+so it cannot select that branch. The process then calls SVC `0x70` in every
+environment. Result `0` succeeds normally. A nonzero result is accepted only
+when Azahar was identified and the result equals the input real process handle,
+matching its unimplemented handler's unchanged `r0`. Negative errors, unrelated
+positive results, unknown environments, and handle creation/closing errors fail.
+This is not a generic "ignore SVC errors" policy. A missing-SVC emulator still
+relies on permissive instruction fetching; an implemented SVC is used normally.
+References: [Azahar's identity query](https://github.com/azahar-emu/azahar/blob/9e6f523a57fac9564ac0bf8286db3c3702d301ec/src/core/hle/kernel/svc.cpp#L1866-L1870),
+[unimplemented handler](https://github.com/azahar-emu/azahar/blob/9e6f523a57fac9564ac0bf8286db3c3702d301ec/src/core/hle/kernel/svc.cpp#L2440-L2448),
+and [Luma's hardware query](https://github.com/LumaTeam/Luma3DS/blob/master/k11_extension/source/svc/GetSystemInfo.c#L218-L222).
 
 The ticket module remains ARM. Other functional modules use Thumb; shared
 TLS/SVC primitives remain non-inlined ARM functions called through literal
@@ -76,9 +118,100 @@ The remaining native ticket-state and job bytes are unchanged.
 The zero-filled tails in `.rodata` (`0x002EBA58–0x002EC000`, `0x5A8` bytes)
 and the code image padding at `0x003293FC–0x0032A000` (`0xC04` bytes) are
 non-executable. The latter is the start of the logical runtime BSS, not free
-data. Static zeros do not establish the absence of references. Expanding only
-the ExHeader `.text` size would overlap the existing `.rodata` mapping; the
-current patch does not enlarge the executable mapping.
+data. Static zeros do not establish the absence of references. Expanding only the ExHeader `.text` size would overlap
+the existing `.rodata` mapping. The SVC layout instead extends data, materializes
+BSS, and pairs its BPS with an ExHeader and startup permission change, without
+relocating the original program.
+
+## Expansion development and approach comparison
+
+### Development sequence
+
+1. **Magikoopa-based hardware expansion.** Materialize original BSS as zeros,
+   extend the loaded data pages, place a small bootstrap in the original text
+   padding, and make the added pages executable through SVC `0x70`. Existing
+   variables stay at their addresses without relocating rodata, data, or stock
+   code. The initial IPS failed to load in unmodified Azahar before reaching SVC.
+   Reference: [Magikoopa's image/ExHeader preparation](https://github.com/RicBent/Magikoopa/blob/master/MagikoopaUI/patchmaker.cpp).
+2. **Implement both missing emulator capabilities.** The personal
+   [`svc112` branch](https://github.com/Wokann/azahar/tree/svc112) addresses two
+   separate problems: its
+   [loader](https://github.com/Wokann/azahar/blob/svc112/src/core/loader/ncch.cpp)
+   allocates the complete segment-layout buffer before patching; its
+   [SVC dispatch](https://github.com/Wokann/azahar/blob/svc112/src/core/hle/kernel/svc.cpp)
+   and [process-memory implementation](https://github.com/Wokann/azahar/blob/svc112/src/core/hle/kernel/process.cpp)
+   validate the real process handle, perform the Protect operation needed here,
+   and invalidate the code cache. This is not a success-return stub: the loader
+   enables IPS placement, while SVC implements the permission change.
+3. **Try a separate Citra layout.**
+   [oot3d_practice_menu's instructions](https://github.com/gamestabled/oot3d_practice_menu/blob/master/README.md)
+   distribute separate patches and ExHeaders for hardware and Citra. Its
+   [hardware header](https://github.com/gamestabled/oot3d_practice_menu/blob/master/exheader.bin)
+   extends data with zero BSS; its
+   [Citra header](https://github.com/gamestabled/oot3d_practice_menu/blob/master/exheader_citra.bin)
+   retains original data and enlarges BSS. The resulting experiment here added
+   `0x3D000` BSS to the `0x22A000` image, giving the old emulator a `0x267000`
+   patch buffer, and used a compile-time permission bypass. The reference's
+   [shared loader](https://github.com/gamestabled/oot3d_practice_menu/blob/master/src/loader.c)
+   still calls SVC `0x70` but rejects only negative results, so an unhandled
+   call retaining a positive handle can continue. This neither implements SVC
+   nor means its Citra build macro removes that call.
+4. **Unify loading and permission handling.** BPS now reconstructs an image of
+   the target length without using additional BSS as an emulator buffer trick.
+   Hardware and SVC-capable Azahar perform the permission change normally;
+   missing-SVC Azahar continues only under the identity/result conditions above.
+   The initializer overwrite and platform-layout switches are removed. Every
+   environment uses the same ExHeader and payload layout.
+
+### Why the earlier approaches are not interchangeable
+
+| Project approach | Image loading | Execution of added pages | Applicable environment |
+|---|---|---|---|
+| Initial hardware IPS | Extended data, zero BSS | SVC `0x70` must succeed | Hardware or `svc112` with both loader and SVC fixes |
+| Citra-style IPS experiment | Original data, enlarged BSS for emulator patch buffering | Compile-time bypass; permissive instruction fetching | Emulator only, not hardware |
+| Final unified BPS | Extended data, zero BSS; target-length reconstruction | Normal SVC, or narrowly identified Azahar unhandled-call compatibility | Same files for hardware and the two tested Azahar configurations |
+
+Loading and execution are separate gates. Before patching, the old Azahar
+[loader](https://github.com/azahar-emu/azahar/blob/9e6f523a57fac9564ac0bf8286db3c3702d301ec/src/core/loader/ncch.cpp)
+extends the original image only by BSS, not by the enlarged data-page count;
+its [IPS decoder](https://github.com/azahar-emu/azahar/blob/9e6f523a57fac9564ac0bf8286db3c3702d301ec/src/core/file_sys/patch.cpp)
+rejects out-of-buffer records. With zero BSS, the hardware IPS therefore fails
+to apply before startup. Even after resolving that gate, an unimplemented SVC
+does not return normal success and fails the earlier strict startup check.
+
+Conversely, [Luma's loader](https://github.com/LumaTeam/Luma3DS/blob/master/sysmodules/loader/source/loader.c)
+allocates the patch buffer from loaded text/rodata/data pages, **excluding extra
+BSS**. Enlarged BSS neither provides hardware IPS with that buffer nor loads
+file payloads as data; it denotes zero-initialized memory. Hardware also needs
+real execute permission, so an emulator bypass remains insufficient even if
+loading is solved separately. The headers differ in loading and permissions,
+not machine performance, and cannot simply be exchanged.
+
+The final approach handles both gates: BPS reconstructs the full target image,
+the expanded-data ExHeader specifies its mapping, and the bootstrap handles
+permissions and environment detection. Hardware errors are not ignored, and
+the missing-SVC Azahar route does not actually grant execute permission. Exact
+result checks and memory boundaries are documented above.
+
+### Operation and scope of the new approach
+
+Build with `make -C mover` and install `code.bps`, `exheader.bin`, and `romfs/`
+together. Use `SD:/luma/titles/00040000000C9C00/` with Luma game patching enabled
+on hardware, or the user directory's `load/mods/00040000000C9C00/` with a full
+`0x800`-byte ExHeader in Azahar. Remove stale `code.ips` and `code.bin` from that
+directory. No expansion macro or platform-specific layout is required. The
+ticket-test switch is separate and is not automatically changed by this detection.
+
+This project's new contribution is the unified combination of fixed-address
+data-tail expansion, BPS target-length loading, and Azahar identity/unhandled-SVC
+result detection, not a new kernel expansion primitive. The underlying mechanisms
+have public precedents. This investigation did not establish whether the exact
+combination already exists elsewhere, so it does not claim worldwide novelty.
+Comparisons of the reference projects come from their public source and ExHeader
+fields; they were not run during this investigation. Missing-SVC compatibility
+is limited to the tested Azahar behavior, not every Citra fork or a future emulator
+that strictly enforces instruction-fetch permissions. An implemented SVC should
+continue to use the normal success path.
 
 ## Ticket state and local results
 

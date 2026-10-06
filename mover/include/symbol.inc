@@ -17,6 +17,10 @@
 .definelabel DataActualEnd,                     0x003293FC
 .definelabel BssActualEnd,                      0x003638A4
 .definelabel ReadWriteMappedEnd,                0x00364000
+.definelabel CodeExpansion_PayloadStart,        0x00365000
+.definelabel CodeExpansion_PayloadSize,         0x2000
+.definelabel MoverStartup_ConstructorCall,       0x00100010
+.definelabel MoverStartup_RunConstructors,      0x00102ADC
 
 ; The final mapped read/write page extends past the logical end of .bss. Keep
 ; all patch-owned runtime words in the last 16 bytes of that zero-filled page.
@@ -129,14 +133,6 @@
 .definelabel MoverSave_AfterCommitState,         0x0024A3EC
 .definelabel MoverSave_RollbackCall,             0x0024A420
 .definelabel MoverSave_AfterRollbackState,       0x0024A428
-
-; Existing payload bounds, not a proven-safe cave. Native PREL32 constructor
-; entry 0x002EB7BC calls 0x00261C74; its overlap is a known issue deferred from
-; the source-redirection change. Do not extend the overwritten range.
-; 现有荷载边界，并非已证明安全的空洞。原版 PREL32 构造表项 0x002EB7BC 会调用
-; 0x00261C74；该覆盖问题在来源重定向之外另行处理，不得扩大覆盖范围。
-.definelabel MoverCombine_CodeCaveStart,          0x00261C74
-.definelabel MoverCombine_CodeCaveEnd,            0x00262C10
 
 ; -----------------------------------------------------------------------------
 ; HTTP, multipart, and HPP jobs

@@ -5,11 +5,14 @@ program's memory map, network path, BankObject, and Transport Box layout. This
 document covers only the maintained patch design, implementation, and
 independent build procedure.
 
-The current payload overwrites `0x00261C74–0x00262C10`, an active native
-startup initializer rather than a safe code cave. This is a known startup
-risk, documented in the analysis. Continuing after disabling exception
-handling does not make the layout safe; static checks and source-scanning
-tests do not establish safe end-to-end operation.
+The build preserves the native startup initializer and places new features in
+independent pages after the original BSS. A single `code.bps` and matching
+`exheader.bin` serve Luma and Azahar: BPS declares the expanded image length,
+and the startup helper automatically handles permission changes. Hardware must
+successfully execute SVC `0x70`; only identified Azahar may continue when an
+unimplemented SVC leaves the input process handle unchanged. No layout switch
+or initializer-overwrite fallback is used. Static checks do not replace console
+or emulator end-to-end testing; exact boundaries are documented in the analysis.
 
 This is the maintained Poke Mover v5.5.0 patch for base title
 `00040000000C9C00`. It combines the verified standalone offline behavior with
@@ -359,6 +362,7 @@ state object; the native state exit path performs cleanup.
 | File | Role |
 |---|---|
 | `src/main.s` | Title-mode latch, offline-hook dispatch, and shared source entries/native trampolines |
+| `src/code_expansion.c` / `include/code_expansion.h` | Identify Azahar, obtain a real process handle, and enable execution only on the added pages |
 | `src/fs_helpers.c` / `include/fs_helpers.h` | Shared checked SD operations; TLS/SVC primitives remain ARM |
 | `src/nds_fs.c` / `include/nds_fs.h` | UTF-16 directory enumeration and ranged file I/O |
 | `src/nds_sources.c` / `include/nds_sources.h` | Per-frame Gen 5 source discovery, native validation, ranking, and save-I/O dispatch |
@@ -369,13 +373,14 @@ state object; the native state exit path performs cleanup.
 | `src/patch_paths.c` | Shared SD path constants |
 | `src/patch_messages.py` | Appends and validates title/offline text in all ten language archives |
 | `tools/message_archive.py` | Self-contained GARC and encrypted message-file codec |
-| `tools/verify_patch.py` | Verifies the base hash, code regions, hooks, native replay, IPS reconstruction, and resources |
-| `Makefile` | Compiles functional objects, enforces payload bounds, creates IPS, rebuilds messages, and writes the release tree |
+| `tools/verify_patch.py` | Verifies the base hash, code regions, preserved constructors, hooks, native replay, BPS reconstruction/CRCs, and resources |
+| `tools/prepare_expanded_code.py` | Materialize BSS at its original addresses, extend data pages, authorize required SVCs, and generate the matching ExHeader |
+| `Makefile` | Compiles functional objects, enforces payload bounds, creates BPS, rebuilds messages, and writes the release tree |
 
 ## Independent build and installation
 
 The Mover subproject does not depend on Bank source or build artifacts. It can
-compile the payload, create the IPS, rebuild all ten language archives, and run
+compile the payload, create the BPS, rebuild all ten language archives, and run
 static verification independently. At runtime, Offline Mode still requires a
 `sd:/3ds/Bank/bankdata.bin` previously downloaded or initialized by Bank.
 
@@ -391,11 +396,13 @@ Dump the inputs from the user's own Mover base title `00040000000C9C00`:
 2. Select the executable `.app`, then run `NCCH image options...` →
    `Extract .code`.
 3. Select the same `.app`, run `NCCH image options...` →
-   `Mount image to drive`, and copy the complete mounted `romfs` directory.
+   `Mount image to drive`, and copy the complete mounted `romfs` directory and
+   root `extheader.bin`. Rename the latter to `exheader.bin` in the layout below.
 4. Place the inputs in this layout:
 
 ```text
 mover/rom/
+├── exheader.bin
 ├── exefs/
 │   └── 00040000000C9C00.dec.code
 └── romfs/
@@ -406,6 +413,11 @@ The base code must be `2,269,184` bytes with SHA-1
 `583859C1E874D11650EFBDDE51F470ECF96900C4`. The build checks the input again.
 Do not commit or redistribute the code image or RomFS. `ROMFS_SOURCE` may
 override the default RomFS path when required.
+
+The build also requires the original ExHeader from the same base
+title (`0x400` or `0x800` bytes), not another game, update, or modified header.
+Set `EXHEADER=/path/to/exheader.bin` to use a different input location. The tool
+does not change that input. GodMode9's mounted filename is `extheader.bin`.
 
 Build Mover independently from the repository root:
 
@@ -430,23 +442,54 @@ make -C mover ARMIPS=/path/to/armips IPS_TOOL=/path/to/flips
 
 The build compiles the functional C modules into separate objects while
 retaining module-local inlining, and emits an `.s` disassembly beside each
-object for inspection. armips imports those objects into the initializer-overwrite
-region and executable text tail, subject to the known startup risk above.
+object for inspection. armips imports those objects consecutively into the
+added payload pages, with matching code/ExHeader preparation.
 The local ticket module and
 TLS/SVC primitives use ARM; the filesystem, source scanner, local classification,
 Bankdata and offline-flow modules use Thumb with explicit interworking entries.
-Floating IPS creates `code.ips`, the ten-language RomFS is rebuilt, and the static
+Floating IPS creates `code.bps`, the ten-language RomFS is rebuilt, and the static
 verifier checks the complete result. The complete output is:
 
 ```text
 release/00040000000C9C00/
-├── code.ips
+├── code.bps
+├── exheader.bin
 └── romfs/
 ```
 
+Always install `code.bps`, `exheader.bin`, and `romfs/` together. Remove stale
+`code.ips` or `code.bin` files from the same mod directory; both loaders can
+otherwise apply another patch or load another base image. BPS also checks that
+the source code matches the supported version. The build removes the generated
+`code.ips` from its own Mover release directory.
+
+The text-tail bootstrap obtains a real process handle through `DuplicateHandle`,
+queries `GetSystemInfo(0x20000, 0)`, and calls `ControlProcessMemory` with operation
+`6` and permission `7` only for `0x00365000–0x00367000`. SVC result `0` continues
+normally. The only nonzero compatibility case is a successful environment query
+with emulator ID `2`, high word `0`, and an SVC result equal to its input process
+handle. Hardware and unknown environments retain strict result checks; negative
+results and every other nonzero result stop startup. Handle creation and closing
+must succeed. Registers are restored before continuing the native constructor
+walker. Original segment bases, BSS variables, LayeredFS, and the version marker
+do not move; Offline/Online business dispatch and the ticket test byte are unchanged.
+
+Unmodified Azahar can load this BPS without implementing SVC `0x70`; this path
+relies on its permissive instruction fetching and is not a successful permission
+change. [Wokann/azahar's svc112 branch](https://github.com/Wokann/azahar/tree/svc112)
+instead executes the permission change normally. Install the same `code.bps`,
+full `0x800`-byte `exheader.bin`, and `romfs/` together in Azahar's
+`load/mods/00040000000C9C00/` directory. Its ExHeader override is not read from
+the emulated `sdmc/luma/titles/` path. Static checks are not end-to-end verification.
+
+For the progression from Magikoopa-based hardware expansion, personal emulator
+loader/SVC fixes, and the OOT dual-layout reference to unified BPS loading, see
+[Expansion development and approach comparison](docs/code-analysis.md#expansion-development-and-approach-comparison).
+That section explains the differences and compatibility limits.
+
 The verifier checks the base hash, executable payload ranges, every ARM hook,
 overwritten stock instructions, Offline/Online mode dispatch and continuation
-sites, byte-for-byte IPS reconstruction, and all stock and added localized
+sites, byte-for-byte BPS reconstruction and all three CRCs, and all stock and added localized
 messages. Copy `00040000000C9C00` to `SD:/luma/titles/` and enable Luma game
 patching. Back up the SD card and source-game saves before real-console use.
 
@@ -462,6 +505,11 @@ external Transporter redirect patch together with this patch.
 
 ## External open-source references
 
+- [Magikoopa's expansion implementation](https://github.com/RicBent/Magikoopa/blob/master/MagikoopaUI/patchmaker.cpp)
+  informed fixed-address data-tail expansion, BSS materialization, and startup
+  permission handling.
+- [oot3d_practice_menu](https://github.com/gamestabled/oot3d_practice_menu)
+  provided the hardware/Citra ExHeader-layout and loader-result comparison.
 - [zaksabeast/Transporter-Offline-Patch](https://github.com/zaksabeast/Transporter-Offline-Patch)
   provided a public precedent for replacing Poke Mover network-facing states,
   including the two legality-request bypass locations.

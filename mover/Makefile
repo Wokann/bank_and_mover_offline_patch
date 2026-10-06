@@ -1,4 +1,4 @@
-.PHONY: all clean verify FORCE layeredfs
+.PHONY: all clean verify FORCE layeredfs exheader
 .DEFAULT_GOAL := all
 
 export MSYS2_ARG_CONV_EXCL := *
@@ -12,17 +12,23 @@ TOOLS := tools
 ARMIPS ?= ../$(TOOLS)/armips/armips
 IPS_TOOL ?= $(TOOLS)/flips/flips
 PYTHON ?= python3
-BUILD := build
+BUILD ?= build
 TITLE_ID := 00040000000C9C00
 BASE := rom/exefs/00040000000C9C00.dec.code
 PATCHED := $(BUILD)/00040000000C9C00.dec.code
-RELEASE_ROOT := ../release
+RELEASE_ROOT ?= ../release
 RELEASE_TITLE := $(RELEASE_ROOT)/$(TITLE_ID)
-RELEASE_IPS := $(RELEASE_TITLE)/code.ips
+RELEASE_BPS := $(RELEASE_TITLE)/code.bps
 RELEASE_ROMFS := $(RELEASE_TITLE)/romfs
 ROMFS_SOURCE ?= rom/romfs
 OBJECTS := $(patsubst $(SRC)/%.c,$(BUILD)/%.o,$(wildcard $(SRC)/*.c))
 SYMBOLS := $(BUILD)/armips-symbols.txt
+EXHEADER ?= rom/exheader.bin
+PREPARED_BASE := $(BUILD)/expanded-base.code
+EXPANDED_EXHEADER := $(BUILD)/exheader.bin
+RELEASE_EXHEADER := $(RELEASE_TITLE)/exheader.bin
+ASSEMBLY_BASE := $(PREPARED_BASE)
+VERIFY_EXHEADER := --base-exheader "$(EXHEADER)" --exheader "$(RELEASE_EXHEADER)"
 
 CC := $(DEVKITARM)/bin/arm-none-eabi-gcc
 OBJDUMP := $(DEVKITARM)/bin/arm-none-eabi-objdump
@@ -39,7 +45,7 @@ $(BUILD)/offline_flow.o $(BUILD)/nds_fs.o $(BUILD)/nds_sources.o: CFLAGS := $(TH
 
 -include $(OBJECTS:.o=.d)
 
-all: $(RELEASE_IPS) layeredfs verify
+all: $(RELEASE_BPS) exheader layeredfs verify
 
 $(BUILD):
 	mkdir -p "$@"
@@ -48,21 +54,30 @@ $(BUILD)/%.o: $(SRC)/%.c | $(BUILD)
 	"$(CC)" $(CFLAGS) -c "$<" -o "$@"
 	"$(OBJDUMP)" -dr -z "$@" > "$(@:.o=.s)"
 
-$(PATCHED): FORCE $(SRC)/main.s $(OBJECTS) $(BASE) $(TOOLS)/verify_patch.py
-	"$(PYTHON)" -B -c "from pathlib import Path; from tools.verify_patch import verify_code_cave; verify_code_cave(Path('$(BASE)').read_bytes())"
-	cd "$(SRC)" && "$(ARMIPS)" -erroronwarning -stat -sym "../$(SYMBOLS)" main.s
+$(PREPARED_BASE): FORCE $(BASE) $(EXHEADER) $(TOOLS)/prepare_expanded_code.py | $(BUILD)
+	"$(PYTHON)" -B -m tools.prepare_expanded_code prepare --base-code "$(BASE)" --base-exheader "$(EXHEADER)" --output-code "$@" --output-exheader "$(EXPANDED_EXHEADER)" --payload-start 0x00365000 --payload-size 0x2000
 
-$(RELEASE_IPS): $(PATCHED)
+$(PATCHED): FORCE $(SRC)/main.s $(OBJECTS) $(ASSEMBLY_BASE) $(TOOLS)/verify_patch.py
+	cd "$(SRC)" && "$(ARMIPS)" -erroronwarning -stat -sym "../$(SYMBOLS)" -strequ INPUT_CODE "../$(ASSEMBLY_BASE)" -strequ OUTPUT_CODE "../$(PATCHED)" -strequ BUILD_DIRECTORY "../$(BUILD)" main.s
+
+$(RELEASE_EXHEADER): $(PATCHED)
+	mkdir -p "$(dir $@)"
+	cp "$(EXPANDED_EXHEADER)" "$@"
+
+exheader: $(RELEASE_EXHEADER)
+
+$(RELEASE_BPS): $(PATCHED)
 	mkdir -p "$(dir $@)"
 	rm -f "$@"
-	"$(IPS_TOOL)" --create --ips "$(BASE)" "$(PATCHED)" "$@"
+	"$(IPS_TOOL)" --create --bps --exact "$(BASE)" "$(PATCHED)" "$@"
+	rm -f "$(RELEASE_TITLE)/code.ips"
 
 layeredfs: $(SRC)/patch_messages.py $(TOOLS)/message_archive.py
 	rm -rf "$(RELEASE_ROMFS)"
 	"$(PYTHON)" -B -m src.patch_messages --source-romfs "$(ROMFS_SOURCE)" --output-romfs "$(RELEASE_ROMFS)"
 
-verify: $(PATCHED) $(RELEASE_IPS) layeredfs $(TOOLS)/verify_patch.py
-	"$(PYTHON)" -B -m tools.verify_patch --base "$(BASE)" --patched "$(PATCHED)" --symbols "$(SYMBOLS)" --ips "$(RELEASE_IPS)" --source-romfs "$(ROMFS_SOURCE)" --output-romfs "$(RELEASE_ROMFS)"
+verify: $(PATCHED) $(RELEASE_BPS) exheader layeredfs $(TOOLS)/verify_patch.py
+	"$(PYTHON)" -B -m tools.verify_patch --base "$(BASE)" --patched "$(PATCHED)" --symbols "$(SYMBOLS)" --bps "$(RELEASE_BPS)" --source-romfs "$(ROMFS_SOURCE)" --output-romfs "$(RELEASE_ROMFS)" $(VERIFY_EXHEADER)
 
 clean:
 	rm -rf "$(RELEASE_TITLE)" "$(BUILD)"

@@ -10,15 +10,16 @@ import argparse
 import hashlib
 import importlib.util
 import sys
+import zlib
 from pathlib import Path
 
 
 IMAGE_BASE = 0x00100000
 EXPECTED_BASE_SHA256 = "001C20ADA74016507C969BB44A0A50F8EDF803EC06A3FC46834263BA8DF0FD2F"
-CAVE_START = 0x00261C74
-CAVE_END = 0x00262C10
+INITIALIZER_START = 0x00261C74
+INITIALIZER_END = 0x00262C10
 TEXT_ACTUAL_END = 0x0028D1AC
-FOLLOWING_STOCK_CODE_START = CAVE_END
+FOLLOWING_STOCK_CODE_START = INITIALIZER_END
 FOLLOWING_STOCK_CODE_END = 0x002638D8
 TEXT_MAPPED_END = 0x0028E000
 LAYEREDFS_RESERVED_SIZE = 0x130
@@ -26,7 +27,8 @@ VERSION_STORAGE_SIZE = 0x40
 VERSION_STORAGE_START = TEXT_MAPPED_END - VERSION_STORAGE_SIZE
 VERSION_IDENTIFIER = b"offline_patch_v1.0.0\0"
 PAYLOAD_START = 0x0028D2E0
-PAYLOAD_END = VERSION_STORAGE_START
+EXPANDED_PAYLOAD_START = 0x00365000
+EXPANDED_PAYLOAD_SIZE = 0x2000
 TICKET_INTERFACES = (
     (0x00249754, "initialize", "ticketjob_initialize", 0x0023D3C0),
     (0x00249774, "poll", "ticketjob_poll", 0x0023E230),
@@ -56,7 +58,7 @@ def word(image: bytes, address: int) -> int:
     return int.from_bytes(image[offset:offset + 4], "little")
 
 
-def verify_code_cave(base: bytes) -> None:
+def verify_constructor_table(base: bytes, patched: bytes) -> None:
     # Native startup calls each PREL32 entry as entry address + stored offset.
     # Direct branches and absolute pointers alone do not cover these calls.
     # 原版启动以“表项地址 + 相对偏移”调用 PREL32 构造表，不能只检查直接分支和绝对指针。
@@ -67,19 +69,14 @@ def verify_code_cave(base: bytes) -> None:
         and (table_end - table_start) % 4 == 0
     ):
         raise ValueError("invalid native startup constructor table")
-    for entry in range(table_start, table_end, 4):
-        target = ((entry + word(base, entry)) & 0xFFFFFFFF) & ~1
-        if CAVE_START <= target < CAVE_END:
-            if (entry, target) == (0x002EB7BC, CAVE_START):
-                print(
-                    "WARNING: retained existing payload overlap with native "
-                    "startup initializer 00261C74; its repair is deferred"
-                )
-                continue
-            raise ValueError(
-                f"code cave overlaps native startup initializer {target:08X}; "
-                f"PREL32 constructor entry {entry:08X} references it"
-            )
+    if ((0x002EB7BC + word(base, 0x002EB7BC)) & 0xFFFFFFFF) != INITIALIZER_START:
+        raise ValueError("native constructor entry no longer targets its initializer")
+    if patched[table_start - IMAGE_BASE:table_end - IMAGE_BASE] != \
+            base[table_start - IMAGE_BASE:table_end - IMAGE_BASE]:
+        raise ValueError("native constructor table changed")
+    if patched[INITIALIZER_START - IMAGE_BASE:INITIALIZER_END - IMAGE_BASE] != \
+            base[INITIALIZER_START - IMAGE_BASE:INITIALIZER_END - IMAGE_BASE]:
+        raise ValueError("native startup initializer changed")
 
 
 def branch_target(image: bytes, address: int) -> tuple[int, bool, int]:
@@ -102,29 +99,6 @@ def arm_literal_value(
     return word(image, address + 8 + (instruction & 0xFFF))
 
 
-def verify_reclaimed_range_unreferenced(image: bytes) -> None:
-    """Reject ordinary pointers or ARM B/BL edges into the reclaimed range."""
-    for offset in range(0, len(image) - 3, 4):
-        address = IMAGE_BASE + offset
-        if CAVE_START <= address < CAVE_END:
-            continue
-        instruction = int.from_bytes(image[offset:offset + 4], "little")
-        if CAVE_START <= instruction < CAVE_END:
-            raise ValueError(
-                f"external aligned pointer enters reclaimed range at {address:08X}"
-            )
-        if ((instruction >> 25) & 7) != 5:
-            continue
-        displacement = (instruction & 0xFFFFFF) << 2
-        if displacement & 0x02000000:
-            displacement -= 0x04000000
-        target = address + 8 + displacement
-        if CAVE_START <= target < CAVE_END:
-            raise ValueError(
-                f"external ARM branch enters reclaimed range at {address:08X}"
-            )
-
-
 def verify_no_immediate_thumb_blx(image: bytes, start: int, end: int) -> None:
     """Reject importer-generated Thumb-to-ARM immediate calls.
 
@@ -141,22 +115,74 @@ def verify_no_immediate_thumb_blx(image: bytes, start: int, end: int) -> None:
                 f"unsafe immediate Thumb-to-ARM call at {address:08X}"
             )
 
-def apply_ips(base: bytes, patch: bytes) -> bytes:
-    if not patch.startswith(b"PATCH") or not patch.endswith(b"EOF"):
-        raise ValueError("invalid IPS stream")
-    output = bytearray(base)
-    cursor = 5
-    while patch[cursor:cursor + 3] != b"EOF":
-        offset = int.from_bytes(patch[cursor:cursor + 3], "big")
-        length = int.from_bytes(patch[cursor + 3:cursor + 5], "big")
-        cursor += 5
-        if length:
-            output[offset:offset + length] = patch[cursor:cursor + length]
+def apply_bps(base: bytes, patch: bytes) -> bytes:
+    """Decode the release BPS, checking sizes, copy bounds and all three CRCs."""
+    if len(patch) < 19 or not patch.startswith(b"BPS1"):
+        raise ValueError("invalid BPS stream")
+    cursor, footer = 4, len(patch) - 12
+
+    def number() -> int:
+        nonlocal cursor
+        value, shift = 0, 1
+        while cursor < footer:
+            byte = patch[cursor]
+            cursor += 1
+            value += (byte & 0x7F) * shift
+            if byte & 0x80:
+                return value
+            shift <<= 7
+            value += shift
+            if shift > 1 << 35:
+                break
+        raise ValueError("invalid BPS number")
+
+    source_size, target_size, metadata_size = number(), number(), number()
+    if source_size != len(base) or metadata_size != 0:
+        raise ValueError("BPS source length or metadata is incompatible")
+    if target_size != EXPANDED_PAYLOAD_START + EXPANDED_PAYLOAD_SIZE - IMAGE_BASE:
+        raise ValueError("BPS target length differs from the mapped image")
+    source_crc, target_crc, patch_crc = (
+        int.from_bytes(patch[index:index + 4], "little")
+        for index in range(footer, len(patch), 4)
+    )
+    if zlib.crc32(base) != source_crc or zlib.crc32(patch[:-4]) != patch_crc:
+        raise ValueError("BPS source or patch CRC mismatch")
+
+    output = bytearray()
+    source_relative = target_relative = 0
+    while cursor < footer:
+        command = number()
+        operation, length = command & 3, (command >> 2) + 1
+        if length > target_size - len(output):
+            raise ValueError("BPS command exceeds target size")
+        if operation == 0:
+            offset = len(output)
+            if offset + length > source_size:
+                raise ValueError("BPS source read exceeds source size")
+            output.extend(base[offset:offset + length])
+        elif operation == 1:
+            if cursor + length > footer:
+                raise ValueError("truncated BPS literal")
+            output.extend(patch[cursor:cursor + length])
             cursor += length
         else:
-            count = int.from_bytes(patch[cursor:cursor + 2], "big")
-            output[offset:offset + count] = bytes([patch[cursor + 2]]) * count
-            cursor += 3
+            encoded = number()
+            distance = -(encoded >> 1) if encoded & 1 else encoded >> 1
+            if operation == 2:
+                source_relative += distance
+                if source_relative < 0 or source_relative + length > source_size:
+                    raise ValueError("BPS source copy exceeds source size")
+                output.extend(base[source_relative:source_relative + length])
+                source_relative += length
+            else:
+                target_relative += distance
+                if target_relative < 0 or target_relative >= len(output):
+                    raise ValueError("BPS target copy does not reference existing output")
+                for _ in range(length):
+                    output.append(output[target_relative])
+                    target_relative += 1
+    if cursor != footer or len(output) != target_size or zlib.crc32(output) != target_crc:
+        raise ValueError("BPS target size or CRC mismatch")
     return bytes(output)
 
 
@@ -175,9 +201,11 @@ def main() -> None:
     parser.add_argument("--base", required=True, type=Path)
     parser.add_argument("--patched", required=True, type=Path)
     parser.add_argument("--symbols", required=True, type=Path)
-    parser.add_argument("--ips", required=True, type=Path)
+    parser.add_argument("--bps", required=True, type=Path)
     parser.add_argument("--source-romfs", required=True, type=Path)
     parser.add_argument("--output-romfs", required=True, type=Path)
+    parser.add_argument("--exheader", required=True, type=Path)
+    parser.add_argument("--base-exheader", required=True, type=Path)
     args = parser.parse_args()
 
     base = args.base.read_bytes()
@@ -185,20 +213,27 @@ def main() -> None:
     digest = hashlib.sha256(base).hexdigest().upper()
     if digest != EXPECTED_BASE_SHA256:
         raise ValueError(f"unsupported base code SHA-256: {digest}")
-    verify_code_cave(base)
-    verify_reclaimed_range_unreferenced(base)
-    if len(base) != len(patched):
-        raise ValueError("patched image length differs from base")
-    if apply_ips(base, args.ips.read_bytes()) != patched:
-        raise ValueError("release IPS does not reproduce the patched image")
+    sym = symbols(args.symbols)
+    verify_constructor_table(base, patched)
+    from tools.prepare_expanded_code import prepare_images
+    _, expected_header, _ = prepare_images(
+        base, args.base_exheader.read_bytes(), EXPANDED_PAYLOAD_START, EXPANDED_PAYLOAD_SIZE)
+    if args.exheader.read_bytes() != expected_header:
+        raise ValueError("released exheader differs from the required expanded layout/capabilities")
+    if len(patched) != EXPANDED_PAYLOAD_START + EXPANDED_PAYLOAD_SIZE - IMAGE_BASE:
+        raise ValueError("expanded code does not end at its mapped data-page boundary")
+    if patched[len(base):EXPANDED_PAYLOAD_START - IMAGE_BASE] != bytes(
+            EXPANDED_PAYLOAD_START - IMAGE_BASE - len(base)):
+        raise ValueError("expanded BSS and pre-payload padding are not zero-filled")
+    if apply_bps(base, args.bps.read_bytes()) != patched:
+        raise ValueError("release BPS does not reproduce the patched image")
     registration_offset = FOLLOWING_STOCK_CODE_START - IMAGE_BASE
     registration_size = FOLLOWING_STOCK_CODE_END - FOLLOWING_STOCK_CODE_START
     if patched[
         registration_offset:registration_offset + registration_size
     ] != base[registration_offset:registration_offset + registration_size]:
-        raise ValueError("startup registration code after the reclaimed cave changed")
+        raise ValueError("native startup registration code changed")
 
-    sym = symbols(args.symbols)
     required = {
         "combinepatch_codeusedend", "combinepatch_offlinepayloadusedend",
         "combinepatch_offlinepayloadstart", "textactualend", "textmappedend",
@@ -230,6 +265,8 @@ def main() -> None:
         "offlinepatch_versionidentifier", "offlinepatch_runtimestoragestart",
         "nds_scanner_context_slot", "offlinepatch_runtimestorageend",
         "combinepatch_modestorage",
+        "codeexpansion_startup", "codeexpansion_enable",
+        "codeexpansion_loaderbegin", "codeexpansion_loaderend",
     }
     for _, operation, native_name, _ in TICKET_INTERFACES:
         required.update((f"combinepatch_ticket{operation}",
@@ -237,12 +274,13 @@ def main() -> None:
     missing = sorted(required - sym.keys())
     if missing:
         raise ValueError(f"missing armips symbols: {', '.join(missing)}")
-    if not CAVE_START < sym["combinepatch_codeusedend"] <= CAVE_END:
-        raise ValueError("payload exceeds the existing overwritten range")
+    code_start = EXPANDED_PAYLOAD_START
+    code_end = EXPANDED_PAYLOAD_START + EXPANDED_PAYLOAD_SIZE
+    if not code_start < sym["combinepatch_codeusedend"] <= code_end:
+        raise ValueError("payload exceeds the added executable pages")
     if not (
         sym["textactualend"] == TEXT_ACTUAL_END
         and sym["textmappedend"] == TEXT_MAPPED_END
-        and sym["combinepatch_offlinepayloadstart"] == PAYLOAD_START
         and PAYLOAD_START % 0x10 == 0
         and PAYLOAD_START - TEXT_ACTUAL_END >= LAYEREDFS_RESERVED_SIZE
     ):
@@ -252,7 +290,11 @@ def main() -> None:
             PAYLOAD_START - TEXT_ACTUAL_END
         ):
             raise ValueError("Luma LayeredFS reservation is not untouched padding")
-    if not PAYLOAD_START < sym["combinepatch_offlinepayloadusedend"] <= PAYLOAD_END:
+    tail_start = sym["combinepatch_codeusedend"]
+    tail_end = code_end
+    if sym["combinepatch_offlinepayloadstart"] != tail_start:
+        raise ValueError("incorrect offline payload start for selected layout")
+    if not tail_start < sym["combinepatch_offlinepayloadusedend"] <= tail_end:
         raise ValueError("offline payload exceeds the executable tail")
     payload_objects = (
         ("fshelpers_payloadbegin", "fshelpers_payloadend"),
@@ -267,18 +309,18 @@ def main() -> None:
     for begin, end in payload_objects:
         if sym[begin] >= sym[end]:
             raise ValueError(f"empty or reversed payload object: {begin}")
-    cave_objects = payload_objects[:2]
-    if not CAVE_START < sym[cave_objects[0][0]]:
-        raise ValueError("first code-cave object precedes the audited code cave")
-    for (_, previous_end), (next_begin, _) in zip(cave_objects, cave_objects[1:]):
+    head_objects = payload_objects[:2]
+    if not code_start < sym[head_objects[0][0]]:
+        raise ValueError("first feature object precedes the added pages")
+    for (_, previous_end), (next_begin, _) in zip(head_objects, head_objects[1:]):
         if sym[previous_end] != sym[next_begin]:
-            raise ValueError("code-cave payload objects are not consecutive")
-    if sym[cave_objects[-1][1]] != sym["combinepatch_codeusedend"]:
-        raise ValueError("code-cave payload end does not follow the final object")
-    if sym[cave_objects[-1][1]] > CAVE_END:
-        raise ValueError("code-cave payload exceeds the audited range")
+            raise ValueError("feature payload objects are not consecutive")
+    if sym[head_objects[-1][1]] != sym["combinepatch_codeusedend"]:
+        raise ValueError("feature payload end does not follow the final object")
+    if sym[head_objects[-1][1]] > code_end:
+        raise ValueError("feature payload exceeds the added pages")
     tail_objects = payload_objects[2:]
-    if sym[tail_objects[0][0]] < PAYLOAD_START:
+    if sym[tail_objects[0][0]] < tail_start:
         raise ValueError("first tail payload object precedes the executable tail")
     for (_, previous_end), (next_begin, _) in zip(tail_objects, tail_objects[1:]):
         if sym[previous_end] != sym[next_begin]:
@@ -406,6 +448,28 @@ def main() -> None:
         0x0021AA0C: ("combinepatch_ndsreadgamecodeentry", False, 0xE),
         0x0021AB50: ("combinepatch_ndswritesaveentry", False, 0xE),
     }
+    if word(base, 0x00100010) != 0xFA000AB1:
+        raise ValueError("unexpected original constructor-walker call")
+    hooks[0x00100010] = ("codeexpansion_startup", True, 0xE)
+    loader_start = sym["codeexpansion_startup"]
+    loader_end = sym["codeexpansion_loaderend"]
+    if not PAYLOAD_START <= loader_start < loader_end <= VERSION_STORAGE_START:
+        raise ValueError("expansion bootstrap is outside executable padding")
+    if word(patched, loader_start) != 0xE92D5FFF or \
+            word(patched, loader_start + 24) != 0xE8BD5FFF:
+        raise ValueError("expansion bootstrap does not preserve startup registers")
+    if arm_literal_value(patched, loader_start + 4, 0) != EXPANDED_PAYLOAD_START or \
+            word(patched, loader_start + 8) != 0xE3A01A02:
+        raise ValueError("expansion bootstrap protects the wrong pages")
+    if branch_target(patched, loader_start + 12) != \
+            (sym["codeexpansion_enable"], True, 0xE):
+        raise ValueError("expansion bootstrap does not call its native ARM helper")
+    if arm_literal_value(patched, loader_start + 28, 15) != 0x00102ADD:
+        raise ValueError("expansion bootstrap does not resume native constructors")
+    loader = patched[sym["codeexpansion_loaderbegin"] - IMAGE_BASE:loader_end - IMAGE_BASE]
+    for service in (0x27, 0x2A, 0x70, 0x23):
+        if (0xEF000000 | service).to_bytes(4, "little") not in loader:
+            raise ValueError(f"missing expansion SVC {service:02X}")
     for address, operation, native_name, native_address in TICKET_INTERFACES:
         if branch_target(base, address) != (native_address, True, 0xE):
             raise ValueError(f"unexpected native ticket call at {address:08X}")
@@ -438,8 +502,8 @@ def main() -> None:
     wrapper_end = sym["combinepatch_ticketwrappersend"]
     if policy not in (0, 1) or patched[policy_address - IMAGE_BASE] != policy:
         raise ValueError("ONLINE_TICKET_CHECK_BYPASS must be a matching 0/1 byte")
-    if not CAVE_START <= policy_address < wrapper_start < wrapper_end <= sym["fshelpers_payloadbegin"]:
-        raise ValueError("ticket policy/wrappers exceed the audited code cave")
+    if not code_start <= policy_address < wrapper_start < wrapper_end <= sym["fshelpers_payloadbegin"]:
+        raise ValueError("ticket policy/wrappers exceed the added pages")
     for _, operation, native_name, _ in TICKET_INTERFACES:
         wrapper = sym[f"combinepatch_ticket{operation}"]
         local = sym[f"combinepatch_ticket{operation}local"]

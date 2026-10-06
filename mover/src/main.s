@@ -12,10 +12,9 @@
 
 .definelabel OfflinePatch_VersionStorageSize,   0x40
 .definelabel OfflinePatch_VersionStorageStart,  TextMappedEnd - OfflinePatch_VersionStorageSize
-.definelabel CombinePatch_CodeStart, MoverCombine_CodeCaveStart
-.definelabel CombinePatch_CodeEnd, MoverCombine_CodeCaveEnd
-.definelabel CombinePatch_OfflinePayloadStart, 0x0028D2E0
-.definelabel CombinePatch_OfflinePayloadEnd,   OfflinePatch_VersionStorageStart
+.definelabel CombinePatch_CodeStart, CodeExpansion_PayloadStart
+.definelabel CombinePatch_CodeEnd, CodeExpansion_PayloadStart + CodeExpansion_PayloadSize
+.definelabel CombinePatch_OfflinePayloadEnd, CombinePatch_CodeEnd
 .definelabel CombinePatch_ModeStorage,         OfflinePatch_RuntimeStorageStart + 4
 .definelabel CombinePatch_ModeOffline,         0
 .definelabel CombinePatch_ModeOnline,          1
@@ -29,7 +28,10 @@
 .definelabel CombinePatch_SaveMessage,         71
 .definelabel CombinePatch_DisconnectMessage,   72
 
-.open "../rom/exefs/00040000000C9C00.dec.code", "../build/00040000000C9C00.dec.code", 0x00100000
+.open INPUT_CODE, OUTPUT_CODE, 0x00100000
+
+.org MoverStartup_ConstructorCall
+    bl CodeExpansion_Startup
 
 // Title mode selection. The displayed R uses the same private-use button glyph
 // as the Bank patch and is independent of the native input bit.
@@ -543,19 +545,16 @@ CombinePatch_NdsWriteSaveEntry:
     bx r12
     .pool
 
-// Stay within the existing payload bounds. The known startup-initializer
-// overlap is tracked separately; this change does not expand that range.
-// 保持现有荷载边界。已知启动初始化覆盖问题另行处理，本次不扩大该区域。
 // Bankdata and SD sources share one filesystem implementation. TLS/SVC
 // primitives remain ARM; the checked file operations use Thumb.
 // Bankdata 与 SD 来源共用一份文件系统实现。TLS／SVC 原语保留 ARM，其余带检查
 // 的文件操作采用 Thumb。
 FsHelpers_PayloadBegin:
-    .importobj "../build/fs_helpers.o"
+    .importobj BUILD_DIRECTORY + "/fs_helpers.o"
 FsHelpers_PayloadEnd:
 
 NdsSources_PayloadBegin:
-    .importobj "../build/nds_sources.o"
+    .importobj BUILD_DIRECTORY + "/nds_sources.o"
 NdsSources_PayloadEnd:
 
 CombinePatch_CodeUsedEnd:
@@ -569,7 +568,32 @@ CombinePatch_CodeUsedEnd:
 .area 0x130
 .endarea
 
-.org CombinePatch_OfflinePayloadStart
+// The loader remains inside original executable padding. It preserves the
+// native startup call's registers and LR, then resumes the constructor walker.
+// 加载器仅使用原可执行填充。保留启动调用的寄存器与 LR 后继续原版构造函数遍历。
+.org 0x0028D2E0
+.area OfflinePatch_VersionStorageStart - 0x0028D2E0
+CodeExpansion_Startup:
+    push {r0-r12,lr}
+    ldr r0,=CodeExpansion_PayloadStart
+    ldr r1,=CodeExpansion_PayloadSize
+    bl CodeExpansion_Enable
+    cmp r0,#0
+    bne @@failure
+    pop {r0-r12,lr}
+    ldr pc,=MoverStartup_RunConstructors + 1
+@@failure:
+    mov r0,#0
+    swi 0x3C
+    b @@failure
+    .pool
+CodeExpansion_LoaderBegin:
+    .importobj BUILD_DIRECTORY + "/code_expansion.o"
+CodeExpansion_LoaderEnd:
+.endarea
+
+.org CombinePatch_CodeUsedEnd
+CombinePatch_OfflinePayloadStart:
 .area CombinePatch_OfflinePayloadEnd-CombinePatch_OfflinePayloadStart
 OfflinePatch_EligibilityEntry:
     ldr r1,[r0,#0x10]
@@ -594,32 +618,29 @@ OfflinePatch_GetPokemonEntry:
     b MoverGetPokemonState_Update + 4
     .pool
 
-// Keep all remaining feature modules consecutive in the executable tail.
-// The former external redirect reservation is deliberately gone: this patch
-// now owns the native card I/O hooks and provides the more capable scanner.
-// 其余功能模块在可执行尾部连续排列。原外部重定向预留已刻意移除：本补丁现在接管
-// 原生卡带 I/O 钩子，并提供功能更完整的扫描器。
+// Keep all remaining feature modules consecutive inside the added pages.
+// 其余功能模块在新增页内连续排列。
 LocalTicket_PayloadBegin:
-    .importobj "../build/local_ticket.o"
+    .importobj BUILD_DIRECTORY + "/local_ticket.o"
 LocalTicket_PayloadEnd:
 
 BankdataRedirect_PayloadBegin:
-    .importobj "../build/bankdata_redirect.o"
+    .importobj BUILD_DIRECTORY + "/bankdata_redirect.o"
 BankdataRedirect_PayloadEnd:
 
 OfflineFlow_PayloadBegin:
-    .importobj "../build/offline_flow.o"
+    .importobj BUILD_DIRECTORY + "/offline_flow.o"
 OfflineFlow_PayloadEnd:
 
 PatchPaths_PayloadBegin:
-    .importobj "../build/patch_paths.o"
+    .importobj BUILD_DIRECTORY + "/patch_paths.o"
 PatchPaths_PayloadEnd:
 
 LocalValidation_PayloadBegin:
-    .importobj "../build/local_validation.o"
+    .importobj BUILD_DIRECTORY + "/local_validation.o"
 LocalValidation_PayloadEnd:
 NdsFs_PayloadBegin:
-    .importobj "../build/nds_fs.o"
+    .importobj BUILD_DIRECTORY + "/nds_fs.o"
 NdsFs_PayloadEnd:
 CombinePatch_OfflinePayloadUsedEnd:
 .endarea

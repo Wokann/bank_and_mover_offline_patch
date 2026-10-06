@@ -21,7 +21,7 @@
 
 ExHeader 声明的 `.text` 内容结束于 `0x0028D1AC`，最后一页映射结束于
 `0x0028E000`。Ghidra 记录的最后指令/数据引用位置为 `0x0028D188`，最后函数结束于
-`0x0028D18F`。页尾余量足够时，Luma 会在应用 IPS 之后，从声明的内容末尾安装
+`0x0028D18F`。页尾余量足够时，Luma 会在应用代码补丁之后，从声明的内容末尾安装
 LayeredFS 荷载。本项目保留 `0x0028D1AC–0x0028D2DC` 的 `0x130` 字节不写入，
 再将自身荷载起点对齐至 `0x0028D2E0`。已检查的 Luma 荷载为 `0x114` 字节；
 以后若其增大，需要重新检查预留量。参见官方的
@@ -32,25 +32,60 @@ LayeredFS 荷载。本项目保留 `0x0028D1AC–0x0028D2DC` 的 `0x130` 字节�
 `0x0028DFC0–0x0028E000` 的 `0x40` 字节保留给版本标识。内置第五世代来源
 重定向接管原生卡带 I/O 钩子，不再为外部 Transporter Redirect Patch 保留
 `0xE0` 区域；汇编区域边界与静态验证仍保护 Luma LayeredFS 和版本标识。
+所有功能对象使用下面的新增页布局；环境识别只改变启动时的权限返回值处理。
 
 `0x00261C74–0x00262C10` 属于仍被调用的原版全局注册初始化函数，不能作为回收空洞。
 启动流程进入 `0x00102ADC` 后，会遍历 `0x002EB744–0x002EBA58` 的 PREL32 构造表。
 其中 `0x002EB7BC` 的表项存储 `0xFFF764B8`，与表项地址相加后得到 `0x00261C74`。
-这个间接调用不会出现在直接分支或绝对指针搜索中。当前模式包装、共用 FS 和
-NDS 扫描器覆盖了这个初始化函数，但原构造表项仍未改变。这是已知启动风险，
-不是安全代码空洞；关闭异常处理器后能继续执行也不能证明安全。
-原版票务作业和免费活动函数均不被回收。
+这个间接调用不会出现在直接分支或绝对指针搜索中。整个初始化函数与构造表都要求
+与原镜像逐字节相同。原版票务作业和免费活动函数均不被回收。
 
 | 荷载区域 | 内容 | 实际结束／余量 |
 |---|---|---|
-| 初始化函数覆盖区 `0x00261C74–0x00262C10` | ARM 模式分派与原版跳板、共用 FS、NDS 扫描器 | `0x00262BB8`／`0x58` 字节 |
-| text 页尾 `0x0028D2E0–0x0028DFC0` | ARM 入口、本地票务、Bankdata、离线状态、路径、本地分类、UTF-16 FS | `0x0028DFA6`／`0x1A` 字节 |
+| text 页尾 `0x0028D2E0–0x0028DFC0`：已映射可执行填充 | 启动跳板与自动识别环境的 `code_expansion.o` | `0x0028D3B0`／`0xC10` 字节 |
+| 新增页 `0x00365000–0x00367000`：扩展 data，启动后可执行 | 全部模式包装、原版跳板与功能对象 | `0x00366C06`／`0x3FA` 字节 |
+
+启动钩子只在调用点 `0x00100010` 改为跳转到加载器。加载器保存 `r0–r12/LR`，
+通过 SVC `0x27` 复制当前进程伪句柄取得真实句柄，使用 SVC `0x2A` 查询环境，
+随后调用 SVC `0x70`（操作 `6`，
+权限 `7`）启用新增两页的 RWX，关闭句柄并恢复寄存器，再以 Thumb 状态继续
+`0x00102ADC` 的原构造函数遍历。实机失败以 SVC Break 中止；只有下面明确识别为
+Azahar 的兼容情况，才允许未成功修改权限时继续。
+
+配套 ExHeader 保持三个原段起点和 text／rodata 大小不变，仅把 data 扩到 `0x7B` 页
+（末尾 `0x00367000`），将 BSS 大小设为 `0`，并在既有能力描述符中补所需的 SVC 位。
+原 BSS 区域成为镜像中的零填充，其变量地址不移动；`0x00364000–0x00365000` 也是
+零填充 RW 隔离页，而非未映射的保护页。本配置原先已授权 `0x23/0x27/0x2A/0x3C`，
+实际只新增 `0x70`。
+这借鉴了 [Magikoopa 的 data 尾扩容方式](https://github.com/RicBent/Magikoopa/blob/master/MagikoopaUI/patchmaker.cpp)，
+但不将 text 实际大小扩至页边界，避免改变 Luma 的 LayeredFS 注入位置。
+新增页最初由加载器作为 RW data 装入，SVC 仅改变这两页的权限，不会把旧 data/BSS
+或整个进程全部改成可执行。
+
+### BPS 通用装载与自动环境识别
+
+BPS 的来源长度为 `0x22A000`，目标长度为 `0x267000`，元数据长度为 `0`。Luma 根据
+扩容 ExHeader 提前分配目标缓冲；原版 Azahar 的 BPS 实现会先把镜像扩长到目标长度，
+再还原补丁。两边得到相同字节，data 都映射至 `0x00367000`。原程序的 BSS 清零边界
+`0x003293FC–0x003638A4` 不变。参见
+[Luma 的 BPS 解码](https://github.com/LumaTeam/Luma3DS/blob/master/sysmodules/loader/source/bps_patcher.cpp)
+和 [Azahar 的 BPS 扩长处理](https://github.com/azahar-emu/azahar/blob/9e6f523a57fac9564ac0bf8286db3c3702d301ec/src/core/file_sys/patch.cpp#L260-L280)。
+
+只有 `GetSystemInfo(0x20000, 0)` 返回 `0`、输出低 32 位为 `2`、高 32 位为 `0`，才识别
+为 Azahar。Luma 实机返回 `1`、输出 `0`，不会进入该分支。所有环境都会调用 SVC
+`0x70`，返回 `0` 时正常成功；非零结果只有在已识别为 Azahar、且恰好等于输入的真实
+进程句柄时才接受，对应未实现调用保留 `r0` 的行为。负值、其他正值、未知环境以及
+句柄创建／关闭失败均按错误处理，并非忽略所有 SVC 错误。未实现 SVC 的模拟器仍
+依赖宽松取指；已经实现时则正常执行权限修改。参考：
+[Azahar 的身份查询](https://github.com/azahar-emu/azahar/blob/9e6f523a57fac9564ac0bf8286db3c3702d301ec/src/core/hle/kernel/svc.cpp#L1866-L1870)、
+[未实现调用处理](https://github.com/azahar-emu/azahar/blob/9e6f523a57fac9564ac0bf8286db3c3702d301ec/src/core/hle/kernel/svc.cpp#L2440-L2448)
+和 [Luma 实机查询](https://github.com/LumaTeam/Luma3DS/blob/master/k11_extension/source/svc/GetSystemInfo.c#L218-L222)。
 
 票务模块仍采用 ARM；其他功能模块采用 Thumb。共用 TLS／SVC 原语保留为禁止内联的
 ARM 函数，采用地址间接调用；ARM 分派通过 `BX/BLX` 明确切换状态，验证器会拒绝
 目标文件导入器产生的不安全立即数 Thumb→ARM 调用。
 卡带读写入口、列表虚表与来源选择处属于原址钩子；后续原版函数体由跳板继续
-调用，不用于存放新代码。原版 data/BSS 地址保持不变。
+调用，不用于存放新代码。原版 data/BSS 地址不移动。
 
 扫描器按需从原版堆分配 `0xE60` 字节上下文；指针使用 `0x00363FF0`，三个模式
 字节使用 `0x00363FF4` 起的空间。这些地址位于逻辑 BSS 末尾 `0x003638A4`
@@ -62,8 +97,82 @@ ARM 函数，采用地址间接调用；ARM 分派通过 `BX/BLX` 明确切换�
 `.rodata`（`0x002EBA58–0x002EC000`，`0x5A8` 字节）和镜像中
 `0x003293FC–0x0032A000` 的 `0xC04` 字节零填充不可执行；后者属于运行时逻辑
 BSS 起始部分，不是空闲 data。静态零值不代表没有引用。
-仅增大 ExHeader 的 `.text` 大小会与现有 `.rodata` 映射重叠，不能直接把 text
-向后延伸；当前补丁不扩展原可执行映射。
+仅增大 ExHeader 的 `.text` 大小会与现有 `.rodata` 映射重叠。因此若要越过 `0x0028E000`
+扩容，不能直接把 text 向后延伸。本 SVC 方案改为扩 data／物化 BSS，并使用配套
+ExHeader、BPS 和启动权限修改，因此不需要对原程序整体重定位。
+
+## 扩容方案的探索与对比
+
+### 探索顺序
+
+1. **参考 Magikoopa，实现实机扩容。** 将原 BSS 物化为零填充，扩展 data 装载页，
+   在原 text 页尾放置启动加载器，再通过 SVC `0x70` 为新增页设置执行权限。
+   原变量地址不动，不需要整体移动 rodata、data 或重定位原代码。初步版本使用 IPS；
+   原版 Azahar 首先在补丁装载阶段失败，尚未执行到 SVC。参考
+   [Magikoopa 的镜像与 ExHeader 修改](https://github.com/RicBent/Magikoopa/blob/master/MagikoopaUI/patchmaker.cpp)。
+2. **补足自用模拟器的装载和 SVC 支持。**
+   [`svc112` 分支](https://github.com/Wokann/azahar/tree/svc112) 做了两项不同的修复：
+   [装载器](https://github.com/Wokann/azahar/blob/svc112/src/core/loader/ncch.cpp)
+   根据完整段布局预分配镜像缓冲；
+   [SVC 分派](https://github.com/Wokann/azahar/blob/svc112/src/core/hle/kernel/svc.cpp)
+   与[进程内存实现](https://github.com/Wokann/azahar/blob/svc112/src/core/hle/kernel/process.cpp)
+   接受真实进程句柄，执行本补丁所需的 Protect 操作并使代码缓存失效。
+   这不是仅将返回值改成成功：前者使 IPS 能装入新增区域，后者实现权限修改。
+3. **参考 OOT 项目的双布局，制作模拟器专用实验版。**
+   [oot3d_practice_menu 的说明](https://github.com/gamestabled/oot3d_practice_menu/blob/master/README.md)
+   为实机与 Citra 提供不同补丁及 ExHeader。它的
+   [实机头部](https://github.com/gamestabled/oot3d_practice_menu/blob/master/exheader.bin)
+   扩展 data、BSS 为零；
+   [Citra 头部](https://github.com/gamestabled/oot3d_practice_menu/blob/master/exheader_citra.bin)
+   则保留原 data、增大 BSS。本项目据此实验：原镜像 `0x22A000` 加上 `0x3D000` BSS，
+   让旧模拟器的补丁缓冲达到 `0x267000`，并用当时的编译开关绕过权限修改。
+   对方的[共用加载器](https://github.com/gamestabled/oot3d_practice_menu/blob/master/src/loader.c)
+   仍调用 SVC `0x70`，但只把负值视为失败；未处理调用留下正句柄时也能继续。
+   不能把这一点解释为 Citra 已实现了 SVC，或其编译宏取消了该调用。
+4. **统一布局与发行文件，自动选择权限处理。** 最终改用 BPS 的目标长度重建镜像，
+   不再依赖增大 BSS 来扩长模拟器缓冲。实机仍正常调用 SVC；已经实现 SVC 的 Azahar
+   也正常修改权限；未实现的 Azahar 则仅在身份和返回值都符合上节条件时继续。
+   删除旧的初始化区占用与实机／模拟器布局开关，所有环境使用相同 ExHeader 与荷载。
+
+### 为什么早期方案不能互换
+
+| 本项目方案 | 镜像装载方式 | 新增页执行方式 | 适用条件 |
+|---|---|---|---|
+| 初步实机方案，IPS | 扩展 data，BSS 为 `0` | 要求 SVC `0x70` 返回成功 | 实机或已修复装载器及 SVC 的 `svc112` |
+| Citra 风格实验，IPS | 保留原 data，增大 BSS 来扩长模拟器缓冲 | 编译时绕过权限修改，依赖模拟器宽松取指 | 模拟器专用，不能套到实机 |
+| 最终统一方案，BPS | 扩展 data，BSS 为 `0`；BPS 按目标长度重建 | 正常 SVC，或严格限定的 Azahar 未处理调用兼容 | 同一套文件用于实机与已测试的两类 Azahar |
+
+这里有两道独立关卡。旧 Azahar
+[装载器](https://github.com/azahar-emu/azahar/blob/9e6f523a57fac9564ac0bf8286db3c3702d301ec/src/core/loader/ncch.cpp)
+在应用补丁前只按原代码长度加 BSS 扩长缓冲，不按新 data 页数补齐；其
+[IPS 解码器](https://github.com/azahar-emu/azahar/blob/9e6f523a57fac9564ac0bf8286db3c3702d301ec/src/core/file_sys/patch.cpp)
+遇到越界记录就失败。因此实机版的 BSS 为零时，会先出现“无法应用补丁”。即使绕过
+装载问题，未实现的 SVC 也不会返回正常成功值，仍无法通过原先的严格启动检查。
+
+反过来，[Luma 装载器](https://github.com/LumaTeam/Luma3DS/blob/master/sysmodules/loader/source/loader.c)
+为代码补丁分配的缓冲来自 text／rodata／data 装载页，**不包含额外 BSS**。
+仅增大 BSS 不能替实机 IPS 提供新增代码缓冲；BSS 也只是零初始化范围，不会把文件中
+对应的荷载当作 data 内容装入。即便另行解决装载，实机仍需要真实的执行权限，不能
+使用模拟器的绕过分支。这正是两个 ExHeader 不能互换的原因，而不是机器性能差异。
+
+最终方案同时解决这两道关卡：BPS 负责完整目标镜像，扩展 data 的 ExHeader 负责映射，
+启动加载器负责权限和环境判断。实机没有忽略错误；未实现 SVC 的 Azahar 兼容分支也
+没有真正授予执行权限。详细返回值判断和内存边界见上节。
+
+### 使用与方案定位
+
+执行 `make -C mover` 后，将生成的 `code.bps`、`exheader.bin`、`romfs/` 成套安装。
+实机使用 `SD:/luma/titles/00040000000C9C00/` 并启用 Luma 游戏补丁；Azahar 使用用户
+目录的 `load/mods/00040000000C9C00/`，需完整 `0x800` 字节 ExHeader。移除同一目录的
+旧 `code.ips` 和 `code.bin`，无需切换扩容宏或安装不同布局。票务测试开关是另一项
+功能，不由扩容环境识别自动调整。
+
+本项目新增的是“固定地址 data 尾扩容 + BPS 目标长度装载 + Azahar 身份与未处理 SVC
+返回值识别”的**统一适配组合方案**，不是新的内核扩容原理。基础机制已有公开先例；
+此次调研未能确认是否有完全相同组合的先例，故不宣称全球首创。其他项目的对比依据
+是上述公开源码与 ExHeader 字段，并未在本轮运行它们。无 SVC 兼容仅针对已测试的
+Azahar 行为，不承诺其他 Citra 分支或未来严格检查取指权限的模拟器；真正实现 SVC
+的环境仍应使用正常成功路径。
 
 ## 票务状态与本地结果
 

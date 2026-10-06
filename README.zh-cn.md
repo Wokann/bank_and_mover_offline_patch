@@ -38,7 +38,8 @@ sd:/3ds/Bank/bankdata.bin
    | Pokemon Bank | `00040000000C9B00` | `SD:/luma/titles/00040000000C9B00/` |
    | Poke Mover | `00040000000C9C00` | `SD:/luma/titles/00040000000C9C00/` |
 
-   每个目录内应包含 `code.ips` 和 `romfs/`。
+   Bank 目录包含 `code.ips` 和 `romfs/`；Mover 目录包含 `code.bps`、`exheader.bin`
+   和 `romfs/`，必须成套复制，并移除同一 Mover 补丁目录里旧的 `code.ips` 或 `code.bin`。
 3. 按住 `SELECT` 开机进入 Luma3DS 配置，启用 `Enable game patching`，保存并重启。
 4. 使用前备份 SD 卡以及已有的 `SD:/3ds/Bank/` 目录。
 
@@ -135,7 +136,9 @@ Bank 与 Mover 可以分别独立构建。各子项目的实现原理、内存�
 | Pokemon Bank | `bank/rom/exefs/00040000000C9B00.dec.code` | 2,801,664 字节 | `5AB630856835DCF2DBDF9A62244DD19E46AE1C7C` |
 | Poke Mover | `mover/rom/exefs/00040000000C9C00.dec.code` | 2,269,184 字节 | `583859C1E874D11650EFBDDE51F470ECF96900C4` |
 
-对应的完整 RomFS 分别放入 `bank/rom/romfs/` 和 `mover/rom/romfs/`。
+对应的完整 RomFS 分别放入 `bank/rom/romfs/` 和 `mover/rom/romfs/`。Mover 还需要
+同一本体的 `mover/rom/exheader.bin`：复制 GodMode9 挂载根目录的 `extheader.bin` 并
+重命名即可。具体输入与 Luma／Azahar 自动兼容机制见 Mover 开发文档。
 准备输入后，在仓库根目录运行：
 
 ```sh
@@ -161,17 +164,20 @@ release/00040000000C9B00/
 └── romfs/
 
 release/00040000000C9C00/
-├── code.ips
+├── code.bps
+├── exheader.bin
 └── romfs/
 ```
 
 ## 引用与鸣谢
 
-- [Luma3DS](https://github.com/LumaTeam/Luma3DS)：提供按 Title ID 加载 IPS 与 LayeredFS 资源的运行环境。
+- [Luma3DS](https://github.com/LumaTeam/Luma3DS)：提供按 Title ID 加载 IPS／BPS 与 LayeredFS 资源的运行环境。
 - [GodMode9](https://github.com/d0k3/GodMode9)：用于从用户自己的软件中提取可执行代码与 RomFS。
 - [devkitPro / libctru](https://github.com/devkitPro/libctru)：devkitARM 工具链及公开的 3DS FSUSER／FSFILE 接口参考。
 - [armips](https://github.com/Kingcom/armips)：ARM 汇编、对象导入和代码注入。
-- [Floating IPS](https://github.com/Sir-Walrus/Flips)：生成 IPS 补丁。
+- [Magikoopa 扩容实现](https://github.com/RicBent/Magikoopa/blob/master/MagikoopaUI/patchmaker.cpp)：将新增代码放在原 BSS 后，配合 ExHeader 与 SVC 启用执行权限的公开方法参考。
+- [oot3d_practice_menu](https://github.com/gamestabled/oot3d_practice_menu)：实机与 Citra 双 ExHeader 布局及加载器处理的公开参考。
+- [Floating IPS](https://github.com/Sir-Walrus/Flips)：生成 IPS／BPS 补丁。
 - [pkNX TextFile](https://github.com/kwsch/pkNX/blob/master/pkNX.Structures/Text/TextFile.cs)：消息文件编码与行表格式参考。
 - [zaksabeast/Transporter-Offline-Patch](https://github.com/zaksabeast/Transporter-Offline-Patch)：Poke Mover 联网状态替换的公开先例。
 - [Transporter-PKSM-Bank-Patch 状态机笔记](https://github.com/zaksabeast/Transporter-PKSM-Bank-Patch/blob/master/TRANSPORTER_DOCS.md)：用于交叉核对 Poke Mover 的高层状态顺序。

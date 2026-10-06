@@ -4,9 +4,11 @@
 [`docs/code-analysis.zh-cn.md`](docs/code-analysis.zh-cn.md)。本文只说明当前补丁的设计、
 实现与独立构建方法。
 
-当前荷载占用 `0x00261C74–0x00262C10`，覆盖仍会执行的原版启动初始化函数，
-不是安全代码空洞。这是上述分析文档记录的已知启动风险。关闭异常处理器后能够
-继续运行不代表该布局安全；静态检查和来源扫描测试也不能证明端到端运行安全。
+构建保留原版启动初始化函数，将新增功能放到原 BSS 后的独立页。同一份 `code.bps`
+及配套 `exheader.bin` 同时用于 Luma 和 Azahar：BPS 声明扩容后的镜像长度，启动
+辅助函数自动处理权限修改。实机必须成功执行 SVC `0x70`；只有明确识别为 Azahar，
+且未实现调用保留输入进程句柄时，才允许兼容运行。不再使用布局开关，也没有覆盖
+初始化区的回退路径。静态检查不能替代实机或模拟器全流程测试，具体边界见分析文档。
 
 这是 Poke Mover v5.5.0 本体 `00040000000C9C00` 当前维护的补丁。它把已经验证的
 独立离线功能与官方联网银行／事务流程合并在一起；第五世代来源重定向由两种模式共用。
@@ -297,6 +299,7 @@ ROM `sd:/roms/nds/<name>.nds` 对应
 | 文件 | 作用 |
 |---|---|
 | `src/main.s` | 标题模式锁定、离线钩子分派，以及公共来源入口与原版跳板 |
+| `src/code_expansion.c` / `include/code_expansion.h` | 识别 Azahar、取得真实进程句柄，仅为新增页启用执行权限 |
 | `src/fs_helpers.c` / `include/fs_helpers.h` | 共用带检查 SD 操作；TLS／SVC 原语保留 ARM |
 | `src/nds_fs.c` / `include/nds_fs.h` | UTF-16 目录枚举与分段文件读写 |
 | `src/nds_sources.c` / `include/nds_sources.h` | 逐帧第五世代来源扫描、原生校验、优先级选择与存档 I/O 分派 |
@@ -307,12 +310,13 @@ ROM `sd:/roms/nds/<name>.nds` 对应
 | `src/patch_paths.c` | 共用的 SD 路径常量 |
 | `src/patch_messages.py` | 为十套语言档案追加并验证标题／离线文本 |
 | `tools/message_archive.py` | 自包含的 GARC 与加密消息文件编解码器 |
-| `tools/verify_patch.py` | 验证基底哈希、代码区域、钩子、原版重放、IPS 还原与资源 |
-| `Makefile` | 编译各功能对象、限制荷载边界、创建 IPS、重建文本并写出发行目录 |
+| `tools/verify_patch.py` | 验证基底哈希、代码区域、构造函数保留、钩子、原版重放、BPS 还原／校验与资源 |
+| `tools/prepare_expanded_code.py` | 保持原段地址，物化 BSS、扩展 data 页并授权必要 SVC，生成配套 ExHeader |
+| `Makefile` | 编译各功能对象、限制荷载边界、创建 BPS、重建文本并写出发行目录 |
 
 ## 独立编译与安装
 
-Mover 子项目不依赖 Bank 的源码或构建产物，可以单独完成代码编译、IPS 生成、十套语言
+Mover 子项目不依赖 Bank 的源码或构建产物，可以单独完成代码编译、BPS 生成、十套语言
 文本重建和静态验证。运行时的离线模式仍要求 SD 卡上已有由 Bank 下载或初始化的
 `sd:/3ds/Bank/bankdata.bin`。
 
@@ -325,11 +329,13 @@ Mover 子项目不依赖 Bank 的源码或构建产物，可以单独完成代�
 1. 在 GodMode9 的 `Title manager` 中选择 Mover 本体并进入 `Open title folder`。
 2. 选择可执行 `.app`，依次执行 `NCCH image options...` → `Extract .code`。
 3. 再次选择同一 `.app`，执行 `NCCH image options...` → `Mount image to drive`，复制挂载
-   分区中的完整 `romfs` 目录。
+   分区中的完整 `romfs` 目录，以及根目录的 `extheader.bin`；将后者重命名为
+   `exheader.bin` 放到下述位置。
 4. 按以下结构放入工程：
 
 ```text
 mover/rom/
+├── exheader.bin
 ├── exefs/
 │   └── 00040000000C9C00.dec.code
 └── romfs/
@@ -339,6 +345,10 @@ mover/rom/
 基底代码必须为 `2,269,184` 字节，SHA-1 必须为
 `583859C1E874D11650EFBDDE51F470ECF96900C4`。构建脚本会再次检查输入；代码镜像和
 RomFS 不应提交或传播。需要使用其他 RomFS 路径时可显式覆盖 `ROMFS_SOURCE`。
+
+构建还需要从同一本体取得的原始 `exheader.bin`（`0x400` 或 `0x800` 字节），
+不能使用其他游戏、更新数据或已修改的 ExHeader。也可用 `EXHEADER=/path/to/exheader.bin`
+指定输入；工具不会修改它。
 
 从仓库根目录独立构建 Mover：
 
@@ -361,22 +371,45 @@ make
 make -C mover ARMIPS=/path/to/armips IPS_TOOL=/path/to/flips
 ```
 
-构建顺序为：编译各功能 C 对象并输出 `.s` 反汇编 →
-armips 导入对象并修改基底镜像 → Floating IPS 对比生成 `code.ips` →
+构建顺序为：编译各功能 C 对象并输出 `.s` 反汇编 → 准备扩容镜像与 ExHeader →
+armips 导入对象并修改基底镜像 → Floating IPS 对比生成 `code.bps` →
 重建十套语言 RomFS → 执行静态验证。
-对象使用原初始化函数覆盖区与可执行 text 页尾，仍存在上文说明的已知启动风险。
 本地票务模块和 TLS／SVC 原语采用 ARM；文件系统、来源扫描、本地逐槽分类、Bankdata
 与离线状态模块采用 Thumb，并通过显式跨状态入口调用。
 完整输出为：
 
 ```text
 release/00040000000C9C00/
-├── code.ips
+├── code.bps
+├── exheader.bin
 └── romfs/
 ```
 
+安装时必须成套使用 `code.bps`、`exheader.bin` 和 `romfs/`，移除同一补丁目录里的旧
+`code.ips` 或 `code.bin`，避免重复应用补丁或载入其他基底镜像。BPS 还会校验原代码
+是否为受支持版本。构建会移除自身 Mover 发行目录中生成的旧 `code.ips`。
+
+默认发行目录仍为 `release/00040000000C9C00/`。text 页尾加载器通过 `DuplicateHandle`
+取得真实进程句柄，查询 `GetSystemInfo(0x20000, 0)`，再对 `0x00365000–0x00367000`
+调用 `ControlProcessMemory`（操作 `6`、权限 `7`）。SVC 返回 `0` 时正常继续；唯一允许
+的非零兼容情况是环境查询成功、模拟器 ID 为 `2`、高 32 位为 `0`，且 SVC 返回值恰好
+等于输入进程句柄。实机和未知环境仍严格检查返回值；负值和其他任何非零结果都中止
+启动。句柄创建与关闭必须成功，恢复寄存器后继续原版构造函数遍历。原段起点、BSS
+变量地址、Luma 预留和版本标识位置不移动，离线／在线业务分派及票务测试字节不变。
+
+原版 Azahar 可以通过 BPS 装载，不需要实现 SVC `0x70`；该兼容路径依赖它宽松的取指
+行为，不代表真正取得执行权限。[Wokann/azahar 的 svc112 分支](https://github.com/Wokann/azahar/tree/svc112)
+则正常执行权限修改。两者都将同一套 `code.bps`、完整 `0x800` 字节的 `exheader.bin`
+和 `romfs/` 放入用户目录的 `load/mods/00040000000C9C00/`。Azahar 不会从模拟 SD 的
+`sdmc/luma/titles/` 读取 ExHeader 覆盖；GodMode9 挂载导出的 `extheader.bin` 是完整
+`0x800` 字节输入。静态构建检查不能替代端到端测试。
+
+从 Magikoopa 实机方案、自用模拟器的装载／SVC 修复、OOT 项目的双布局参考到最终
+统一 BPS 的探索经过、方案差异与兼容边界，见
+[扩容方案的探索与对比](docs/code-analysis.zh-cn.md#扩容方案的探索与对比)。
+
 校验器会检查基底哈希、载荷可执行范围、每个 ARM 钩子、被覆盖原指令、离线／在线模式
-分派和续接点、IPS 逐字节还原结果，以及所有原版和新增本地化文本。把生成的
+分派和续接点、BPS 逐字节还原与三个 CRC，以及所有原版和新增本地化文本。把生成的
 `00040000000C9C00` 复制到 `SD:/luma/titles/`，启用 Luma 游戏补丁。实机使用前请备份
 SD 卡和来源游戏存档。
 
@@ -390,6 +423,10 @@ SD 卡和来源游戏存档。
 
 ## 外部开源参考
 
+- [Magikoopa 扩容实现](https://github.com/RicBent/Magikoopa/blob/master/MagikoopaUI/patchmaker.cpp)
+  用于参考固定地址 data 尾扩容、BSS 物化及启动权限修改。
+- [oot3d_practice_menu](https://github.com/gamestabled/oot3d_practice_menu)
+  用于对照实机与 Citra 的不同 ExHeader 装载布局及加载器返回值处理。
 - [zaksabeast/Transporter-Offline-Patch](https://github.com/zaksabeast/Transporter-Offline-Patch)
   提供了替换 Poke Mover 联网状态的公开先例，包括两处合法性请求绕过位置。
 - [Transporter-PKSM-Bank-Patch 状态机笔记](https://github.com/zaksabeast/Transporter-PKSM-Bank-Patch/blob/master/TRANSPORTER_DOCS.md)

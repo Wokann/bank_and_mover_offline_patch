@@ -38,7 +38,9 @@ Players do not need an original `.code`, a RomFS dump, or a local build environm
    | Pokemon Bank | `00040000000C9B00` | `SD:/luma/titles/00040000000C9B00/` |
    | Poke Mover | `00040000000C9C00` | `SD:/luma/titles/00040000000C9C00/` |
 
-   Each directory must contain `code.ips` and `romfs/`.
+   Bank contains `code.ips` and `romfs/`. Mover contains `code.bps`, `exheader.bin`,
+   and `romfs/`; install all three together and remove stale `code.ips` or
+   `code.bin` from that Mover mod directory.
 3. Hold `SELECT` while booting to open the Luma3DS configuration, enable `Enable game patching`, then save and reboot.
 4. Back up the SD card and any existing `SD:/3ds/Bank/` directory before first use.
 
@@ -142,7 +144,10 @@ Do not commit or redistribute extracted code and resources. The project supports
 | Pokemon Bank | `bank/rom/exefs/00040000000C9B00.dec.code` | 2,801,664 bytes | `5AB630856835DCF2DBDF9A62244DD19E46AE1C7C` |
 | Poke Mover | `mover/rom/exefs/00040000000C9C00.dec.code` | 2,269,184 bytes | `583859C1E874D11650EFBDDE51F470ECF96900C4` |
 
-Place each complete RomFS at `bank/rom/romfs/` or `mover/rom/romfs/`.
+Place each complete RomFS at `bank/rom/romfs/` or `mover/rom/romfs/`. Mover's
+build also requires `mover/rom/exheader.bin` from the same
+base title: copy GodMode9's mounted root `extheader.bin` and rename it. See the
+Mover developer document for inputs and automatic Luma/Azahar compatibility.
 With the inputs prepared, run from the repository root:
 
 ```sh
@@ -168,17 +173,20 @@ release/00040000000C9B00/
 └── romfs/
 
 release/00040000000C9C00/
-├── code.ips
+├── code.bps
+├── exheader.bin
 └── romfs/
 ```
 
 ## References and acknowledgements
 
-- [Luma3DS](https://github.com/LumaTeam/Luma3DS) provides the Title ID-based IPS and LayeredFS runtime.
+- [Luma3DS](https://github.com/LumaTeam/Luma3DS) provides the Title ID-based IPS/BPS and LayeredFS runtime.
 - [GodMode9](https://github.com/d0k3/GodMode9) is used to dump executable code and RomFS from the user's own titles.
 - [devkitPro / libctru](https://github.com/devkitPro/libctru) provides the devkitARM ecosystem and public 3DS FSUSER/FSFILE references.
 - [armips](https://github.com/Kingcom/armips) provides ARM assembly, object import, and code injection.
-- [Floating IPS](https://github.com/Sir-Walrus/Flips) creates the IPS files.
+- [Magikoopa's expansion implementation](https://github.com/RicBent/Magikoopa/blob/master/MagikoopaUI/patchmaker.cpp) provides a public reference for placing new code after the original BSS and using an ExHeader plus SVC permission change.
+- [oot3d_practice_menu](https://github.com/gamestabled/oot3d_practice_menu) provides a public reference for separate hardware/Citra ExHeader layouts and loader behavior.
+- [Floating IPS](https://github.com/Sir-Walrus/Flips) creates the IPS/BPS files.
 - [pkNX TextFile](https://github.com/kwsch/pkNX/blob/master/pkNX.Structures/Text/TextFile.cs) was consulted for the message encoding and line-table format.
 - [zaksabeast/Transporter-Offline-Patch](https://github.com/zaksabeast/Transporter-Offline-Patch) provides a public precedent for replacing Poke Mover network states.
 - [Transporter-PKSM-Bank-Patch state-machine notes](https://github.com/zaksabeast/Transporter-PKSM-Bank-Patch/blob/master/TRANSPORTER_DOCS.md) were used to cross-check the high-level Poke Mover state order.
