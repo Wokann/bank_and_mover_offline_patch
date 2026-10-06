@@ -1,8 +1,8 @@
 #include "local_ticket.h"
 #include "system_time.h"
 
-/* Local clock conversion used to refresh the offline entitlement ticket. */
-/* 用于刷新离线使用权票据的本地主机时间转换。 */
+/* Local date input for the native entitlement job's result consumers. */
+/* 为原版使用权作业的结果处理提供本地日期。 */
 static u64 divideU64(u64 numerator,u64 denominator,u64 *remainder)
 {
     u64 quotient=0,rest=0;
@@ -71,14 +71,13 @@ static int leapYear(u32 year)
     return remainder100!=0u || remainder400==0u;
 }
 
-static int packFutureTicketDate(u32 packed[2])
+static int packTicketDates(MoverTicketJobView *job)
 {
     static const u8 monthDays[12]={31,28,31,30,31,30,31,31,30,31,30,31};
     u64 remainder,cycles,days;
-    u64 future=currentSystemTimeMs()+
-        (u64)MOVER_TICKET_ENTITLEMENT_DAYS*86400000ull;
-    u32 year=1900,month=1,day,hour,minute,second,span;
-    days=divideU64(future,86400000ull,&remainder);
+    u64 now=currentSystemTimeMs();
+    u32 year=MOVER_TICKET_MIN_YEAR,month=1,day,hour,minute,second,span,time;
+    days=divideU64(now,86400000ull,&remainder);
     /* Skip whole Gregorian 400-year cycles so malformed timestamps can never
        turn the year conversion into an unbounded loop. */
     /* 先跳过完整的公历 400 年周期，避免异常时间戳造成无界的逐年循环。 */
@@ -89,6 +88,7 @@ static int packFutureTicketDate(u32 packed[2])
         days-=365u+leapYear(year);
         year++;
     }
+    if (year>MOVER_TICKET_MAX_YEAR) return 0;
     while (month<=12u) {
         span=monthDays[month-1u]+((month==2u)?leapYear(year):0);
         if (days<span) break;
@@ -99,30 +99,68 @@ static int packFutureTicketDate(u32 packed[2])
     hour=(u32)divideU64(remainder,3600000u,&remainder);
     minute=(u32)divideU64(remainder,60000u,&remainder);
     second=(u32)divideU64(remainder,1000u,0);
-    packed[0]=(second&63u)|((minute&63u)<<6)|((hour&31u)<<12)|
+    time=(second&63u)|((minute&63u)<<6)|((hour&31u)<<12);
+    job->currentDate[0]=time|
         ((day&31u)<<17)|((month&15u)<<22)|(year<<26);
-    packed[1]=(year>>6)&0xFFu;
+    job->currentDate[1]=year>>6;
+    /* Add days only to the expiry date, not to the job's current time. */
+    /* 只给到期日加天数，不改变作业的当前时间。 */
+    day+=MOVER_TICKET_ENTITLEMENT_DAYS;
+    for (;;) {
+        span=monthDays[month-1u]+((month==2u)?leapYear(year):0);
+        if (day<=span) break;
+        day-=span;
+        if (++month>12u) { month=1; year++; }
+    }
+    if (year>MOVER_TICKET_MAX_YEAR) return 0;
+    job->expiryDate[0]=time|(day<<17)|(month<<22)|(year<<26);
+    job->expiryDate[1]=year>>6;
     return 1;
 }
 
 __attribute__((used,noinline,section(".text.offline.03_ticket")))
-int OfflinePatch_TicketUpdate(MoverStateView *state)
+int LocalTicket_Initialize(MoverTicketJobView *job,MoverTicketSharedView *shared)
+{
+    u32 index;
+    if (!job || !shared) return 0;
+    job->ecAccountId[0]=shared->ecAccountId[0];
+    job->ecAccountId[1]=shared->ecAccountId[1];
+    job->appletResult=0;
+    job->substate=0;
+    job->matchedCatalogCount=0;
+    job->firstShopUse=0;
+    job->expiryKnown=0;
+    job->cancelled=0;
+    /* No purchase history is available locally; do not invent purchases or
+       alter native SDK pointers, containers and strings. */
+    /* 本地没有购票历史；不伪造购买记录，不改变原版 SDK 指针、容器与字符串。 */
+    for (index=0;index<5;index++) {
+        job->ticketPurchaseCounts[index]=MOVER_TICKET_PURCHASE_COUNT_UNKNOWN;
+    }
+    shared->freeCampaignActive=0;
+    return packTicketDates(job);
+}
+
+__attribute__((used,noinline,section(".text.offline.03_ticket")))
+int LocalTicket_Poll(MoverTicketJobView *job,u32 *result,u32 minimumDays)
+{
+    if (!result) return 1;
+    *result=0;
+    if (!job || minimumDays>MOVER_TICKET_ENTITLEMENT_DAYS) return 1;
+    job->expiryKnown=1;
+    job->substate=MOVER_TICKET_JOB_VERIFIED;
+    *result=1;
+    return 1;
+}
+
+__attribute__((used,noinline,section(".text.offline.03_ticket")))
+s32 LocalTicket_CampaignResult(MoverStateView *state)
 {
     MoverTicketSharedView *shared=(MoverTicketSharedView *)state->sharedData;
-    if (!shared) {
-        state->phase=MOVER_TICKET_PHASE_ERROR;
-        return MOVER_STATE_UPDATE_FINISHED;
-    }
-    /* Preserve account data and refresh only the offline ticket fields. */
-    /* 保留账户数据，仅刷新离线票据字段。 */
-    if (!packFutureTicketDate(shared->expiryDate)) {
-        state->phase=MOVER_TICKET_PHASE_ERROR;
-        return MOVER_STATE_UPDATE_FINISHED;
-    }
-    shared->entitlementDays=MOVER_TICKET_ENTITLEMENT_DAYS;
-    shared->entitlementHours=MOVER_TICKET_ENTITLEMENT_DAYS*MOVER_TICKET_HOURS_PER_DAY;
-    shared->entitlementValid=1;
-    shared->remoteResultFlag=0;
-    state->phase=MOVER_TICKET_PHASE_COMPLETE;
-    return MOVER_STATE_UPDATE_FINISHED;
+    /* Complete only the campaign query as "no campaign". The state retains
+       its native entitlement decision, callback registration and cleanup. */
+    /* 只把活动查询完成为“无活动”；状态仍沿用原版使用权判断、回调注册与清理。 */
+    shared->freeCampaignActive=0;
+    state->substate=MOVER_TICKET_SUBSTATE_CHECK_ENTITLEMENT;
+    return 0;
 }

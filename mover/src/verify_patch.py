@@ -17,11 +17,13 @@ IMAGE_BASE = 0x00100000
 EXPECTED_BASE_SHA256 = "001C20ADA74016507C969BB44A0A50F8EDF803EC06A3FC46834263BA8DF0FD2F"
 CAVE_START = 0x00261C74
 CAVE_END = 0x00262C10
+TEXT_ACTUAL_END = 0x0028D1AC
 TEXT_MAPPED_END = 0x0028E000
+LAYEREDFS_RESERVED_SIZE = 0x130
 VERSION_STORAGE_SIZE = 0x40
 VERSION_STORAGE_START = TEXT_MAPPED_END - VERSION_STORAGE_SIZE
 VERSION_IDENTIFIER = b"offline_patch_v1.0.0\0"
-PAYLOAD_START = 0x0028D1B0
+PAYLOAD_START = 0x0028D2E0
 TRANSPORTER_REDIRECT_AREA_START = 0x0028DD00
 TRANSPORTER_REDIRECT_AREA_SIZE = 0xE0
 LOCAL_VALIDATION_AREA_START = (
@@ -32,6 +34,12 @@ TRANSPORTER_REDIRECT_HOOK_RANGES = (
     (0x0021A7E0, 0x0021A7E4),
     (0x0021AA0C, 0x0021AA24),
     (0x0021AB50, 0x0021AB68),
+)
+TICKET_INTERFACES = (
+    (0x00249754, "initialize", "ticketjob_initialize", 0x0023D3C0),
+    (0x00249774, "poll", "ticketjob_poll", 0x0023E230),
+    (0x00249818, "campaignrequest", "movercampaign_request", 0x0023BE4C),
+    (0x00249CEC, "unbind", "ticketjob_unbind", 0x0023E63C),
 )
 
 
@@ -111,6 +119,7 @@ def main() -> None:
     sym = symbols(args.symbols)
     required = {
         "combinepatch_codeusedend", "combinepatch_offlinepayloadusedend",
+        "combinepatch_offlinepayloadstart", "textactualend", "textmappedend",
         "fshelpers_payloadbegin", "fshelpers_payloadend",
         "bankdataredirect_payloadbegin", "bankdataredirect_payloadend",
         "localticket_payloadbegin", "localticket_payloadend",
@@ -119,7 +128,10 @@ def main() -> None:
         "patchpaths_payloadbegin", "patchpaths_payloadend",
         "combinepatch_titletextinitialize", "combinepatch_titlestateupdate",
         "combinepatch_titleprocessmodetoggle", "combinepatch_networkupdate",
-        "combinepatch_networkavailability", "combinepatch_ticketupdate",
+        "combinepatch_networkavailability",
+        "combinepatch_onlineticketbypass", "online_ticket_check_bypass",
+        "combinepatch_modestorage", "combinepatch_ticketwrappersend",
+        "localticket_initialize", "localticket_poll", "localticket_campaignresult",
         "combinepatch_eligibilityupdate", "combinepatch_getpokemonupdate",
         "combinepatch_saveskipremotejob",
         "offlinepatch_networkupdate", "offlinepatch_stage", "offlinepatch_commit",
@@ -127,26 +139,50 @@ def main() -> None:
         "offlinepatch_preparegen12validation",
         "offlinepatch_versionidentifier",
     }
+    for _, operation, native_name, _ in TICKET_INTERFACES:
+        required.update((f"combinepatch_ticket{operation}",
+                         f"combinepatch_ticket{operation}local", native_name))
     missing = sorted(required - sym.keys())
     if missing:
         raise ValueError(f"missing armips symbols: {', '.join(missing)}")
     if not CAVE_START < sym["combinepatch_codeusedend"] <= CAVE_END:
         raise ValueError("code-cave payload exceeds the audited range")
-    if not PAYLOAD_START < sym["combinepatch_offlinepayloadusedend"] <= PAYLOAD_END:
+    if not (
+        sym["textactualend"] == TEXT_ACTUAL_END
+        and sym["textmappedend"] == TEXT_MAPPED_END
+        and sym["combinepatch_offlinepayloadstart"] == PAYLOAD_START
+        and PAYLOAD_START % 0x10 == 0
+        and PAYLOAD_START - TEXT_ACTUAL_END >= LAYEREDFS_RESERVED_SIZE
+    ):
+        raise ValueError("invalid LayeredFS reservation or payload alignment")
+    for image in (base, patched):
+        if image[TEXT_ACTUAL_END - IMAGE_BASE:PAYLOAD_START - IMAGE_BASE] != bytes(
+            PAYLOAD_START - TEXT_ACTUAL_END
+        ):
+            raise ValueError("Luma LayeredFS reservation is not untouched padding")
+    if not (
+        PAYLOAD_START < sym["combinepatch_offlinepayloadusedend"]
+        <= TRANSPORTER_REDIRECT_AREA_START
+    ):
         raise ValueError("offline payload exceeds the executable tail")
     payload_objects = (
         ("fshelpers_payloadbegin", "fshelpers_payloadend"),
-        ("bankdataredirect_payloadbegin", "bankdataredirect_payloadend"),
         ("localticket_payloadbegin", "localticket_payloadend"),
+        ("bankdataredirect_payloadbegin", "bankdataredirect_payloadend"),
         ("offlineflow_payloadbegin", "offlineflow_payloadend"),
         ("patchpaths_payloadbegin", "patchpaths_payloadend"),
     )
     for begin, end in payload_objects:
         if sym[begin] >= sym[end]:
             raise ValueError(f"empty or reversed payload object: {begin}")
-    if not CAVE_START < sym["fshelpers_payloadbegin"] < sym["fshelpers_payloadend"] <= CAVE_END:
-        raise ValueError("filesystem helper object exceeds the audited code cave")
-    tail_objects = payload_objects[1:]
+    if not (
+        CAVE_START < sym["fshelpers_payloadbegin"]
+        < sym["fshelpers_payloadend"] == sym["localticket_payloadbegin"]
+        < sym["localticket_payloadend"] == sym["combinepatch_codeusedend"]
+        <= CAVE_END
+    ):
+        raise ValueError("filesystem/ticket objects exceed the audited code cave")
+    tail_objects = payload_objects[2:]
     if sym[tail_objects[0][0]] < PAYLOAD_START:
         raise ValueError("first tail payload object precedes the executable tail")
     for (_, previous_end), (next_begin, _) in zip(tail_objects, tail_objects[1:]):
@@ -248,7 +284,6 @@ def main() -> None:
         0x00248B88: ("combinepatch_networkavailability", True, 0xE),
         0x00248B98: ("combinepatch_networkskipremotejob", False, 0xE),
         0x00248BC0: ("combinepatch_selectinitialconnectmessage", True, 0xE),
-        0x00249600: ("combinepatch_ticketupdate", False, 0xE),
         0x00248814: ("combinepatch_remotecheckupdate", False, 0xE),
         0x00248C68: ("combinepatch_eligibilityupdate", False, 0xE),
         0x002455D0: ("combinepatch_getpokemonupdate", False, 0xE),
@@ -270,10 +305,73 @@ def main() -> None:
         0x0024A428: ("combinepatch_afterrollback", False, 0x1),
         0x0024A6F0: ("combinepatch_selectsavemessage", True, 0xE),
     }
+    for address, operation, native_name, native_address in TICKET_INTERFACES:
+        if branch_target(base, address) != (native_address, True, 0xE):
+            raise ValueError(f"unexpected native ticket call at {address:08X}")
+        if sym[native_name] != native_address:
+            raise ValueError(f"incorrect Mover ticket address: {native_name}")
+        hooks[address] = (f"combinepatch_ticket{operation}", True, 0xE)
     for address, (name, link, condition) in hooks.items():
         target, actual_link, actual_condition = branch_target(patched, address)
         if (target, actual_link, actual_condition) != (sym[name], link, condition):
             raise ValueError(f"incorrect hook at {address:08X}")
+
+    # Keep the native state, callback and cleanup intact except for the four
+    # interface calls; no whole-state ticket bypass remains.
+    # 除四个接口调用外，原版状态、回调与清理不变；不再从整状态外部跳过票据流程。
+    state_start, state_end = 0x00249600, 0x00249D38
+    expected_state = bytearray(base[state_start - IMAGE_BASE:state_end - IMAGE_BASE])
+    for address, _, _, _ in TICKET_INTERFACES:
+        expected_state[address - state_start:address - state_start + 4] = \
+            patched[address - IMAGE_BASE:address - IMAGE_BASE + 4]
+    if patched[state_start - IMAGE_BASE:state_end - IMAGE_BASE] != expected_state:
+        raise ValueError("native ticket state/callback/cleanup changed outside its interfaces")
+    for start, end in ((0x0023D3C0, 0x0023E910), (0x0023BC50, 0x0023BF24),
+                       (0x00199720, 0x0019983C)):
+        if patched[start - IMAGE_BASE:end - IMAGE_BASE] != base[start - IMAGE_BASE:end - IMAGE_BASE]:
+            raise ValueError(f"native ticket implementation changed: {start:08X}-{end:08X}")
+
+    policy = sym["online_ticket_check_bypass"]
+    policy_address = sym["combinepatch_onlineticketbypass"]
+    wrapper_start = sym["combinepatch_ticketinitialize"]
+    wrapper_end = sym["combinepatch_ticketwrappersend"]
+    if policy not in (0, 1) or patched[policy_address - IMAGE_BASE] != policy:
+        raise ValueError("ONLINE_TICKET_CHECK_BYPASS must be a matching 0/1 byte")
+    if not CAVE_START <= policy_address < wrapper_start < wrapper_end <= sym["fshelpers_payloadbegin"]:
+        raise ValueError("ticket policy/wrappers exceed the audited code cave")
+    for _, operation, native_name, _ in TICKET_INTERFACES:
+        wrapper = sym[f"combinepatch_ticket{operation}"]
+        local = sym[f"combinepatch_ticket{operation}local"]
+        if local != wrapper + 36:
+            raise ValueError(f"incorrect ticket {operation} wrapper layout")
+        for offset, pointer in ((0, sym["combinepatch_modestorage"]),
+                                (16, policy_address)):
+            address = wrapper + offset
+            instruction = word(patched, address)
+            if instruction & 0xFFFFF000 != 0xE59FC000:
+                raise ValueError(f"ticket {operation} does not load its policy pointer")
+            literal = address + 8 + (instruction & 0xFFF)
+            if not wrapper_start <= literal < wrapper_end or word(patched, literal) != pointer:
+                raise ValueError(f"incorrect ticket {operation} policy literal")
+            if word(patched, address + 4) != 0xE5DCC000 or word(patched, address + 8) != 0xE35C0000:
+                raise ValueError(f"ticket {operation} does not test the session/policy byte")
+        for offset, target, condition in ((12, local, 0x0), (28, local, 0x1),
+                                           (32, sym[native_name], 0xE)):
+            if branch_target(patched, wrapper + offset) != (target, False, condition):
+                raise ValueError(f"incorrect ticket {operation} route")
+        if operation == "initialize":
+            if word(patched, local) != 0xE5941028 or \
+                    branch_target(patched, local + 4) != (sym["localticket_initialize"], False, 0xE):
+                raise ValueError("local ticket initialization loses the shared-data argument")
+        elif operation == "poll":
+            if branch_target(patched, local) != (sym["localticket_poll"], False, 0xE):
+                raise ValueError("local ticket poll is not a tail call")
+        elif operation == "campaignrequest":
+            if word(patched, local) != 0xE1A00004 or \
+                    branch_target(patched, local + 4) != (sym["localticket_campaignresult"], False, 0xE):
+                raise ValueError("local campaign completion loses the state argument")
+        elif word(patched, local) != 0xE3A00001 or word(patched, local + 4) != 0xE12FFF1E:
+            raise ValueError("local ticket unbind does not return to native destruction")
 
     validation_routes = (
         (

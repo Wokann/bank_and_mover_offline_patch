@@ -165,9 +165,10 @@ bypasses local mileage, Bank Box, and save screens and uses the stock no-save
 exit. If local capture fails, the patch does not falsify the official callback
 result or silently mark the capture successful.
 
-Download Mode locally completes the separate entitlement/campaign state to
-disable `free_campaign` and online gifts while supplying the downstream
-runtime fields. This state is independent of the normal local mileage states.
+Download Mode preserves the native state 15 entitlement, ticket, campaign, and
+online-gift checks by default, including their waits, messages, and error
+handling. The one-byte switch below enables a local bypass for emulator tests;
+it does not change the post-download mileage, Box, and save-screen skip.
 
 ## Unlock Mode
 
@@ -201,10 +202,67 @@ lets the existing message system add leading zeroes. It does not invent a code,
 skip validation, force a success result, or replace the subsequent server
 operation. If the vector is empty, the original prompt is used unchanged.
 
-This mode still shares project-wide menu restrictions, the redirected Turtle
-record, and the local entitlement/online-gift bypass. Its recovery state,
-however, remains the stock state machine. The local offline `bankdata.bin` is
-neither loaded nor uploaded by the unlock display hook.
+This mode still shares project-wide menu restrictions and the redirected Turtle
+record. It preserves native state 15 ticket and online-gift checks by default,
+and its recovery state remains the stock state machine. The local offline
+`bankdata.bin` is neither loaded nor uploaded by the unlock display hook.
+
+## Ticket and online-gift checks: fixed test switch
+
+Change this value at the top of [`main.s`](main.s), then rebuild:
+
+```asm
+.definelabel ONLINE_TICKET_CHECK_BYPASS, 0
+```
+
+| Session mode | `0`: default native checks | `1`: emulator test bypass |
+| --- | --- | --- |
+| Offline | Supply a local 999-day entitlement at the state 15 job interfaces without requesting online campaign data | Same as left |
+| Download | Native state 15 ticket, campaign, and online-gift checks | Use the same local state 15 result as Offline Mode |
+| Unlock | Native state 15 ticket, campaign, and online-gift checks | Use the same local state 15 result as Offline Mode |
+
+At the time of this ticket-routing commit, official Azahar does not implement
+`am:net`'s `GetRightsOnlyTicketData` (command `0x0821`; see the
+[interface registration](https://github.com/azahar-emu/azahar/blob/6280521bf26ef1393974cd8c898de29cf75f5752/src/core/hle/service/am/am_net.cpp#L115)).
+The two ticket configurations therefore remain available: `0` runs native checks;
+`1` bypasses native ticket queries and supplies local results for emulators
+missing this interface. The author's Azahar
+[`pokebank` test branch](https://github.com/Wokann/azahar/tree/pokebank)
+implements the interface, which the author has verified in online testing.
+For that fork or real hardware, the value can remain fixed at `0`; no ticket
+bypass is needed. Offline Mode always uses local results regardless of this value.
+
+That Azahar feature implementation was generated entirely by AI and does not meet the
+[Azahar AI Use Policy](https://github.com/azahar-emu/azahar/blob/master/AI-POLICY.md)
+requirements for accepting contributions written entirely or substantially by AI.
+It is therefore kept only in the personal test branch and will not be submitted
+to Azahar's official main branch.
+
+Both paths remain in the same code. This definition changes only the policy
+byte at `[0x002A7E04, 0x002A7E05)`. State 15 retains its original entry and
+state transitions. Only three calls are redirected: job initialization at
+`0x002B0444`, result polling at `0x002B0464`, and unbinding at `0x002B1994`.
+With `0`, Download and Unlock modes call the native job interfaces. Offline
+Mode, or online modes with `1`, use local job results. Native allocation,
+construction, result checks, field copying, UI cleanup, and destruction remain
+in place. Local unbinding succeeds without a network call because no client
+was bound.
+
+Local results contain the current console date and an expiry exactly 999 days
+later. Native getters calculate remaining days, hours, and validity. The
+current date itself is not advanced and remains the local mileage reference.
+Purchase counts stay `-1` (unknown), so no ticket-purchase reward is invented.
+Existing EC account fields are preserved; there is no free-campaign window or
+system eShop applet/loading-animation simulation. The completed job uses the
+same status as native verification with at least 15 entitlement days. Clock
+failure or an expiry beyond the native year range follows native error handling.
+
+This switch controls only state 15. It does not skip NNID login, other network
+requests, or server-side validation, and it does not change the post-download
+exit, unlock transaction handling, or existing state 12/13 mode dispatch. It is
+for emulator compatibility; hardware and emulators implementing this interface
+use `0`. Native check errors retain their original handling rather than being
+reported as successful networking.
 
 ## Offline Mode: startup, recovery, and first use
 
@@ -354,14 +412,14 @@ Spanish, Korean, Simplified Chinese, and Traditional Chinese.
 | `fs_helpers.c` | Shared checked SD-filesystem implementation used by Bankdata and Turtle backends |
 | `offline_flow.c` | Local connection, disconnection, and save-display state updates |
 | `local_mileage.c` | Converts console time into the packed date consumed by the stock Poké Mile states; it does not replace the native point calculation |
-| `local_ticket.c` | Locally completes the entitlement/optional-reward state and supplies ticket fields without implementing Poké Mile calculation |
+| `local_ticket.c` | Supplies local ticket results at the native entitlement state's job interfaces without implementing Poké Mile calculation |
 | `unlock_mode.c` | Selects and normalizes the first server-returned unlock candidate for the stock challenge-code UI |
 | `patch_paths.c` | Path constants placed in the verified tail-code region |
 | `turtle_redirect.c` | Redirected Turtle-record backend placed in the verified HOME-code region |
 | `../include/bankdata_redirect.h` | Confirmed serialized Bankdata layout, partial native Bank views, redirection constants, and stock entry points |
 | `../include/fs_helpers.h` | Shared filesystem types, SDK entry points, and checked SD-helper declarations |
 | `../include/local_mileage.h` | Local mileage-date input declaration |
-| `../include/local_ticket.h` | Offline-ticket shared-data view, entitlement constants, and state entry point |
+| `../include/local_ticket.h` | Ticket-job and shared-data views, entitlement constants, and local job interfaces |
 | `../include/offline_flow.h` | Stock timer entry points used by local flow states |
 | `../include/patch_types.h` | Fixed-width primitive types shared by the injected C objects |
 | `../include/patch_paths.h` | Path declarations shared across the separately placed objects |
@@ -397,11 +455,11 @@ were not unused gaps in the original image.
 | Address range | Provenance and original purpose | Current use and boundary constraints |
 | --- | --- | --- |
 | Scattered in-place hooks in `main.s` | Instructions at original function entries, call sites, or branches | Change jumps, conditions, or a few instructions; wrappers replay overwritten instructions where necessary. A hook does not make the whole original function reclaimable. |
-| `[0x00285BA8, 0x0028711C)` | Reclaimed disabled code: input, update, construction, and cleanup functions of the dedicated HOME box-selection UI; original span `0x1574` (5492 bytes) | Holds six C objects for FS, Bankdata, offline flow, local mileage, local entitlement, and unlock display. Ordinary box and shared functions are excluded. `0x0028711C` starts an adjacent normal UI function and must not be overwritten. |
-| `[0x002A7BF0, 0x002A8404)` | Reclaimed disabled code: state 27 HOME operation control and its creation, initialization, and cleanup functions | Assembly dispatch, wrappers, and trampolines end at `0x002A82E4`. The Turtle backend starts there and continues into the reclaimed region in the next row. |
+| `[0x00285BA8, 0x0028711C)` | Reclaimed disabled code: input, update, construction, and cleanup functions of the dedicated HOME box-selection UI; original span `0x1574` (5492 bytes) | Holds six C objects for FS, Bankdata, offline flow, local mileage, local entitlement, and unlock display, followed by ticket-job wrappers. Ordinary box and shared functions are excluded. `0x0028711C` starts an adjacent normal UI function and must not be overwritten. |
+| `[0x002A7BF0, 0x002A8404)` | Reclaimed disabled code: state 27 HOME operation control and its creation, initialization, and cleanup functions | Assembly dispatch, wrappers, trampolines, and the one-byte ticket switch end at `0x002A82E4`. The Turtle backend starts there and continues into the reclaimed region in the next row. |
 | `[0x002A8404, 0x002A8760)` | Reclaimed disabled code: state 14 eShop launch UI and companion functions | Holds the rest of the Turtle backend. These two reclaimed regions total `0xB70` (2928 bytes) and are fully occupied. `0x002A8760` is the native transaction-recovery entry, which remains intact and must not be overwritten. |
-| `[0x002B0270, 0x002B0274)` | In-place edit: entry of the state 15 entitlement-check update function | One branch enters the existing local bypass; all three modes still use this entry behavior. |
-| `[0x002B0274, 0x002B1AD0)` | Preserved: original state 15 body and companion functions | Matches the original image and is not payload space. Preserving the body does not mean online entitlement checks are currently enabled. |
+| Four bytes each at `0x002B0444`, `0x002B0464`, and `0x002B1994` | In-place edits: state 15 job initialization, result polling, and exit unbinding calls | Three `BL` calls enter mode wrappers. Offline Mode always uses local results; the fixed test byte selects native or local jobs for Download and Unlock modes. |
+| `[0x002B0270, 0x002B1AD0)`, excluding those three calls | Preserved: original state 15 body and companion functions | All other bytes match the original image. Every mode retains native state transitions, result copying, and cleanup; this is not payload space. The native ticket-job functions are also unchanged. |
 | `[0x00313910, 0x00313A40)` | Existing padding in the last `.text` page | Reserves `0x130` (304 bytes) for Luma LayeredFS; this patch does not write here. `0x00313A40` is this project's chosen separation boundary, not a fixed Luma address. |
 | `[0x00313A40, 0x00313FC0)` | Existing padding in the last `.text` page; span `0x580` (1408 bytes) | Holds tail assembly and `patch_paths.o`, ending at `0x00313E2B`. The remaining padding is unused by this project. |
 | `[0x00313FC0, 0x00314000)` | Existing padding in the last `.text` page | A 64-byte version-identifier slot containing `offline_patch_v1.0.0` with zero padding; it does not currently affect runtime behavior. It must not cross the `.rodata` start at `0x00314000`. |
@@ -421,15 +479,17 @@ padding between objects.
 | `bankdata_redirect.o` | `[0x00286150, 0x002867AC)` | `0x65C` (1628 bytes) |
 | `offline_flow.o` | `[0x002867AC, 0x002868CC)` | `0x120` (288 bytes) |
 | `local_mileage.o` | `[0x002868CC, 0x00286CF0)` | `0x424` (1060 bytes) |
-| `local_ticket.o` | `[0x00286CF0, 0x00286D50)` | `0x60` (96 bytes) |
-| `unlock_mode.o` | `[0x00286D50, 0x00286DA0)` | `0x50` (80 bytes) |
-| Assembly wrappers and trampolines in reclaimed code | `[0x002A7BF0, 0x002A82E4)` | `0x6F4` (1780 bytes) |
+| `local_ticket.o` | `[0x00286CF0, 0x00286EB8)` | `0x1C8` (456 bytes) |
+| `unlock_mode.o` | `[0x00286EB8, 0x00286F08)` | `0x50` (80 bytes) |
+| Ticket-job assembly wrappers and literal pool | `[0x00286F08, 0x00286F90)` | `0x88` (136 bytes) |
+| Assembly wrappers, trampolines, and ticket switch in reclaimed code | `[0x002A7BF0, 0x002A82E4)` | `0x6F4` (1780 bytes) |
 | `turtle_redirect.o` | `[0x002A82E4, 0x002A8760)` | `0x47C` (1148 bytes) |
 | `.text` tail assembly | `[0x00313A40, 0x00313D78)` | `0x338` (824 bytes) |
 | `patch_paths.o` | `[0x00313D78, 0x00313E2B)` | `0xB3` (179 bytes) |
 
-The six C objects occupy `0x11F8` (4600 bytes), leaving
-`[0x00286DA0, 0x0028711C)`, or `0x37C` (892 bytes). This remainder still
+The six C objects occupy `0x1360` (4960 bytes); the additional 136-byte ticket-job
+wrappers bring the total to `0x13E8` (5096 bytes), leaving
+`[0x00286F90, 0x0028711C)`, or `0x18C` (396 bytes). This remainder still
 contains disabled HOME functions, not natural zero padding. The tail area leaves
 `[0x00313E2B, 0x00313FC0)`, or `0x195` (405 bytes). For 4-byte-aligned ARM
 code, the usable start is `0x00313E2C`, leaving `0x194` (404 bytes).

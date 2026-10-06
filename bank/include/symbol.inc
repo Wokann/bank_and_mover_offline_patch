@@ -125,11 +125,17 @@
 .definelabel BankDataSync_TurtleTransactionWrite, 0x002AF720
 .definelabel BankDataSync_TurtleSaveBegin,         0x002AF784
 .definelabel HomeRollbackState_Update,           0x002AFE94
-; State ID 15: the 0x158-byte state contains optional-reward UI and remote-result
-; handling. It is distinct from state ID 12 (reward eligibility) and ID 25 (Bank Box).
-; 状态 ID 15：该 0x158 字节状态包含可选奖励界面与远端结果处理。它不同于状态 ID 12
+; State ID 15: a 0x50-byte controller owns a 0x158-byte entitlement job. It is
+; distinct from state ID 12 (reward eligibility) and ID 25 (Bank Box).
+; 状态 ID 15：0x50 字节控制器持有一个 0x158 字节使用权作业。它不同于状态 ID 12
 ; （奖励资格）和 ID 25（Bank 盒子）。
 .definelabel OptionalRewardState_Update,         0x002B0270
+.definelabel OptionalRewardState_TicketInitializeCall, 0x002B0444
+.definelabel OptionalRewardState_TicketPollCall,  0x002B0464
+.definelabel OptionalRewardState_TicketUnbindCall,0x002B1994
+.definelabel TicketJob_Initialize,               0x002A04C0
+.definelabel TicketJob_Poll,                     0x002A1CAC
+.definelabel TicketJob_Unbind,                   0x002A20B8
 .definelabel BankSaveState_Update,              0x002B1CF8
 .definelabel BankSave_SerializeAndStage,        0x002B2320
 .definelabel BankSaveState_Initialize,           0x002B2520

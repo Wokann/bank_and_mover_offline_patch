@@ -4,11 +4,17 @@
 
 .include "../include/symbol.inc"
 
+// 0: native online ticket/campaign checks; 1: local bypass for emulator tests.
+// Both routes remain in the image; the policy is stored as a single byte.
+// 0：联网模式走原版票据／活动检查；1：模拟器测试时提供本地结果。
+// 两条路线始终保留在镜像中；策略只占一个字节。
+.definelabel ONLINE_TICKET_CHECK_BYPASS, 0
+
 .definelabel OfflinePatch_VersionStorageSize,   0x40
 .definelabel OfflinePatch_VersionStorageStart,  TextMappedEnd - OfflinePatch_VersionStorageSize
 .definelabel CombinePatch_CodeStart, MoverCombine_CodeCaveStart
 .definelabel CombinePatch_CodeEnd, MoverCombine_CodeCaveEnd
-.definelabel CombinePatch_OfflinePayloadStart, 0x0028D1B0
+.definelabel CombinePatch_OfflinePayloadStart, 0x0028D2E0
 .definelabel CombinePatch_OfflinePayloadEnd,   OfflinePatch_VersionStorageStart
 .definelabel CombinePatch_ModeStorage,         0x00329FFC
 .definelabel CombinePatch_ModeOffline,         0
@@ -46,8 +52,14 @@
     b CombinePatch_NetworkSkipRemoteJob
 .org MoverNetworkState_Initialize + 0x68
     bl CombinePatch_SelectInitialConnectMessage
-.org MoverTicketState_Update
-    b CombinePatch_TicketUpdate
+.org MoverTicketState_TicketInitializeCall
+    bl CombinePatch_TicketInitialize
+.org MoverTicketState_TicketPollCall
+    bl CombinePatch_TicketPoll
+.org MoverTicketState_CampaignRequestCall
+    bl CombinePatch_TicketCampaignRequest
+.org MoverTicketState_TicketUnbindCall
+    bl CombinePatch_TicketUnbind
 .org MoverRemoteCheckState_Update
     b CombinePatch_RemoteCheckUpdate
 .org MoverTransferEligibilityState_Update
@@ -201,14 +213,6 @@ CombinePatch_NetworkUpdate:
     beq OfflinePatch_NetworkUpdate
     push {r4-r6,lr}
     b MoverNetworkState_Update + 4
-
-CombinePatch_TicketUpdate:
-    ldr r12,=CombinePatch_ModeStorage
-    ldrb r12,[r12]
-    cmp r12,#CombinePatch_ModeOffline
-    beq OfflinePatch_TicketUpdate
-    push {r3-r9,lr}
-    b MoverTicketState_Update + 4
 
 CombinePatch_RemoteCheckUpdate:
     ldr r12,=CombinePatch_ModeStorage
@@ -393,20 +397,93 @@ CombinePatch_SelectDisconnectMessage:
     bx lr
     .pool
 
-// Place the shared filesystem module in the audited code cave. Keeping this
-// module out-of-line lets the Bankdata load and transaction modules reuse one
-// implementation without duplicating their low-level IPC helpers.
-// 将共用文件系统模块放入已审计的代码空位。该模块保持独立后，Bankdata
-// 载入与事务模块可共用同一套底层 IPC 辅助实现，无需重复。
+// The single-byte test policy affects Original Mode only. Offline Mode always
+// supplies local ticket results through the same native job interfaces.
+// 单字节测试策略只影响原版模式。离线模式始终经原版作业接口提供本地票据结果。
+CombinePatch_OnlineTicketBypass:
+    .byte ONLINE_TICKET_CHECK_BYPASS
+    .align 4
+
+// Intercept only native job interfaces and the campaign request. Tail calls
+// preserve their ABI, the original BL return address and stack alignment.
+// 只转接原版作业接口及活动请求。尾调用保留 ABI、原 BL 返回地址与栈对齐。
+CombinePatch_TicketInitialize:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeOffline
+    beq CombinePatch_TicketInitializeLocal
+    ldr r12,=CombinePatch_OnlineTicketBypass
+    ldrb r12,[r12]
+    cmp r12,#0
+    bne CombinePatch_TicketInitializeLocal
+    b TicketJob_Initialize
+CombinePatch_TicketInitializeLocal:
+    ldr r1,[r4,#0x28]
+    b LocalTicket_Initialize
+CombinePatch_TicketPoll:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeOffline
+    beq CombinePatch_TicketPollLocal
+    ldr r12,=CombinePatch_OnlineTicketBypass
+    ldrb r12,[r12]
+    cmp r12,#0
+    bne CombinePatch_TicketPollLocal
+    b TicketJob_Poll
+CombinePatch_TicketPollLocal:
+    b LocalTicket_Poll
+CombinePatch_TicketCampaignRequest:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeOffline
+    beq CombinePatch_TicketCampaignRequestLocal
+    ldr r12,=CombinePatch_OnlineTicketBypass
+    ldrb r12,[r12]
+    cmp r12,#0
+    bne CombinePatch_TicketCampaignRequestLocal
+    b MoverCampaign_Request
+CombinePatch_TicketCampaignRequestLocal:
+    mov r0,r4
+    b LocalTicket_CampaignResult
+CombinePatch_TicketUnbind:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeOffline
+    beq CombinePatch_TicketUnbindLocal
+    ldr r12,=CombinePatch_OnlineTicketBypass
+    ldrb r12,[r12]
+    cmp r12,#0
+    bne CombinePatch_TicketUnbindLocal
+    b TicketJob_Unbind
+CombinePatch_TicketUnbindLocal:
+    // No network client was bound; the native destructor still follows.
+    // 未绑定网络客户端；返回后仍执行原版析构。
+    mov r0,#1
+    bx lr
+    .pool
+CombinePatch_TicketWrappersEnd:
+
 FsHelpers_PayloadBegin:
     .importobj "../build/fs_helpers.o"
 FsHelpers_PayloadEnd:
 
+LocalTicket_PayloadBegin:
+    .importobj "../build/local_ticket.o"
+LocalTicket_PayloadEnd:
+
 CombinePatch_CodeUsedEnd:
 .endarea
 
+// Luma installs its LayeredFS payload at the declared text end. Leave 0x130
+// bytes untouched, then align this project's tail to 0x10 bytes.
+// Luma 从声明的 text 末尾安装 LayeredFS 荷载。保留 0x130 字节不写入，再将
+// 本项目尾部荷载按 0x10 字节对齐。
+.org TextActualEnd
+.area 0x130
+.endarea
+
 .org CombinePatch_OfflinePayloadStart
-.area CombinePatch_OfflinePayloadEnd-CombinePatch_OfflinePayloadStart
+.area 0x0028DD00-CombinePatch_OfflinePayloadStart
 OfflinePatch_EligibilityEntry:
     ldr r1,[r0,#0x10]
     cmp r1,#7
@@ -437,10 +514,6 @@ OfflinePatch_GetPokemonEntry:
 BankdataRedirect_PayloadBegin:
     .importobj "../build/bankdata_redirect.o"
 BankdataRedirect_PayloadEnd:
-
-LocalTicket_PayloadBegin:
-    .importobj "../build/local_ticket.o"
-LocalTicket_PayloadEnd:
 
 OfflineFlow_PayloadBegin:
     .importobj "../build/offline_flow.o"

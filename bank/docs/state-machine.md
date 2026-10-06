@@ -222,7 +222,7 @@ the middle, states 18 and 17 resolve the persisted state on a later use.
 | Turtle backend | Stock `data:/turtle` storage | Redirected to `sd:/3ds/Bank/sav.bin` | Redirected to the same `sav.bin` | Redirected to the same `sav.bin` |
 | state 5 | Real connection | Stock | Complete the session locally; no remote job | Stock |
 | state 8 | Server account summary | Stock | Classify existing/first-use from local `bankdata.bin/.bak` | Stock |
-| state 15 | Remote entitlement/campaign | Supply required ticket fields locally; disable online campaigns | Same as Download Mode | Same project-wide local result |
+| state 15 | Remote entitlement/campaign | Native by default; fixed test switch can enable a local bypass | Always supply required ticket fields locally; disable online campaigns | Use the same fixed test switch as Download Mode |
 | state 9 | Server-side first creation | Stock creation and upload | Create the initial local `bankdata.bin` | Stock creation and upload |
 | state 11 | Select recovery path | Stock | Keep the test, but redirect result `9` to state 17 instead of state 18 | Stock |
 | state 18 | Current Turtle remote recovery | Stock | Never entered | Stock; challenge UI may append the first server candidate |
@@ -234,12 +234,27 @@ the middle, states 18 and 17 resolve the persisted state on a later use.
 | state 19/20 | Remote release and disconnect | Stock no-save exit after capture | Local cleanup and title return | Stock |
 
 Download Mode is not a full stock mode. It retains real networking, first-use
-creation, transaction recovery, and complete-file download, but state 15 uses
-the local ticket result and a successful capture immediately takes the stock
+creation, transaction recovery, and complete-file download. State 15 preserves
+native ticket and online-gift checks by default; a successful capture takes the stock
 no-save exit. HOME, support-code, and Mover/eShop menu operations are also
 disabled or redirected by the patch. Because the Turtle backend is redirected
 globally, server transaction descriptors written in Download Mode are stored
 in `sav.bin`, not the stock logical-record backend.
+
+State 15 retains its native entry, transitions, job construction and cleanup.
+Only job initialization at `0x002B0444`, result polling at `0x002B0464`, and
+unbinding at `0x002B1994` are redirected. Wrappers occupy the reclaimed HOME
+box-selection UI region; all other bytes in `[0x002B0270, 0x002B1AD0)` and the
+native job implementation remain intact. Download and Unlock modes call native
+interfaces with `ONLINE_TICKET_CHECK_BYPASS=0`. Offline Mode, or online modes
+with `1`, supply console time and an expiry 999 days later. Purchase counts stay
+`-1`, existing EC account fields are retained, and no free-campaign window is
+provided. Native getters and exit cleanup copy the resulting entitlement and
+date. Local unbinding does not access a nonexistent network client; native
+destruction still runs. No system eShop applet or loading-animation simulation
+is used. Both paths remain present, and only one byte at `0x002A7E04` changes
+between builds. The switch does not alter other networking, transaction
+recovery, mileage calculations, or post-download exit branches.
 
 With no usable game data, `0x002AC958` branches to the existing failure substate
 at `0x002ACA90` after the stock message completes and its text is cleared.

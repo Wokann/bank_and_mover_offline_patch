@@ -58,6 +58,14 @@
 .definelabel StateTimer_Reset,                   0x00233844
 .definelabel StateTimer_HasElapsed,              0x0019B758
 .definelabel MoverTicketState_Update,           0x00249600
+.definelabel MoverTicketState_TicketInitializeCall, 0x00249754
+.definelabel MoverTicketState_TicketPollCall,     0x00249774
+.definelabel MoverTicketState_CampaignRequestCall, 0x00249818
+.definelabel MoverTicketState_TicketUnbindCall,   0x00249CEC
+.definelabel TicketJob_Initialize,               0x0023D3C0
+.definelabel TicketJob_Poll,                     0x0023E230
+.definelabel TicketJob_Unbind,                   0x0023E63C
+.definelabel MoverCampaign_Request,              0x0023BE4C
 .definelabel MoverRemoteCheckState_Update,      0x00248814
 .definelabel MoverTransferEligibilityState_Update, 0x00248C68
 .definelabel MoverNoTransferState_Update,         0x00248360

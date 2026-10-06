@@ -73,11 +73,6 @@ enum MoverNetworkStatePhase {
     MOVER_NETWORK_PHASE_COMPLETE = 3
 };
 
-enum MoverTicketStatePhase {
-    MOVER_TICKET_PHASE_ERROR = 2,
-    MOVER_TICKET_PHASE_COMPLETE = 3
-};
-
 enum MoverRemoteCheckStatePhase {
     MOVER_REMOTE_CHECK_PHASE_COMPLETE = 8
 };

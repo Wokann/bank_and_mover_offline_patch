@@ -16,6 +16,11 @@ IMAGE_BASE = 0x00100000
 EXPECTED_BASE_SHA256 = "2DCE4796F54807CF8A67F1CE6297BF472D969B30ED7A7E8E25C2A6C2BDC40ABF"
 OPTIONAL_REWARD_STATE = 0x002B0270
 OPTIONAL_REWARD_BODY_END = 0x002B1AD0
+TICKET_JOB_CALLS = (
+    (0x002B0444, "combinepatch_ticketinitialize", "ticketjob_initialize"),
+    (0x002B0464, "combinepatch_ticketpoll", "ticketjob_poll"),
+    (0x002B1994, "combinepatch_ticketunbind", "ticketjob_unbind"),
+)
 HOME_BOX_CAVE_START = 0x00285BA8
 HOME_BOX_CAVE_END = 0x0028711C
 HOME_CAVE_START = 0x002A7BF0
@@ -210,7 +215,18 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
         "unlockmode_trygetfirstcandidatecode",
         "combinepatch_networkupdate",
         "combinepatch_initialremoterecordupdate",
-        "combinepatch_optionalrewardbypassupdate",
+        "combinepatch_ticketinitialize",
+        "combinepatch_ticketinitializelocal",
+        "combinepatch_ticketpoll",
+        "combinepatch_ticketpolllocal",
+        "combinepatch_ticketunbind",
+        "combinepatch_ticketunbindlocal",
+        "combinepatch_ticketwrappersend",
+        "ticketjob_initialize",
+        "ticketjob_poll",
+        "ticketjob_unbind",
+        "combinepatch_onlineticketbypass",
+        "online_ticket_check_bypass",
         "combinepatch_firstpresentdispatch",
         "combinepatch_bankdatasyncdispatch",
         "combinepatch_bankdatasyncturtlestate0",
@@ -263,7 +279,8 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
         "offlinepatch_postselectionconnectionupdate",
         "offlinepatch_disconnectupdate",
         "offlinepatch_initialremoterecordupdate",
-        "offlinepatch_optionalrewardbypassupdate",
+        "localticket_initialize",
+        "localticket_poll",
         "localmileage_getcurrentdate",
         "offlinepatch_loadbankdata",
         "offlinepatch_savedisplaydelayupdate",
@@ -338,10 +355,25 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
         raise ValueError("local payload no longer starts in the HOME box-selection UI region")
     if not payload_begin < payload_end <= HOME_BOX_CAVE_END:
         raise ValueError("local payload exceeds the HOME box-selection UI region")
-    reward_body_start = image_offset(OPTIONAL_REWARD_STATE + 4)
-    reward_body_end = image_offset(OPTIONAL_REWARD_BODY_END)
-    if image[reward_body_start:reward_body_end] != base_image[reward_body_start:reward_body_end]:
-        raise ValueError("native entitlement state body or companion functions were modified")
+    # Only the three job calls may differ; native allocation, construction,
+    # result handling, state transitions and destruction must remain intact.
+    # 仅允许三个作业调用点变化；保留原版分配、构造、结果处理、状态推进与析构。
+    cursor = image_offset(OPTIONAL_REWARD_STATE)
+    for address, wrapper, native in TICKET_JOB_CALLS:
+        end = image_offset(address)
+        if image[cursor:end] != base_image[cursor:end]:
+            raise ValueError("native entitlement flow changed outside a job call")
+        expect_branch(base_image, address, symbols[native], True, ARM_COND_AL,
+                      f"base {native} call")
+        expect_branch(image, address, symbols[wrapper], True, ARM_COND_AL,
+                      f"redirected {native} call")
+        cursor = end + 4
+    end = image_offset(OPTIONAL_REWARD_BODY_END)
+    if image[cursor:end] != base_image[cursor:end]:
+        raise ValueError("native entitlement companion functions were modified")
+    job_start, job_end = image_offset(0x002A04C0), image_offset(0x002A2504)
+    if image[job_start:job_end] != base_image[job_start:job_end]:
+        raise ValueError("native ticket job implementation was modified")
     expect_word(
         image,
         HOME_BOX_CAVE_END,
@@ -375,7 +407,7 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
         "combinepatch_networkskipremotejobofficial",
         "combinepatch_networkupdate",
         "combinepatch_initialremoterecordupdate",
-        "combinepatch_optionalrewardbypassupdate",
+        "combinepatch_onlineticketbypass",
         "combinepatch_firstpresentdispatch",
         "combinepatch_bankdatasyncdispatch",
         "combinepatch_bankdatasyncinitialize",
@@ -458,7 +490,8 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
         "offlinepatch_postselectionconnectionupdate",
         "offlinepatch_disconnectupdate",
         "offlinepatch_initialremoterecordupdate",
-        "offlinepatch_optionalrewardbypassupdate",
+        "localticket_initialize",
+        "localticket_poll",
         "localmileage_getcurrentdate",
         "offlinepatch_loadbankdata",
         "offlinepatch_savedisplaydelayupdate",
@@ -507,7 +540,6 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
         (0x002AF3B4, "combinepatch_selectinitialconnectionmessage", True, ARM_COND_AL, "initial connection message"),
         (0x002ACBDC, "combinepatch_initialremoterecordupdate", False, ARM_COND_AL, "initial remote record update"),
         (0x002ACE14, "combinepatch_selectpostselectionconnectionmessage", True, ARM_COND_AL, "initial-record reconnect message"),
-        (OPTIONAL_REWARD_STATE, "combinepatch_optionalrewardbypassupdate", False, ARM_COND_AL, "optional reward bypass"),
         (0x002AF460, "combinepatch_bankdatasyncdispatch", False, ARM_COND_AL, "Bank data sync"),
         (0x002AF720, "combinepatch_bankdatasyncturtlestate0", False, ARM_COND_AL, "offline Turtle descriptor preservation after Bankdata load"),
         (0x002AFE50, "combinepatch_bankdatasyncinitialize", False, ARM_COND_AL, "Bank data-sync initializer"),
@@ -810,15 +842,53 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
     ):
         expect_word(image, address, ARM_NOP, name)
 
-    local_target, local_link, local_condition = decode_arm_branch(
-        image, symbols["combinepatch_optionalrewardbypassupdate"]
-    )
-    if (
-        local_link
-        or local_condition != ARM_COND_AL
-        or local_target != symbols["offlinepatch_optionalrewardbypassupdate"]
-    ):
-        raise ValueError("optional-reward bypass does not enter the local implementation")
+    # All wrappers preserve r0-r2, lr and the native aligned stack. Initialize
+    # supplies the existing state's shared pointer in r1 only on the local path.
+    # 包装保留 r0-r2、lr 与原版栈对齐；本地初始化分支才把共享数据指针装入 r1。
+    ticket_start = symbols["combinepatch_ticketinitialize"]
+    ticket_end = symbols["combinepatch_ticketwrappersend"]
+    if not payload_end <= ticket_start < ticket_end <= HOME_BOX_CAVE_END:
+        raise ValueError("ticket job wrappers exceed the HOME box-selection cave")
+    policy = symbols["online_ticket_check_bypass"]
+    if policy not in (0, 1):
+        raise ValueError("ONLINE_TICKET_CHECK_BYPASS must be 0 or 1")
+    expect_bytes(image, symbols["combinepatch_onlineticketbypass"], bytes([policy]),
+                 "online entitlement test byte")
+    for operation in ("initialize", "poll", "unbind"):
+        wrapper = symbols[f"combinepatch_ticket{operation}"]
+        local = symbols[f"combinepatch_ticket{operation}local"]
+        if local != wrapper + 36:
+            raise ValueError(f"ticket {operation} wrapper layout changed")
+        for offset, target, name in (
+            (0, symbols["combinepatch_modestorage"], "ticket session-mode pointer"),
+            (16, symbols["combinepatch_onlineticketbypass"], "ticket test-byte pointer"),
+        ):
+            address = wrapper + offset
+            word = read_word(image, address)
+            if word & 0xFFFFF000 != 0xE59FC000:
+                raise ValueError(f"{name}: expected ARM ldr r12 literal")
+            literal = address + 8 + (word & 0xFFF)
+            if not ticket_start <= literal < ticket_end:
+                raise ValueError("ticket wrapper literal is outside its payload")
+            expect_word(image, literal, target, name)
+            expect_word(image, address + 4, 0xE5DCC000, f"{name} byte load")
+            expect_word(image, address + 8, 0xE35C0000, f"{name} zero test")
+        expect_branch(image, wrapper + 12, local, False, ARM_COND_EQ,
+                      f"offline ticket {operation}")
+        expect_branch(image, wrapper + 28, local, False, ARM_COND_NE,
+                      f"test ticket {operation}")
+        expect_branch(image, wrapper + 32, symbols[f"ticketjob_{operation}"],
+                      False, ARM_COND_AL, f"native ticket {operation}")
+        if operation == "initialize":
+            expect_word(image, local, 0xE5941028, "local ticket shared-data load")
+            expect_branch(image, local + 4, symbols["localticket_initialize"],
+                          False, ARM_COND_AL, "local ticket initialization")
+        elif operation == "poll":
+            expect_branch(image, local, symbols["localticket_poll"],
+                          False, ARM_COND_AL, "local ticket result")
+        else:
+            expect_word(image, local, 0xE3A00001, "unbound local ticket success")
+            expect_word(image, local + 4, 0xE12FFF1E, "local unbind return")
 
     ips_bytes = ips.read_bytes()
     if apply_ips(base_image, ips_bytes) != image:

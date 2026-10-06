@@ -19,16 +19,28 @@ for build instructions and transaction rules.
 | `.bss` | Starts at `0x0032A000`, length `0x3A4A8` | Read/write, zero-initialized |
 | Thread stack | Length `0x40000` | ExHeader setting |
 
-The last non-zero image byte in `.text` is before `0x0028D1AC`. The ARM-aligned
-usable tail is `0x0028D1B0–0x0028E000`, or `0xE50` bytes. Ghidra's last
-referenced instruction/data location is `0x0028D188`, and its last function
-ends at `0x0028D18F`. The first current offline payload ends at `0x0028DC3D`,
-and the per-slot local-validation payload occupies `0x0028DDE0–0x0028DF54`.
+The ExHeader declares the `.text` content end at `0x0028D1AC`, while the last
+mapped page ends at `0x0028E000`. Ghidra's last referenced instruction/data
+location is `0x0028D188`, and its last function ends at `0x0028D18F`.
+Luma installs its LayeredFS payload at the declared content end when the page
+padding is sufficient, after applying IPS. This project leaves
+`0x0028D1AC–0x0028D2DC` (`0x130` bytes) untouched for it and aligns its own tail
+start to `0x0028D2E0`. The inspected Luma payload is `0x114` bytes; this reservation
+must be rechecked if that payload grows. See the official
+[installation logic](https://raw.githubusercontent.com/LumaTeam/Luma3DS/master/sysmodules/loader/source/patcher.c)
+and [payload assembly](https://raw.githubusercontent.com/LumaTeam/Luma3DS/master/sysmodules/loader/source/romfsredir.s).
+
+The first project tail area is `0x0028D2E0–0x0028DD00`, and the per-slot
+local-validation payload occupies `0x0028DDE0–0x0028DF54`.
 The `0xE0` bytes at `0x0028DD00–0x0028DDE0` form a dedicated area reserved for
 the Transporter Redirect Patch, and `0x0028DFC0–0x0028E000` holds this project's
-version identifier. Future project payloads may use both
-`0x0028D1B0–0x0028DD00` and `0x0028DDE0–0x0028DFC0`, with `0x12F` bytes currently
-free in total.
+version identifier. Project payloads may use both
+`0x0028D2E0–0x0028DD00` and `0x0028DDE0–0x0028DFC0`, totaling `0xC00` bytes before
+subtracting their contents. Assembly area limits and static verification protect
+the LayeredFS and external-patch reservations.
+
+The four ticket hooks replace existing four-byte `BL` instructions in place.
+The remaining native ticket-state and job bytes are unchanged.
 
 The zero-filled tails in `.rodata` (`0x002EBA58–0x002EC000`, `0x5A8` bytes)
 and `.data` (`0x003293FC–0x0032A000`, `0xC04` bytes) are non-executable and may
@@ -36,6 +48,61 @@ still be referenced. Expanding only the ExHeader `.text` size would overlap
 the existing `.rodata` mapping. Expansion beyond `0x0028E000` therefore needs
 a relocated full code image and matching ExHeader segment addresses, not only
 a Luma `code.ips`.
+
+## Ticket state and local results
+
+The native ticket state is `0x00249600`; its local substate is at state `+0x10`.
+Both modes retain this function, callback `0x0024991C` and cleanup `0x00249CD8`.
+Only these interfaces are routed:
+
+| Call site | Native function | Offline or test policy `1` | Original Mode, policy `0` |
+|---|---|---|---|
+| `0x00249754` | `0x0023D3C0` initialization | Populate local job fields; return `0` on failure | Original call and arguments |
+| `0x00249774` | `0x0023E230` polling | Report completion and successful result | Original call and arguments |
+| `0x00249818` | `0x0023BE4C` free-campaign request | No campaign; set substate `3` | Original request and asynchronous callback |
+| `0x00249CEC` | `0x0023E63C` unbind | No client was bound; proceed with destruction | Original unbind |
+
+The wrappers use caller-temporary `r12` for mode/policy checks. Tail calls
+preserve the original `BL` return address and stack. Only local initialization
+loads shared data from state `+0x28` into `r1`; only local campaign completion
+passes the state in `r0`. Native routes preserve their original arguments.
+
+| Substate / node | Native flow | Local-result flow |
+|---|---|---|
+| `0` | Update UI and wait for the next stage | Unchanged |
+| `1` | Wait for UI, allocate/construct the `0x158`-byte job, initialize its client | Keep waiting, allocation and construction; replace client initialization only |
+| `2` | Poll; on success compute entitlement, copy account/purchase values, set validity and register the campaign callback | Same result consumer and registration; replace polling and campaign request only |
+| `6` | Wait for the campaign callback, which advances to `3` | Local campaign completion directly advances to `3`, without fabricating a callback packet |
+| `3` | Check expiry/campaign; available advances to `7`, unavailable to `4` | Same decision; valid local dates and no campaign advance to `7` |
+| `4/5` | Show unavailable message and wait for confirmation, then error exit | Retained, not forcibly approved |
+| `7` | Set completion phase `3` and finish | Unchanged |
+| `8` | Set error phase `2` and finish | Out-of-range local dates or failed allocation also use this route |
+| Cleanup | Unbind, virtual destruction, clear job pointer, remove callback and release campaign resources | Omit only unbinding an uncreated client; retain all remaining cleanup |
+
+Local values populate the native job, not the shared entitlement outputs:
+
+| Job field | Local value and meaning |
+|---|---|
+| `+0xB8` current date | Console-current time in the native eight-byte packed layout |
+| `+0x70` expiry date | Current date plus `999` days, retaining time of day; not a substitute current time |
+| `+0xB0` account fields | Preserve shared `+0x30`; do not generate an account ID |
+| `+0x78–0x8B` five purchase counts | `-1`, no local purchase history |
+| `+0x04`, `+0xA0` | System-shop result and matched catalog count: `0` |
+| `+0xA4` job substate | `0` at initialization, `10` after successful polling |
+| `+0xA8/+0xA9/+0xAA` | First-shop flag `0`, expiry-known flag `0→1`, cancellation flag `0` |
+| SDK pointers, containers and strings | Keep native constructed values; no ticket network client is created |
+
+Native getters `0x001DB83C` and `0x0023DFA8` consume current/expiry dates and
+calculate `999` days and `23976` total hours. The native state writes shared
+`+0x3C/+0x40`, and its original validity decision sets `+0x44 = 1`. Annual
+purchase count remains `-1`; the free-campaign flag at `+0x335` is `0`.
+This does not calculate Poke Miles or change Bankdata transactions or Pokemon
+validation.
+
+`ONLINE_TICKET_CHECK_BYPASS` defaults to `0` and selects local test results only
+in Original Mode; Offline Mode always uses local interfaces. Setting `1` does
+not replace NNID authentication, other server requests or remote permission.
+It is for emulator testing, not evidence of server-side transfer approval.
 
 ## Main flow and function addresses
 

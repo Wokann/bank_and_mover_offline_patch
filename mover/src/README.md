@@ -57,6 +57,12 @@ Original Mode therefore does not read, write, create, rename, or delete any
 file under `sd:/3ds/Bank/`. It keeps the original server flow and original
 messages.
 
+The ticket test policy defaults to `0`. Setting it to `1` makes Original Mode
+use local ticket/campaign results for emulator testing; NNID connection, remote
+Pokemon validation, downloading and remote saving remain native. This test
+configuration is not unmodified online behavior and does not prove server-side
+entitlement approval.
+
 Stock message entries remain unchanged. The LayeredFS archive only appends two
 title variants and four offline connection/save messages; runtime hooks select
 those entries only in Offline Mode. All ten shipped languages are rebuilt and
@@ -91,7 +97,7 @@ Generic Connecting message
         └── allocate no remote connection job
         │
         ▼
-Set runtime offline ticket to console time + 999 days
+Enter the native ticket state; supply console time + 999 days at its job interfaces
         │
         ▼
 Connect to local offline Bank data (at least 2 seconds)
@@ -118,6 +124,53 @@ Stock cartridge read, filtering, and Pokemon conversion
 The ticket step supplies Mover's runtime entitlement date, remaining-day/hour,
 and validity fields. It is not a Poké Mile calculation: Mover has no local
 Poké Mile accumulation or reward path in this patch.
+
+### Ticket routing and test policy
+
+`ONLINE_TICKET_CHECK_BYPASS` in `main.s` emits one policy byte. Both routes
+remain in the same image:
+
+| Session mode | Policy byte | Ticket job / free-campaign query |
+|---|---:|---|
+| Offline | `0` or `1` | Local results; no ticket network client or system shop job |
+| Original | `0` (default) | Native online checks and callbacks |
+| Original | `1` | Local results for emulator testing; other network operations remain native |
+
+At the time of this ticket-routing commit, official Azahar does not implement
+`am:net`'s `GetRightsOnlyTicketData` (command `0x0821`; see the
+[interface registration](https://github.com/azahar-emu/azahar/blob/6280521bf26ef1393974cd8c898de29cf75f5752/src/core/hle/service/am/am_net.cpp#L115)).
+The two ticket configurations therefore remain available: `0` runs native checks;
+`1` bypasses native ticket queries and supplies local results for emulators
+missing this interface. The author's Azahar
+[`pokebank` test branch](https://github.com/Wokann/azahar/tree/pokebank)
+implements the interface, which the author has verified in online testing.
+For that fork or real hardware, the value can remain fixed at `0`; no ticket
+bypass is needed. Offline Mode always uses local results regardless of this value.
+
+That Azahar feature implementation was generated entirely by AI and does not meet the
+[Azahar AI Use Policy](https://github.com/azahar-emu/azahar/blob/master/AI-POLICY.md)
+requirements for accepting contributions written entirely or substantially by AI.
+It is therefore kept only in the personal test branch and will not be submitted
+to Azahar's official main branch.
+
+Change this value and rebuild; a second source tree is unnecessary. The entry
+at `0x00249600`, UI waiting, job construction, result propagation, validity
+decision, state exit and destruction remain native. Only four calls are routed:
+
+| Call site | Native interface | Local replacement |
+|---|---|---|
+| `0x00249754` | `TicketJob_Initialize` | Initialize local dates and job result fields |
+| `0x00249774` | `TicketJob_Poll` | Report a completed job with valid entitlement |
+| `0x00249818` | `MoverCampaign_Request` | Complete as no free campaign and resume the native entitlement decision |
+| `0x00249CEC` | `TicketJob_Unbind` | No client was bound; still proceed with native destruction |
+
+The local job supplies separate console-current and 999-day expiry dates.
+Native getters calculate `999` remaining days, `23976` total hours and the
+validity flag. Existing account fields are preserved; purchase counts remain
+unknown (`-1`), without inventing purchases or campaign rewards. An out-of-range
+date or failed job allocation uses the native error exit instead of success.
+See [Ticket state and local results](../docs/code-analysis.md#ticket-state-and-local-results)
+for the field and branch comparison.
 
 The native candidate-conversion state remains responsible for reading the
 source game, filtering records, and constructing transfer candidates. After
@@ -245,7 +298,7 @@ state object; the native state exit path performs cleanup.
 | `main.s` | Title-mode latch and mode dispatch for every offline hook |
 | `fs_helpers.c` | Checked SD archive/file primitives shared by local loading and transactions |
 | `bankdata_redirect.c` | Local Bankdata loading, transfer-slot preservation, eligibility update, and crash-safe temporary write, commit, and rollback |
-| `local_ticket.c` | Runtime offline ticket and console-calendar calculation |
+| `local_ticket.c` | Local native-job/campaign results and console-calendar calculation |
 | `local_validation.c` | Read-only Gen 5 integrity/empty-slot classification and Gen 5/VC per-slot result isolation |
 | `offline_flow.c` | Independent network, disconnect, remote-check, no-transfer, and save-delay state updates |
 | `patch_paths.c` | Shared SD path constants |
@@ -312,8 +365,8 @@ make -C mover ARMIPS=/path/to/armips IPS_TOOL=/path/to/flips
 The build compiles the functional C modules into separate objects while
 retaining module-local inlining, and emits an `.s` disassembly beside each
 object for inspection. armips imports those objects consecutively into the
-audited executable tail, Floating IPS creates `code.ips`, the ten-language
-RomFS is rebuilt, and the static verifier checks the complete result. The
+audited reclaimed range and executable tail. Floating IPS creates `code.ips`,
+the ten-language RomFS is rebuilt, and the static verifier checks the complete result. The
 complete output is:
 
 ```text

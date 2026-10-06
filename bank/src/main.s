@@ -4,6 +4,12 @@
 
 .include "../include/symbol.inc"
 
+// 0: native online entitlement/campaign checks; 1: local bypass for emulator tests.
+// This value is stored as one byte; both dispatch paths remain in either build.
+// 0：联网模式走原版使用权／活动检查；1：模拟器测试时使用本地跳过逻辑。
+// 此值只占一个字节；两条分派路径在两种构建中都会保留。
+.definelabel ONLINE_TICKET_CHECK_BYPASS, 0
+
 // Offline behavior is the baseline. Mode wrappers branch to these native entry
 // points when Download or Unlock Mode was selected on the title screen.
 // 离线行为作为基线；标题界面选定下载模式或解锁模式后，模式包装函数会跳转到这些
@@ -67,8 +73,12 @@
     b CombinePatch_InitialRemoteRecordUpdate
 .org InitialRemoteRecord_MessageIdLoad
     bl CombinePatch_SelectPostSelectionConnectionMessage
-.org OptionalRewardState_Update
-    b CombinePatch_OptionalRewardBypassUpdate
+.org OptionalRewardState_TicketInitializeCall
+    bl CombinePatch_TicketInitialize
+.org OptionalRewardState_TicketPollCall
+    bl CombinePatch_TicketPoll
+.org OptionalRewardState_TicketUnbindCall
+    bl CombinePatch_TicketUnbind
 .org BankDataSyncState_Update
     b CombinePatch_BankDataSyncDispatch
 .org BankDataSync_TurtleTransactionWrite
@@ -729,15 +739,11 @@ CombinePatch_InitialRemoteRecordUpdate:
     b InitialRemoteRecordState_Update + 4
     .pool
 
-// State ID 15 combines remote entitlement and campaign/online-gift checks.
-// All patch modes complete it locally, disabling free_campaign and online gifts
-// while supplying the runtime entitlement fields needed downstream. This is
-// separate from the native local mileage calculation in states 12 and 13.
-// state 15 组合了远端使用权以及活动／联网礼物检查。所有补丁模式都让它在本地
-// 完成，以禁用 free_campaign 与在线礼物，同时提供后续所需的运行时使用权字段。
-// 它与 state 12/13 的原版本地里程计算相互独立。
-CombinePatch_OptionalRewardBypassUpdate:
-    b OfflinePatch_OptionalRewardBypassUpdate
+// One-byte online entitlement policy, independent of the selected session mode.
+// 单字节联网使用权策略，与选定的会话模式相互独立。
+CombinePatch_OnlineTicketBypass:
+    .byte ONLINE_TICKET_CHECK_BYPASS
+    .align 4
 
 CombinePatch_FirstPresentDispatch:
     cmp r0,#0
@@ -1191,11 +1197,9 @@ TurtleRedirect_PayloadEnd:
 
 // Both HOME entry routes are blocked in every mode. Use only its dedicated
 // box-selection UI region, stopping before the next unrelated UI function.
-// The entitlement state body remains intact; its entry still uses the local
-// bypass in all modes.
+// The entitlement state retains its native flow; job wrappers follow the C objects.
 // 三个模式均已封堵 HOME 的两条入口。这里只使用 HOME 专用的盒子选择 UI 区域，
-// 不覆盖紧邻的其他 UI 函数。使用权状态的原函数体保持完整；入口在所有模式下仍
-// 使用现有的本地跳过逻辑。
+// 不覆盖紧邻的其他 UI 函数。使用权状态保留原版流程；作业包装位于 C 对象之后。
 .org CombinePatch_PayloadStart
 .area CombinePatch_PayloadEndLimit-CombinePatch_PayloadStart
 CombinePatch_PayloadBegin:
@@ -1218,6 +1222,55 @@ UnlockMode_PayloadBegin:
     .importobj "../build/unlock_mode.o"
 UnlockMode_PayloadEnd:
 CombinePatch_PayloadEnd:
+
+// Replace only the job interfaces in local/test sessions. Keep the native state,
+// constructor, result handling and destructor. Dispatch touches only caller-saved
+// r12; tail branches preserve the BL return address and stack alignment.
+// 本地／测试会话只替换作业接口，保留原版状态、构造、结果处理与析构。分派只使用
+// 易失的 r12；尾跳转保留 BL 返回地址与栈对齐。
+.align 4
+CombinePatch_TicketInitialize:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeOffline
+    beq CombinePatch_TicketInitializeLocal
+    ldr r12,=CombinePatch_OnlineTicketBypass
+    ldrb r12,[r12]
+    cmp r12,#0
+    bne CombinePatch_TicketInitializeLocal
+    b TicketJob_Initialize
+CombinePatch_TicketInitializeLocal:
+    ldr r1,[r4,#0x28]
+    b LocalTicket_Initialize
+CombinePatch_TicketPoll:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeOffline
+    beq CombinePatch_TicketPollLocal
+    ldr r12,=CombinePatch_OnlineTicketBypass
+    ldrb r12,[r12]
+    cmp r12,#0
+    bne CombinePatch_TicketPollLocal
+    b TicketJob_Poll
+CombinePatch_TicketPollLocal:
+    b LocalTicket_Poll
+CombinePatch_TicketUnbind:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeOffline
+    beq CombinePatch_TicketUnbindLocal
+    ldr r12,=CombinePatch_OnlineTicketBypass
+    ldrb r12,[r12]
+    cmp r12,#0
+    bne CombinePatch_TicketUnbindLocal
+    b TicketJob_Unbind
+CombinePatch_TicketUnbindLocal:
+    // No network client was bound; the native destructor still runs afterwards.
+    // 未绑定网络客户端；返回后仍执行原版析构。
+    mov r0,#1
+    bx lr
+    .pool
+CombinePatch_TicketWrappersEnd:
 .endarea
 
 .close
