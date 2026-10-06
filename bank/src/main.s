@@ -16,12 +16,13 @@
 // 原版入口。
 .definelabel OfflinePatch_VersionStorageSize, 0x40
 .definelabel OfflinePatch_VersionStorageStart, TextMappedEnd - OfflinePatch_VersionStorageSize
-.definelabel CombinePatch_CodeStart, 0x00313A40
-.definelabel CombinePatch_CodeEnd, OfflinePatch_VersionStorageStart
-.definelabel CombinePatch_PayloadStart, 0x00285BA8
-.definelabel CombinePatch_PayloadEndLimit, 0x0028711C
-.definelabel TurtleRedirect_PayloadEndLimit, 0x002A8760
-.definelabel CombinePatch_ModeStorage, 0x003ABFFC
+.definelabel CodeExpansion_PayloadStart, 0x003FC000
+.definelabel CODE_EXPANSION_PAYLOAD_SIZE, 0x3000
+.definelabel CombinePatch_CodeStart, CodeExpansion_PayloadStart
+.definelabel CombinePatch_CodeEnd, CodeExpansion_PayloadStart + CODE_EXPANSION_PAYLOAD_SIZE
+.definelabel OfflinePatch_RuntimeStorageStart, ReadWriteMappedEnd - 0x10
+.definelabel OfflinePatch_RuntimeStorageEnd, ReadWriteMappedEnd
+.definelabel CombinePatch_ModeStorage, OfflinePatch_RuntimeStorageStart
 .definelabel CombinePatch_HidManager, 0x003DC3B4
 .definelabel CombinePatch_ModeOffline, 0
 .definelabel CombinePatch_ModeDownload, 1
@@ -53,7 +54,12 @@
 .definelabel CombinePatch_UnlockGameSelectionPrompt, 0x6F
 .definelabel CombinePatch_UnlockChallengePrompt, 0x70
 
-.open "../rom/exefs/00040000000C9B00.dec.code", "../build/00040000000C9B00.dec.code", 0x00100000
+.open INPUT_CODE, OUTPUT_CODE, 0x00100000
+
+// Enable the added pages before the original PREL32 constructor walker runs.
+// 原版 PREL32 构造函数遍历前启用新增页。
+.org BankStartup_ConstructorCall
+    bl CodeExpansion_Startup
 
 // Offline baseline hooks. Each site is retained so the combined project starts
 // from the tested local-data behavior rather than duplicating a second patch.
@@ -149,11 +155,9 @@
 .org BankFlow_SelectNextState + 0x270
     beq CombinePatch_Result6Or12
 
-// Do not enter menu-only operations whose state bodies are repurposed as code
-// caves. Returning before the stock callback prologue leaves the feature menu
-// visible and interactive.
-// 不进入其状态函数体已被复用为代码空位的菜单操作。在原版回调序言前返回，使功能
-// 选单保持显示和可操作。
+// Disabled menu actions return before the native callback prologue, leaving
+// the feature menu visible and interactive. Native state bodies stay intact.
+// 禁用的菜单操作在原版回调序言前返回，选单保持显示和可操作；原版状态函数体完整保留。
 .org BankMenuState_SelectionCallback
     b CombinePatch_MenuSelectionCallback
 
@@ -537,29 +541,13 @@ CombinePatch_SaveTurtleState1:
     b BankSave_TurtleRollbackWrite + 4
     .pool
 
-// C-owned path data occupies this second verified injection region.
-// C 后端使用的路径数据放在第二个已验证注入区。
+// C-owned paths and all feature payloads share the added pages.
+// C 路径数据与全部功能荷载共同放在新增页内。
 CombinePatch_PathDataBegin:
-    .importobj "../build/patch_paths.o"
+    .importobj BUILD_DIRECTORY + "/patch_paths.o"
 CombinePatch_PathDataEnd:
-.endarea
 
-// Reserve the final 64 bytes of the mapped text segment as a zero-padded ASCII
-// identifier. No runtime code reads it in the current version.
-// 将已映射 text 段的最后 64 字节预留为零填充 ASCII 标识。当前版本没有运行时代码
-// 读取它。
-.org OfflinePatch_VersionStorageStart
-.area OfflinePatch_VersionStorageSize, 0
-OfflinePatch_VersionIdentifier:
-    .asciiz "offline_patch_v1.0.0"
-.endarea
-
-// The feature-menu HOME result redirects to language selection, while the
-// no-game path returns to the title. Neither route can create this state.
-// 功能选单中的 HOME 结果改走语言选择，无游戏路径则返回标题，两条入口均不会
-// 创建此状态。
-.org HomeTransferState_Update
-.area TurtleRedirect_PayloadEndLimit-HomeTransferState_Update
+.align 4
 
 // Reset the title selector whenever its UI is created, then replace the stock
 // bottom HOME-help line. The narrow version pane remains completely native.
@@ -1186,40 +1174,32 @@ CombinePatch_DownloadCaptureTrampoline:
     bx lr
     .pool
 
-// Import the C implementation of the redirected Turtle-record backend into
-// the remaining verified HOME code cave. Hook sites above remain assembly-only.
-// 将 Turtle 记录重定向后端的 C 实现导入剩余的已验证 HOME 代码空位；上方
-// hook 点仍仅保留汇编。
+// Import the Turtle backend into the added pages; hook sites remain assembly-only.
+// Turtle 后端放在新增页；原址钩子仅保留汇编跳转。
 TurtleRedirect_PayloadBegin:
-    .importobj "../build/turtle_redirect.o"
+    .importobj BUILD_DIRECTORY + "/turtle_redirect.o"
 TurtleRedirect_PayloadEnd:
-.endarea
 
-// Both HOME entry routes are blocked in every mode. Use only its dedicated
-// box-selection UI region, stopping before the next unrelated UI function.
-// The entitlement state retains its native flow; job wrappers follow the C objects.
-// 三个模式均已封堵 HOME 的两条入口。这里只使用 HOME 专用的盒子选择 UI 区域，
-// 不覆盖紧邻的其他 UI 函数。使用权状态保留原版流程；作业包装位于 C 对象之后。
-.org CombinePatch_PayloadStart
-.area CombinePatch_PayloadEndLimit-CombinePatch_PayloadStart
+// Keep the remaining feature modules consecutive inside the added pages.
+// 其余功能模块在新增页内连续排列。
 CombinePatch_PayloadBegin:
 FsHelpers_PayloadBegin:
-    .importobj "../build/fs_helpers.o"
+    .importobj BUILD_DIRECTORY + "/fs_helpers.o"
 FsHelpers_PayloadEnd:
 BankdataRedirect_PayloadBegin:
-    .importobj "../build/bankdata_redirect.o"
+    .importobj BUILD_DIRECTORY + "/bankdata_redirect.o"
 BankdataRedirect_PayloadEnd:
 OfflineFlow_PayloadBegin:
-    .importobj "../build/offline_flow.o"
+    .importobj BUILD_DIRECTORY + "/offline_flow.o"
 OfflineFlow_PayloadEnd:
 LocalMileage_PayloadBegin:
-    .importobj "../build/local_mileage.o"
+    .importobj BUILD_DIRECTORY + "/local_mileage.o"
 LocalMileage_PayloadEnd:
 LocalTicket_PayloadBegin:
-    .importobj "../build/local_ticket.o"
+    .importobj BUILD_DIRECTORY + "/local_ticket.o"
 LocalTicket_PayloadEnd:
 UnlockMode_PayloadBegin:
-    .importobj "../build/unlock_mode.o"
+    .importobj BUILD_DIRECTORY + "/unlock_mode.o"
 UnlockMode_PayloadEnd:
 CombinePatch_PayloadEnd:
 
@@ -1271,6 +1251,41 @@ CombinePatch_TicketUnbindLocal:
     bx lr
     .pool
 CombinePatch_TicketWrappersEnd:
+CombinePatch_CodeUsedEnd:
+.endarea
+
+// Only the small startup loader uses original executable padding. Native
+// function bodies remain unchanged because assembly starts from the base image.
+// 仅小型启动加载器使用原可执行填充；从原版镜像构建，完整保留原函数体。
+.org 0x00313A40
+.area OfflinePatch_VersionStorageStart - 0x00313A40
+CodeExpansion_Startup:
+    push {r0-r12,lr}
+    ldr r0,=CodeExpansion_PayloadStart
+    ldr r1,=CODE_EXPANSION_PAYLOAD_SIZE
+    bl CodeExpansion_Enable
+    cmp r0,#0
+    bne @@failure
+    pop {r0-r12,lr}
+    ldr pc,=BankStartup_RunConstructors + 1
+@@failure:
+    mov r0,#0
+    swi 0x3C
+    b @@failure
+    .pool
+CodeExpansion_LoaderBegin:
+    .importobj BUILD_DIRECTORY + "/code_expansion.o"
+CodeExpansion_LoaderEnd:
+.endarea
+
+// Reserve the final 64 bytes of the mapped text segment as a zero-padded ASCII
+// identifier. No runtime code reads it in the current version.
+// 将已映射 text 段的最后 64 字节预留为零填充 ASCII 标识。当前版本没有运行时代码
+// 读取它。
+.org OfflinePatch_VersionStorageStart
+.area OfflinePatch_VersionStorageSize, 0
+OfflinePatch_VersionIdentifier:
+    .asciiz "offline_patch_v1.0.0"
 .endarea
 
 .close

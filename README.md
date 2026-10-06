@@ -38,9 +38,9 @@ Players do not need an original `.code`, a RomFS dump, or a local build environm
    | Pokemon Bank | `00040000000C9B00` | `SD:/luma/titles/00040000000C9B00/` |
    | Poke Mover | `00040000000C9C00` | `SD:/luma/titles/00040000000C9C00/` |
 
-   Bank contains `code.ips` and `romfs/`. Mover contains `code.bps`, `exheader.bin`,
-   and `romfs/`; install all three together and remove stale `code.ips` or
-   `code.bin` from that Mover mod directory.
+   Both Bank and Mover contain `code.bps`, `exheader.bin` and `romfs/`.
+   Install all three together and remove stale `code.ips` or `code.bin` from
+   the corresponding mod directory.
 3. Hold `SELECT` while booting to open the Luma3DS configuration, enable `Enable game patching`, then save and reboot.
 4. Back up the SD card and any existing `SD:/3ds/Bank/` directory before first use.
 
@@ -144,10 +144,11 @@ Do not commit or redistribute extracted code and resources. The project supports
 | Pokemon Bank | `bank/rom/exefs/00040000000C9B00.dec.code` | 2,801,664 bytes | `5AB630856835DCF2DBDF9A62244DD19E46AE1C7C` |
 | Poke Mover | `mover/rom/exefs/00040000000C9C00.dec.code` | 2,269,184 bytes | `583859C1E874D11650EFBDDE51F470ECF96900C4` |
 
-Place each complete RomFS at `bank/rom/romfs/` or `mover/rom/romfs/`. Mover's
-build also requires `mover/rom/exheader.bin` from the same
-base title: copy GodMode9's mounted root `extheader.bin` and rename it. See the
-Mover developer document for inputs and automatic Luma/Azahar compatibility.
+Place each complete RomFS at `bank/rom/romfs/` or `mover/rom/romfs/`. Both
+subprojects also require their own base title's complete `0x800`-byte ExHeader:
+copy GodMode9's mounted root `extheader.bin` to `bank/rom/exheader.bin` or
+`mover/rom/exheader.bin`. These headers are not interchangeable. See each
+subproject's developer document for inputs and the unified Luma/Azahar loader.
 With the inputs prepared, run from the repository root:
 
 ```sh
@@ -169,7 +170,8 @@ Outputs are written to:
 
 ```text
 release/00040000000C9B00/
-├── code.ips
+├── code.bps
+├── exheader.bin
 └── romfs/
 
 release/00040000000C9C00/

@@ -14,6 +14,11 @@
 .definelabel RodataMappedEnd,                   0x0036A000
 .definelabel DataMappedStart,                   0x0036A000
 .definelabel DataMappedEnd,                     0x003AC000
+.definelabel DataActualEnd,                     0x003ABACC
+.definelabel BssActualEnd,                      0x003FA904
+.definelabel ReadWriteMappedEnd,                0x003FB000
+.definelabel BankStartup_ConstructorCall,       0x00100010
+.definelabel BankStartup_RunConstructors,       0x00102BA4
 
 ; -----------------------------------------------------------------------------
 ; Bank object and fixed-size serialized file

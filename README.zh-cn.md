@@ -38,8 +38,8 @@ sd:/3ds/Bank/bankdata.bin
    | Pokemon Bank | `00040000000C9B00` | `SD:/luma/titles/00040000000C9B00/` |
    | Poke Mover | `00040000000C9C00` | `SD:/luma/titles/00040000000C9C00/` |
 
-   Bank 目录包含 `code.ips` 和 `romfs/`；Mover 目录包含 `code.bps`、`exheader.bin`
-   和 `romfs/`，必须成套复制，并移除同一 Mover 补丁目录里旧的 `code.ips` 或 `code.bin`。
+   Bank 与 Mover 均包含 `code.bps`、`exheader.bin` 和 `romfs/`，必须成套复制。
+   移除对应补丁目录里旧的 `code.ips` 或 `code.bin`，避免混装。
 3. 按住 `SELECT` 开机进入 Luma3DS 配置，启用 `Enable game patching`，保存并重启。
 4. 使用前备份 SD 卡以及已有的 `SD:/3ds/Bank/` 目录。
 
@@ -136,9 +136,10 @@ Bank 与 Mover 可以分别独立构建。各子项目的实现原理、内存�
 | Pokemon Bank | `bank/rom/exefs/00040000000C9B00.dec.code` | 2,801,664 字节 | `5AB630856835DCF2DBDF9A62244DD19E46AE1C7C` |
 | Poke Mover | `mover/rom/exefs/00040000000C9C00.dec.code` | 2,269,184 字节 | `583859C1E874D11650EFBDDE51F470ECF96900C4` |
 
-对应的完整 RomFS 分别放入 `bank/rom/romfs/` 和 `mover/rom/romfs/`。Mover 还需要
-同一本体的 `mover/rom/exheader.bin`：复制 GodMode9 挂载根目录的 `extheader.bin` 并
-重命名即可。具体输入与 Luma／Azahar 自动兼容机制见 Mover 开发文档。
+对应的完整 RomFS 分别放入 `bank/rom/romfs/` 和 `mover/rom/romfs/`。两个子项目都需要
+各自同一本体的完整 `0x800` 字节 ExHeader：复制 GodMode9 挂载根目录的 `extheader.bin`，
+分别放入 `bank/rom/exheader.bin` 或 `mover/rom/exheader.bin`。两个头部不能互换。
+具体输入与 Luma／Azahar 共用加载器见对应子项目开发文档。
 准备输入后，在仓库根目录运行：
 
 ```sh
@@ -160,7 +161,8 @@ make -C mover ARMIPS=/path/to/armips IPS_TOOL=/path/to/flips
 
 ```text
 release/00040000000C9B00/
-├── code.ips
+├── code.bps
+├── exheader.bin
 └── romfs/
 
 release/00040000000C9C00/

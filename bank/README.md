@@ -239,7 +239,7 @@ It is therefore kept only in the personal test branch and will not be submitted
 to Azahar's official main branch.
 
 Both paths remain in the same code. This definition changes only the policy
-byte at `[0x002A7E04, 0x002A7E05)`. State 15 retains its original entry and
+byte at `[0x003FC600, 0x003FC601)`. State 15 retains its original entry and
 state transitions. Only three calls are redirected: job initialization at
 `0x002B0444`, result polling at `0x002B0464`, and unbinding at `0x002B1994`.
 With `0`, Download and Unlock modes call the native job interfaces. Offline
@@ -409,18 +409,20 @@ Spanish, Korean, Simplified Chinese, and Traditional Chinese.
 |---|---|
 | `src/main.s` | Original-address hooks, mode dispatch, small trampolines, state routing, and placement of imported C objects |
 | `src/bankdata_redirect.c` | Checked Bank-data validation, recovery, loading, and local transaction implementation |
+| `src/code_expansion.c` | Unified hardware/Azahar loader using the same architecture as Mover |
 | `src/fs_helpers.c` | Shared checked SD-filesystem implementation used by Bankdata and Turtle backends |
 | `src/offline_flow.c` | Local connection, disconnection, and save-display state updates |
 | `src/local_mileage.c` | Converts console time into the packed date consumed by the stock Poké Mile states; it does not replace the native point calculation |
 | `src/local_ticket.c` | Supplies local ticket results at the native entitlement state's job interfaces without implementing Poké Mile calculation |
 | `src/unlock_mode.c` | Selects and normalizes the first server-returned unlock candidate for the stock challenge-code UI |
-| `src/patch_paths.c` | Path constants placed in the verified tail-code region |
-| `src/turtle_redirect.c` | Redirected Turtle-record backend placed in the verified HOME-code region |
+| `src/patch_paths.c` | Path constants placed in added pages |
+| `src/turtle_redirect.c` | Redirected Turtle-record backend placed in added pages |
 | `include/bankdata_redirect.h` | Confirmed serialized Bankdata layout, partial native Bank views, redirection constants, and stock entry points |
 | `include/fs_helpers.h` | Shared filesystem types, SDK entry points, and checked SD-helper declarations |
 | `include/local_mileage.h` | Local mileage-date input declaration |
 | `include/local_ticket.h` | Ticket-job and shared-data views, entitlement constants, and local job interfaces |
 | `include/offline_flow.h` | Stock timer entry points used by local flow states |
+| `include/code_expansion.h` | Expansion loader interface and SVC constants |
 | `include/patch_types.h` | Fixed-width primitive types shared by the injected C objects |
 | `include/patch_paths.h` | Path declarations shared across the separately placed objects |
 | `include/system_time.h` | Shared-memory system-time structure and addresses |
@@ -428,95 +430,117 @@ Spanish, Korean, Simplified Chinese, and Traditional Chinese.
 | `include/unlock_mode.h` | Unlock-candidate display helper declaration |
 | `src/patch_messages.py` | Rebuilds and validates the ten localized LayeredFS archives |
 | `tools/message_archive.py` | Self-contained GARC and encrypted message-file codec |
-| `tools/verify_patch.py` | Verifies base hash, code ranges, hooks, IPS reconstruction, native instruction replay, and resources |
-| `Makefile` | Compiles, injects, creates the IPS, rebuilds messages, and writes the Luma release tree |
+| `tools/prepare_expanded_code.py` | Validates code/ExHeader, materializes native BSS and prepares a fixed-address expanded image/header |
+| `tools/verify_patch.py` | Verifies preserved native functions, expansion layout, loader, hooks, BPS reconstruction and resources |
+| `Makefile` | Compiles, expands, injects, creates BPS, rebuilds messages and writes the Luma release tree |
 
 ### Injection-space provenance and bounds
 
-All addresses below are runtime virtual addresses, not IPS file offsets. Ranges
-use `[start, end)`: the start is included and the end is excluded. Layout
-definitions are in [`src/main.s`](src/main.s) and
-[`symbol.inc`](include/symbol.inc); actual placements after a build are in
-`bank/build/armips-symbols.txt`.
+Addresses are runtime virtual addresses with half-open ranges `[start, end)`.
+Definitions are in [`src/main.s`](src/main.s) and [`symbol.inc`](include/symbol.inc);
+actual placements are recorded in `build/armips-symbols.txt`. Bank and Mover
+share the fixed-address expansion architecture, not their image boundaries,
+startup entries or SDK addresses. Bank's build does not reference Mover files.
 
-The original executable has the following segment bounds. This patch neither
-enlarges the ExHeader segment sizes nor moves the following segments.
+Original segment and logical BSS boundaries:
 
-| Original segment | Start | Declared size | Declared content end | End of 4 KiB page mapping | Permissions |
+| Original region | Start | Declared size | Content end | Page-mapped end | Permissions |
 | --- | --- | --- | --- | --- | --- |
-| `.text` | `0x00100000` | `0x00213910` | `0x00313910` | `0x00314000` | Read, execute |
-| `.rodata` | `0x00314000` | `0x00055370` | `0x00369370` | `0x0036A000` | Read-only, non-executable |
-| `.data` | `0x0036A000` | `0x00041ACC` | `0x003ABACC` | `0x003AC000` | Read/write, non-executable |
+| `.text` | `0x00100000` | `0x213910` | `0x00313910` | `0x00314000` | Read/execute |
+| `.rodata` | `0x00314000` | `0x55370` | `0x00369370` | `0x0036A000` | Read-only, non-executable |
+| `.data` | `0x0036A000` | `0x41ACC` | `0x003ABACC` | `0x003AC000` | Read/write, non-executable |
+| Logical BSS | `0x003ABACC` | `0x4EE38` | `0x003FA904` | `0x003FB000` | Read/write, zero-initialized |
 
-The patch uses in-place edits, reclaimed disabled functions, and existing
-last-page padding. These are distinct sources of space; reclaimed functions
-were not unused gaps in the original image.
+Logical BSS begins at the declared data-content end, not the mapped page end.
+Native clearing constants, the constructor walker and PREL32 constructor table
+at `[0x00369050, 0x00369370)` remain unchanged.
 
-| Address range | Provenance and original purpose | Current use and boundary constraints |
+Expansion moves no native segments or variables. Original BSS becomes explicit
+zero bytes in the image, followed by a separator page and three payload pages.
+ExHeader data becomes `0x95` pages, size `0x95000`, with BSS size `0`;
+native clearing still runs. The image grows from `0x2AC000` to `0x2FF000`
+bytes, while runtime mapping grows by only four pages, `0x4000` (16 KiB).
+
+| Range or hook | Original space / purpose | Current use and constraints |
 | --- | --- | --- |
-| Scattered in-place hooks in `main.s` | Instructions at original function entries, call sites, or branches | Change jumps, conditions, or a few instructions; wrappers replay overwritten instructions where necessary. A hook does not make the whole original function reclaimable. |
-| `[0x00285BA8, 0x0028711C)` | Reclaimed disabled code: input, update, construction, and cleanup functions of the dedicated HOME box-selection UI; original span `0x1574` (5492 bytes) | Holds six C objects for FS, Bankdata, offline flow, local mileage, local entitlement, and unlock display, followed by ticket-job wrappers. Ordinary box and shared functions are excluded. `0x0028711C` starts an adjacent normal UI function and must not be overwritten. |
-| `[0x002A7BF0, 0x002A8404)` | Reclaimed disabled code: state 27 HOME operation control and its creation, initialization, and cleanup functions | Assembly dispatch, wrappers, trampolines, and the one-byte ticket switch end at `0x002A82E4`. The Turtle backend starts there and continues into the reclaimed region in the next row. |
-| `[0x002A8404, 0x002A8760)` | Reclaimed disabled code: state 14 eShop launch UI and companion functions | Holds the rest of the Turtle backend. These two reclaimed regions total `0xB70` (2928 bytes) and are fully occupied. `0x002A8760` is the native transaction-recovery entry, which remains intact and must not be overwritten. |
-| Four bytes each at `0x002B0444`, `0x002B0464`, and `0x002B1994` | In-place edits: state 15 job initialization, result polling, and exit unbinding calls | Three `BL` calls enter mode wrappers. Offline Mode always uses local results; the fixed test byte selects native or local jobs for Download and Unlock modes. |
-| `[0x002B0270, 0x002B1AD0)`, excluding those three calls | Preserved: original state 15 body and companion functions | All other bytes match the original image. Every mode retains native state transitions, result copying, and cleanup; this is not payload space. The native ticket-job functions are also unchanged. |
-| `[0x00313910, 0x00313A40)` | Existing padding in the last `.text` page | Reserves `0x130` (304 bytes) for Luma LayeredFS; this patch does not write here. `0x00313A40` is this project's chosen separation boundary, not a fixed Luma address. |
-| `[0x00313A40, 0x00313FC0)` | Existing padding in the last `.text` page; span `0x580` (1408 bytes) | Holds tail assembly and `patch_paths.o`, ending at `0x00313E2B`. The remaining padding is unused by this project. |
-| `[0x00313FC0, 0x00314000)` | Existing padding in the last `.text` page | A 64-byte version-identifier slot containing `offline_patch_v1.0.0` with zero padding; it does not currently affect runtime behavior. It must not cross the `.rodata` start at `0x00314000`. |
-| `[0x003ABFFC, 0x003AC000)` | Verified final four spare bytes in the original `.data` page | Fixed storage for the session mode, download-captured flag, previous title R-key state, and selected title mode. This is not dynamically allocated heap memory and contains no executable code. |
+| Scattered hooks in `main.s` | Native entries, calls or branches | Existing mode dispatch and instruction replay; no complete injected functions. |
+| `0x00100010`, 4 bytes | Native startup `BLX` to the Thumb constructor walker | Calls the loader, restores registers and tail-resumes at `0x00102BA5`. |
+| `[0x00285BA8, 0x0028711C)` | Native HOME box-selection UI | Original bytes preserved throughout; not reclaimed. |
+| `[0x002A7BF0, 0x002A8404)` | Native state 27 HOME flow and companions | Original bytes preserved throughout; not reclaimed. |
+| `[0x002A8404, 0x002A8760)` | Native state 14 eShop flow and companions | Original bytes preserved; subsequent transaction recovery is intact. |
+| `0x002B0444`, `0x002B0464`, `0x002B1994`, 4 bytes each | State 15 job initialization, polling and unbinding | Call added-page wrappers; all other state-15 bytes and native jobs stay intact. |
+| `[0x00313910, 0x00313A40)` | Original last text-page padding | `0x130` bytes reserved for Luma LayeredFS; untouched. |
+| `[0x00313A40, 0x00313B0C)` | Original last text-page padding | Startup assembly and `code_expansion.o`, `0xCC` bytes. |
+| `[0x00313B0C, 0x00313FC0)` | Original last text-page padding | Unused executable padding, `0x4B4` bytes. |
+| `[0x00313FC0, 0x00314000)` | Original last text-page padding | Zero-padded 64-byte `offline_patch_v1.0.0` identifier. |
+| `[0x003ABACC, 0x003FA904)` | Native logical BSS | Explicit zeros; native variables and startup clearing retained. No payload. |
+| `[0x003FAFF0, 0x003FB000)` | Final 16 bytes of original RW mapping, after logical BSS | First four bytes hold session mode, capture flag, R-key history and title selection; twelve bytes reserved. |
+| `[0x003FB000, 0x003FC000)` | Added RW mapping | Zero-filled separator, not an unmapped guard page. |
+| `[0x003FC000, 0x003FF000)` | Three new pages after native BSS | All feature wrappers, C backends and paths; enabled for execution on hardware by the loader. |
 
-All three modes block both the menu HOME entry and the direct HOME entry offered
-when no usable game save exists. The eShop download entry is also disabled in
-every mode. Only functions exclusive to these disabled paths are reclaimed;
-shared SDK functions, ordinary box functions, and other screens remain intact.
+All three existing modes still disable HOME, support-code and eShop entries,
+but their bodies are no longer consumed. This only prepares space and native
+functions for a future Original Mode; that mode is not added here. Feature,
+language and Turtle hooks would still require mode-aware routing.
 
-Current C-object and tail-area placements are listed below, including alignment
-padding between objects.
+Added-page placements total `0x2340` (9024 bytes), leaving `0xCC0` (3264 bytes):
 
 | Content | Actual range | Size |
 | --- | --- | --- |
-| `fs_helpers.o` | `[0x00285BA8, 0x00286150)` | `0x5A8` (1448 bytes) |
-| `bankdata_redirect.o` | `[0x00286150, 0x002867AC)` | `0x65C` (1628 bytes) |
-| `offline_flow.o` | `[0x002867AC, 0x002868CC)` | `0x120` (288 bytes) |
-| `local_mileage.o` | `[0x002868CC, 0x00286CF0)` | `0x424` (1060 bytes) |
-| `local_ticket.o` | `[0x00286CF0, 0x00286EB8)` | `0x1C8` (456 bytes) |
-| `unlock_mode.o` | `[0x00286EB8, 0x00286F08)` | `0x50` (80 bytes) |
-| Ticket-job assembly wrappers and literal pool | `[0x00286F08, 0x00286F90)` | `0x88` (136 bytes) |
-| Assembly wrappers, trampolines, and ticket switch in reclaimed code | `[0x002A7BF0, 0x002A82E4)` | `0x6F4` (1780 bytes) |
-| `turtle_redirect.o` | `[0x002A82E4, 0x002A8760)` | `0x47C` (1148 bytes) |
-| `.text` tail assembly | `[0x00313A40, 0x00313D78)` | `0x338` (824 bytes) |
-| `patch_paths.o` | `[0x00313D78, 0x00313E2B)` | `0xB3` (179 bytes) |
+| Text, save and language assembly wrappers | `[0x003FC000, 0x003FC338)` | `0x338` |
+| `patch_paths.o` | `[0x003FC338, 0x003FC3EB)` | `0xB3`, then one alignment byte |
+| Mode, title, connection wrappers and ticket switch | `[0x003FC3EC, 0x003FCAE0)` | `0x6F4` |
+| `turtle_redirect.o` | `[0x003FCAE0, 0x003FCF5C)` | `0x47C` |
+| `fs_helpers.o` | `[0x003FCF5C, 0x003FD504)` | `0x5A8` |
+| `bankdata_redirect.o` | `[0x003FD504, 0x003FDB60)` | `0x65C` |
+| `offline_flow.o` | `[0x003FDB60, 0x003FDC80)` | `0x120` |
+| `local_mileage.o` | `[0x003FDC80, 0x003FE0A0)` | `0x420` |
+| `local_ticket.o` | `[0x003FE0A0, 0x003FE268)` | `0x1C8` |
+| `unlock_mode.o` | `[0x003FE268, 0x003FE2B8)` | `0x50` |
+| Ticket assembly wrappers and literal pool | `[0x003FE2B8, 0x003FE340)` | `0x88` |
+| Unused added-page space | `[0x003FE340, 0x003FF000)` | `0xCC0` |
 
-The six C objects occupy `0x1360` (4960 bytes); the additional 136-byte ticket-job
-wrappers bring the total to `0x13E8` (5096 bytes), leaving
-`[0x00286F90, 0x0028711C)`, or `0x18C` (396 bytes). This remainder still
-contains disabled HOME functions, not natural zero padding. The tail area leaves
-`[0x00313E2B, 0x00313FC0)`, or `0x195` (405 bytes). For 4-byte-aligned ARM
-code, the usable start is `0x00313E2C`, leaving `0x194` (404 bytes).
+Native text's actual size stays fixed, preserving Luma LayeredFS placement.
+Its path still uses the rodata tail at `[0x00369370, 0x00369397)`, which this
+patch leaves untouched. Recheck separation when changing Luma; zero-filled
+padding alone does not prove free space.
 
-Only `0x6F0` (1776 bytes) separate the declared `.text` content end from its
-mapped end. This is unused space in the last mapped page, not an additional
-allocated page. Luma installs LayeredFS after applying IPS and does not
-automatically avoid IPS-written ranges, so this project separately reserves the
-304 bytes above. With this layout, LayeredFS path strings use the 39 bytes at
-`[0x00369370, 0x00369397)` in the `.rodata` tail, separately from the executable
-payload in `.text`; this patch does not occupy that range. See the
-[Luma loader](https://github.com/LumaTeam/Luma3DS/blob/master/sysmodules/loader/source/loader.c)
-and [LayeredFS installation logic](https://github.com/LumaTeam/Luma3DS/blob/master/sysmodules/loader/source/patcher.c).
-If the Luma implementation or original segment layout changes, recheck the
-payload size and placement rather than assuming this separation boundary is
-valid for every version.
+### One loader for hardware and Azahar
 
-Other zero-filled bytes in the `.rodata` and `.data` tails are not automatically
-safe spare space, and neither segment is executable. This patch allocates no
-additional heap space for injected code. Before adding payloads, check `.area`
-limits, actual build symbols, and adjacent original functions; zero runs or a
-bypassed entry alone do not justify enlarging a reclaimed region.
+The release uses one `code.bps`, `exheader.bin` and `romfs/` set. BPS declares
+the larger target length. Luma allocates using the expanded ExHeader; Azahar's
+BPS loader resizes its code buffer using that length. Native segment addresses
+stay fixed; text is not stretched across other native segments.
+
+Before the original constructor walker, the startup loader:
+
+1. Duplicates the current-process pseudo-handle using `SVC 0x27`.
+2. Queries `SVC 0x2A` with `type=0x20000, param=0`; only success with ID `2`
+   identifies Azahar.
+3. Calls `SVC 0x70` on the added pages with `MEMOP_PROT=6` and `RWX=7`.
+   Hardware and implemented emulator interfaces must return success.
+4. Accepts only identified Azahar's missing-SVC behavior where `r0` retains
+   the exact input handle. Unknown environments cannot use this fallback;
+   other nonzero results still fail.
+5. Closes the real handle. Handle or permission failures stop before added-page execution; success
+   restores registers, stack and return address and resumes native constructors.
+
+Only necessary data/BSS fields and SVC capabilities change. The current input
+requires only `0x70` added. Other capabilities and the full header's signed
+descriptor copy remain intact; this is a CFW override, not a new retail
+signature. Expansion detection is independent of `ONLINE_TICKET_CHECK_BYPASS`;
+automatic ticket detection is not part of this change.
+
+Public references: [Luma loader](https://github.com/LumaTeam/Luma3DS/blob/master/sysmodules/loader/source/loader.c),
+[Luma BPS loader](https://github.com/LumaTeam/Luma3DS/blob/master/sysmodules/loader/source/bps_patcher.cpp)
+and [Azahar BPS buffer expansion](https://github.com/azahar-emu/azahar/blob/9e6f523a57fac9564ac0bf8286db3c3702d301ec/src/core/file_sys/patch.cpp).
+Identification follows [Luma's query implementation](https://github.com/LumaTeam/Luma3DS/blob/master/k11_extension/source/svc/GetSystemInfo.c)
+and [Azahar's SVC implementation](https://github.com/azahar-emu/azahar/blob/9e6f523a57fac9564ac0bf8286db3c3702d301ec/src/core/hle/kernel/svc.cpp).
 
 ## Independent build and installation
 
 The Bank subproject does not depend on Mover source or build artifacts. It can
-compile the payload, create the IPS, rebuild all ten language archives, and run
+compile the payload, create BPS/ExHeader, rebuild all ten language archives, and run
 static verification independently.
 
 Install GNU Make, a POSIX-compatible shell, Python 3, and devkitARM, then set
@@ -531,20 +555,25 @@ Dump the inputs from the user's own Bank base title `00040000000C9B00`:
 2. Select the executable `.app`, then run `NCCH image options...` →
    `Extract .code`.
 3. Select the same `.app`, run `NCCH image options...` →
-   `Mount image to drive`, and copy the complete mounted `romfs` directory.
+   `Mount image to drive`, and copy the complete mounted `romfs` directory
+   and the mounted root's `extheader.bin`.
 4. Place the inputs in this layout:
 
 ```text
 bank/rom/
+├── exheader.bin
 ├── exefs/
 │   └── 00040000000C9B00.dec.code
 └── romfs/
     └── ...
 ```
 
+Rename the mounted `extheader.bin` to `exheader.bin`. The shared release uses the
+complete `0x800`-byte ExHeader from the same Bank base title as the code image.
+
 The base code must be `2,801,664` bytes with SHA-1
 `5AB630856835DCF2DBDF9A62244DD19E46AE1C7C`. The build checks the input again.
-Do not commit or redistribute the code image or RomFS. `ROMFS_SOURCE` may
+Do not commit or redistribute the code image, RomFS or ExHeader. `ROMFS_SOURCE` may
 override the default RomFS path when required.
 
 Build Bank independently from the repository root:
@@ -568,22 +597,26 @@ Example for a non-Windows host:
 make -C bank ARMIPS=/path/to/armips IPS_TOOL=/path/to/flips
 ```
 
-The build compiles the eight C translation units into objects for three verified
-injection regions, emits their disassemblies for inspection, imports them and patches the
-base image with armips, creates `code.ips` with Floating IPS, rebuilds the
-ten-language RomFS, and runs static verification. The complete output is:
+The build compiles nine C units and emits disassemblies, validates the native
+code/ExHeader and reserves zero-filled added pages, imports the loader and
+feature objects with armips, creates `code.bps` plus the matching ExHeader,
+rebuilds all ten language archives and runs static verification. The complete output is:
 
 ```text
 release/00040000000C9B00/
-├── code.ips
+├── code.bps
+├── exheader.bin
 └── romfs/
 ```
 
-The verifier checks the base hash, executable payload ranges, every ARM hook,
-overwritten stock instructions, mode dispatch, byte-for-byte IPS reconstruction,
-and all localized messages. Copy `00040000000C9B00` to `SD:/luma/titles/` and
-enable Luma game patching. Back up the SD card and game saves before real-console
-use.
+The verifier checks the base hash, exact ExHeader changes, native constructor
+and BSS boundaries, preserved functions, loader, every ARM hook, instruction
+replay, mode dispatch, BPS CRCs/reconstruction and localized messages.
+Install the complete `00040000000C9B00` under `SD:/luma/titles/` and enable
+Luma game patching, or install the same complete directory in Azahar.
+Remove stale `code.ips` and `code.bin` from that mod directory; do not mix them.
+The build removes only its own generated release IPS, not installed emulator files.
+Back up the SD card and game saves before real-console use.
 
 ## External open-source references
 
@@ -591,7 +624,7 @@ use.
   and [implementation](https://github.com/devkitPro/libctru/blob/master/libctru/source/services/fs.c)
   were used to verify the public FSUSER/FSFILE interfaces and result handling.
 - [Luma3DS loader patcher](https://github.com/LumaTeam/Luma3DS/blob/master/sysmodules/loader/source/patcher.c)
-  was used to verify the title-specific `code.ips` and LayeredFS layout.
+  was used to verify the title-specific BPS/ExHeader and LayeredFS layout.
 - [pkNX TextFile](https://github.com/kwsch/pkNX/blob/master/pkNX.Structures/Text/TextFile.cs)
   was used to verify the public message-file encoding and line-table format.
 

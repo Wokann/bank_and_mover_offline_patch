@@ -243,8 +243,9 @@ in `sav.bin`, not the stock logical-record backend.
 
 State 15 retains its native entry, transitions, job construction and cleanup.
 Only job initialization at `0x002B0444`, result polling at `0x002B0464`, and
-unbinding at `0x002B1994` are redirected. Wrappers occupy the reclaimed HOME
-box-selection UI region; all other bytes in `[0x002B0270, 0x002B1AD0)` and the
+unbinding at `0x002B1994` are redirected. Wrappers occupy added pages after
+native BSS; HOME box-selection UI stays intact. Other bytes in
+`[0x002B0270, 0x002B1AD0)` and the
 native job implementation remain intact. Download and Unlock modes call native
 interfaces with `ONLINE_TICKET_CHECK_BYPASS=0`. Offline Mode, or online modes
 with `1`, supply console time and an expiry 999 days later. Purchase counts stay
@@ -252,7 +253,7 @@ with `1`, supply console time and an expiry 999 days later. Purchase counts stay
 provided. Native getters and exit cleanup copy the resulting entitlement and
 date. Local unbinding does not access a nonexistent network client; native
 destruction still runs. No system eShop applet or loading-animation simulation
-is used. Both paths remain present, and only one byte at `0x002A7E04` changes
+is used. Both paths remain present, and only one byte at `0x003FC600` changes
 between builds. The switch does not alter other networking, transaction
 recovery, mileage calculations, or post-download exit branches.
 

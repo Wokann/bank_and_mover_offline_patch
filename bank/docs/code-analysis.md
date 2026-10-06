@@ -18,7 +18,7 @@ transaction rules, and independent build procedure.
 | `.text` | `0x00100000–0x00314000` | Read/execute; actual content ends at `0x00313910` |
 | `.rodata` | `0x00314000–0x0036A000` | Read-only, non-executable |
 | `.data` | `0x0036A000–0x003AC000` | Read/write |
-| `.bss` | Starts at `0x003AC000`, length `0x4EE38` | Read/write, zero-initialized |
+| Logical `.bss` | `[0x003ABACC, 0x003FA904)`, length `0x4EE38`; RW pages extend to `0x003FB000` | Read/write, zero-initialized |
 | Thread stack | Length `0x40000` | ExHeader setting |
 
 The last non-zero image byte in `.text` is before `0x00313910`, leaving
@@ -32,13 +32,12 @@ are not equivalent to executable free space. Ghidra records references as far
 as `0x00369374` and `0x003ABFE0`, including locations whose stored bytes are
 zero, so raw zero scanning alone is not a safe allocation rule.
 
-Increasing only the ExHeader `.text` size cannot extend executable code past
-`0x00314000`: `.rodata` begins at that same page boundary. A real expansion
-would require moving `.rodata` and `.data`, updating their ExHeader virtual
-addresses, and relocating every affected absolute reference. A Luma
-`code.ips` cannot express that complete image-layout change by itself. The
-current patch therefore uses existing executable padding and intentionally
-unreachable function bodies instead of claiming `.rodata` or `.bss` as code.
+Increasing only ExHeader text size overlaps rodata at `0x00314000`. An
+alternative preserves native segment and variable addresses: materialize
+original BSS as zero-filled data, add pages after it, then enable execution on
+those pages from a startup loader. The maintained BPS/ExHeader layout and
+preserved-function ranges are described in the
+[developer document](../README.md#injection-space-provenance-and-bounds).
 
 ## Main flow and function addresses
 

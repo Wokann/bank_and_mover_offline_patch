@@ -206,7 +206,7 @@
 官方主分支提交。
 
 两条路线始终包含在同一套代码中；该定义只决定
-`[0x002A7E04, 0x002A7E05)` 的一个策略字节。state 15 的入口和状态推进保持原版，
+`[0x003FC600, 0x003FC601)` 的一个策略字节。state 15 的入口和状态推进保持原版，
 只转接 `0x002B0444`（作业启动）、`0x002B0464`（取得结果）和 `0x002B1994`
 （解除绑定）三个调用点。开关为 `0` 时，下载与解锁模式调用原版作业接口；离线模式
 或开关为 `1` 时，使用本地作业结果。原版仍负责分配、构造、结果检查、字段回填、
@@ -352,18 +352,20 @@
 |---|---|
 | `src/main.s` | 原址 hook、模式分派、小型跳板、状态路由，以及各 C 对象的注入位置 |
 | `src/bankdata_redirect.c` | 经过检查的银行数据校验、恢复、载入与本地事务实现 |
+| `src/code_expansion.c` | 与 Mover 同架构的实机／Azahar 共用加载器 |
 | `src/fs_helpers.c` | Bankdata 与 Turtle 后端共用的带检查 SD 文件系统实现 |
 | `src/offline_flow.c` | 本地连接、断开连接与保存提示状态更新 |
 | `src/local_mileage.c` | 把主机时间转换成原版宝可里程状态读取的日期格式；不替代原版点数计算 |
 | `src/local_ticket.c` | 为原版使用权状态的作业接口提供本地票据结果；不实现宝可里程计算 |
 | `src/unlock_mode.c` | 为原版挑战码界面选择并归一化服务器返回的第一个解锁候选值 |
-| `src/patch_paths.c` | 放入已验证代码尾部区域的路径常量 |
-| `src/turtle_redirect.c` | 放入已验证 HOME 代码区域的 Turtle 记录重定向后端 |
+| `src/patch_paths.c` | 放入新增页的路径常量 |
+| `src/turtle_redirect.c` | 放入新增页的 Turtle 记录重定向后端 |
 | `include/bankdata_redirect.h` | 已确认的 Bankdata 序列化布局、原版 Bank 局部视图、重定向常量与原版入口 |
 | `include/fs_helpers.h` | 共用的文件系统类型、SDK 入口与带检查的 SD 辅助函数声明 |
 | `include/local_mileage.h` | 本地里程日期输入声明 |
 | `include/local_ticket.h` | 票据作业与共享数据视图、使用权常量和本地作业接口 |
 | `include/offline_flow.h` | 本地流程状态使用的原版计时器入口 |
+| `include/code_expansion.h` | 扩容加载器接口及 SVC 常量 |
 | `include/patch_types.h` | 注入 C 对象共用的固定宽度基础类型 |
 | `include/patch_paths.h` | 分别放置的对象所共用的路径声明 |
 | `include/system_time.h` | 共享内存系统时间结构及地址 |
@@ -371,84 +373,102 @@
 | `include/unlock_mode.h` | 解锁候选值显示辅助函数声明 |
 | `src/patch_messages.py` | 重建并验证十套本地化 LayeredFS 档案 |
 | `tools/message_archive.py` | 自包含的 GARC 与加密消息文件编解码器 |
-| `tools/verify_patch.py` | 验证基底哈希、代码范围、钩子、IPS 还原、原指令重放与资源 |
-| `Makefile` | 编译、注入、创建 IPS、重建文本并写出 Luma 发行目录 |
+| `tools/prepare_expanded_code.py` | 验证原镜像／ExHeader，补零原 BSS，生成固定原址扩展镜像与头部 |
+| `tools/verify_patch.py` | 验证保留的原函数、扩容布局、加载器、钩子、BPS 还原与资源 |
+| `Makefile` | 编译、扩容、注入、创建 BPS、重建文本并写出 Luma 发行目录 |
 
 ### 注入空间来源与边界
 
-以下地址均为游戏运行时的虚拟地址，不是 IPS 文件偏移。范围统一采用
-`[起点, 终点)`：包含起点，不包含终点。布局定义见 [`src/main.s`](src/main.s) 和
-[`symbol.inc`](include/symbol.inc)，构建后的实际落点见
-`bank/build/armips-symbols.txt`。
+地址均为运行时虚拟地址，范围采用 `[起点, 终点)`。定义见 [`src/main.s`](src/main.s)
+及 [`symbol.inc`](include/symbol.inc)，实际落点见 `build/armips-symbols.txt`。
+Bank 与 Mover 采用同一种固定原址扩容架构，但各自使用自己的段边界、启动和 SDK
+地址；Bank 构建不引用 Mover 文件。
 
-原版可执行镜像的段边界如下；本补丁不扩大 ExHeader 中的段大小，也不移动后续段。
+原版段与逻辑 BSS 边界：
 
-| 原版段 | 起点 | 声明大小 | 声明内容终点 | 按 4 KiB 页映射的终点 | 权限 |
+| 原版区域 | 起点 | 声明大小 | 内容终点 | 页映射终点 | 权限 |
 | --- | --- | --- | --- | --- | --- |
-| `.text` | `0x00100000` | `0x00213910` | `0x00313910` | `0x00314000` | 可读、可执行 |
-| `.rodata` | `0x00314000` | `0x00055370` | `0x00369370` | `0x0036A000` | 只读、不可执行 |
-| `.data` | `0x0036A000` | `0x00041ACC` | `0x003ABACC` | `0x003AC000` | 可读写、不可执行 |
+| `.text` | `0x00100000` | `0x213910` | `0x00313910` | `0x00314000` | 可读、可执行 |
+| `.rodata` | `0x00314000` | `0x55370` | `0x00369370` | `0x0036A000` | 只读、不可执行 |
+| `.data` | `0x0036A000` | `0x41ACC` | `0x003ABACC` | `0x003AC000` | 可读写、不可执行 |
+| 逻辑 BSS | `0x003ABACC` | `0x4EE38` | `0x003FA904` | `0x003FB000` | 可读写、零初始化 |
 
-代码和数据使用的空间分为原址修改、禁用功能回收和原段末页填充，不能把它们都视为
-原镜像中天然空闲的区域。
+逻辑 BSS 从声明的 `.data` 内容末端开始，并非从页映射末端开始。原版清零循环的
+地址常量、构造函数遍历器及 `[0x00369050, 0x00369370)` 的 PREL32 构造表均保留。
 
-| 地址范围 | 空间来源与原用途 | 当前用途及边界约束 |
+扩容不移动原段或原变量：把原 BSS 显式补零放进镜像，随后添加分隔页与三页荷载。
+ExHeader 的 `.data` 改为 `0x95` 页、大小 `0x95000`，BSS 大小为 `0`；原版
+清零循环仍运行。镜像由 `0x2AC000` 增为 `0x2FF000` 字节，但运行时只比原版多映射
+四页，即 `0x4000`（16 KiB）。
+
+| 地址范围或原址 | 来源与原用途 | 当前用途和约束 |
 | --- | --- | --- |
-| `main.s` 中分散的原址 hook | 原有函数入口、调用点或分支处的指令 | 修改跳转、条件或少量指令，必要时由包装函数重放被覆盖指令；不代表整段原函数可回收。 |
-| `[0x00285BA8, 0x0028711C)` | 禁用后回收：HOME 专用盒子选择 UI 的输入、更新、构造和清理等函数；原范围 `0x1574`（5492 字节） | 放置 FS、Bankdata、离线流程、本地里程、本地票据及解锁显示的六个 C 对象，以及其后的票据作业包装；不包括普通盒子或共享函数。`0x0028711C` 是相邻正常 UI 函数的起点，不能越界。 |
-| `[0x002A7BF0, 0x002A8404)` | 禁用后回收：state 27 的 HOME 操作控制及其创建、初始化、清理函数 | 汇编模式分派、包装、跳板和单字节票务开关使用到 `0x002A82E4`；从该处开始放置 Turtle 重定向后端，并继续使用下一行的回收区。 |
-| `[0x002A8404, 0x002A8760)` | 禁用后回收：state 14 的 eShop 跳转界面及配套函数 | Turtle 后端的剩余部分；这两段回收区合计 `0xB70`（2928 字节），当前已用满。`0x002A8760` 是原版事务恢复入口，保留原样，不能覆盖。 |
-| `0x002B0444`、`0x002B0464`、`0x002B1994`，各 4 字节 | 原址修改：state 15 作业启动、取结果及退出解除绑定的调用点 | 三条 `BL` 调用模式包装；离线模式始终提供本地结果，下载与解锁模式由固定测试字节选择原版或本地作业。 |
-| `[0x002B0270, 0x002B1AD0)`，除上述三个调用点 | 保留：state 15 原函数体及配套函数 | 其余字节与原镜像一致，三个模式均使用原版状态推进、结果回填及清理；不作为荷载空间。原版票据作业函数本身也不改写。 |
-| `[0x00313910, 0x00313A40)` | 原 `.text` 最后一页的填充 | 为 Luma LayeredFS 荷载避让 `0x130`（304 字节），本补丁不写入。`0x00313A40` 是本工程选定的避让边界，不是 Luma 固定地址。 |
-| `[0x00313A40, 0x00313FC0)` | 原 `.text` 最后一页的填充；范围 `0x580`（1408 字节） | 放置尾部汇编和 `patch_paths.o`，实际使用到 `0x00313E2B`；后面是本工程尚未使用的填充。 |
-| `[0x00313FC0, 0x00314000)` | 原 `.text` 最后一页的填充 | 64 字节版本标识空间，存放 `offline_patch_v1.0.0` 并补零；目前不参与运行逻辑。不能越过 `.rodata` 起点 `0x00314000`。 |
-| `[0x003ABFFC, 0x003AC000)` | 原 `.data` 最后一页中已核对的末尾 4 字节空位 | 固定存放会话模式、下载完成标志、标题 R 键前态和标题所选模式；不是动态分配的堆内存，也不存放可执行代码。 |
+| `main.s` 分散的原址 hook | 原函数入口、调用点或分支指令 | 保留现有模式分派和被覆盖指令重放；不放完整新增函数。 |
+| `0x00100010`，4 字节 | 原启动调用 Thumb 构造函数遍历器的 `BLX` | 调用加载器，成功后恢复寄存器并尾跳到 `0x00102BA5`。 |
+| `[0x00285BA8, 0x0028711C)` | 原 HOME 专用盒子选择 UI | 完整保留原版字节，不再回收。 |
+| `[0x002A7BF0, 0x002A8404)` | 原 state 27 HOME 状态及配套函数 | 完整保留原版字节，不再回收。 |
+| `[0x002A8404, 0x002A8760)` | 原 state 14 eShop 状态及配套函数 | 完整保留原版字节；后续事务恢复入口同样保留。 |
+| `0x002B0444`、`0x002B0464`、`0x002B1994`，各 4 字节 | state 15 作业启动、轮询和解除绑定调用点 | 调用新增页中的包装；其他 state 15 字节和原票据作业不变。 |
+| `[0x00313910, 0x00313A40)` | 原 `.text` 末页填充 | 为 Luma LayeredFS 避让 `0x130` 字节，不写入。 |
+| `[0x00313A40, 0x00313B0C)` | 原 `.text` 末页填充 | 启动汇编和 `code_expansion.o`，合计 `0xCC` 字节。 |
+| `[0x00313B0C, 0x00313FC0)` | 原 `.text` 末页填充 | 未使用可执行余量，`0x4B4` 字节。 |
+| `[0x00313FC0, 0x00314000)` | 原 `.text` 末页填充 | 64 字节版本标识 `offline_patch_v1.0.0` 并补零。 |
+| `[0x003ABACC, 0x003FA904)` | 原逻辑 BSS | 显式补零；保留原变量和原启动清零，不放荷载。 |
+| `[0x003FAFF0, 0x003FB000)` | 原读写末页中、逻辑 BSS 之后的 16 字节 | 前 4 字节存会话模式、下载完成标志、R 键前态及标题选择，其余 12 字节保留。 |
+| `[0x003FB000, 0x003FC000)` | 新增读写映射 | 零填充分隔页，不是未映射保护页。 |
+| `[0x003FC000, 0x003FF000)` | 原 BSS 后新增三页 | 全部功能包装、C 后端和路径常量；实机由加载器启用执行权限。 |
 
-HOME 选单入口和无有效游戏存档时的 HOME 直达入口在三个模式中都已封堵；eShop
-下载入口也在三个模式中禁用。因此只回收这些功能专属的调用链，不回收它们使用的
-公共 SDK、普通盒子或其他界面的共享函数。
+三个现有模式仍禁用 HOME、支持代码与 eShop 入口，但禁用不再占用其函数体。本次只
+准备了未来原版模式所需的空间与原函数，尚未添加原版模式；以后仍需给功能禁用、
+语言和 Turtle 等原址 hook 增加模式分派。
 
-当前 C 对象及尾部区的实际占用如下，包含对象之间的对齐填充。
+新增页内的实际落点如下，合计 `0x2340`（9024 字节），剩余 `0xCC0`（3264 字节）：
 
 | 内容 | 实际范围 | 占用 |
 | --- | --- | --- |
-| `fs_helpers.o` | `[0x00285BA8, 0x00286150)` | `0x5A8`（1448 字节） |
-| `bankdata_redirect.o` | `[0x00286150, 0x002867AC)` | `0x65C`（1628 字节） |
-| `offline_flow.o` | `[0x002867AC, 0x002868CC)` | `0x120`（288 字节） |
-| `local_mileage.o` | `[0x002868CC, 0x00286CF0)` | `0x424`（1060 字节） |
-| `local_ticket.o` | `[0x00286CF0, 0x00286EB8)` | `0x1C8`（456 字节） |
-| `unlock_mode.o` | `[0x00286EB8, 0x00286F08)` | `0x50`（80 字节） |
-| 票据作业汇编包装及字面量池 | `[0x00286F08, 0x00286F90)` | `0x88`（136 字节） |
-| 回收区中的汇编包装、跳板与票务开关 | `[0x002A7BF0, 0x002A82E4)` | `0x6F4`（1780 字节） |
-| `turtle_redirect.o` | `[0x002A82E4, 0x002A8760)` | `0x47C`（1148 字节） |
-| `.text` 尾部汇编 | `[0x00313A40, 0x00313D78)` | `0x338`（824 字节） |
-| `patch_paths.o` | `[0x00313D78, 0x00313E2B)` | `0xB3`（179 字节） |
+| 文本、保存和语言汇编包装 | `[0x003FC000, 0x003FC338)` | `0x338` |
+| `patch_paths.o` | `[0x003FC338, 0x003FC3EB)` | `0xB3`，随后 1 字节对齐 |
+| 模式、标题、连接包装和票务开关 | `[0x003FC3EC, 0x003FCAE0)` | `0x6F4` |
+| `turtle_redirect.o` | `[0x003FCAE0, 0x003FCF5C)` | `0x47C` |
+| `fs_helpers.o` | `[0x003FCF5C, 0x003FD504)` | `0x5A8` |
+| `bankdata_redirect.o` | `[0x003FD504, 0x003FDB60)` | `0x65C` |
+| `offline_flow.o` | `[0x003FDB60, 0x003FDC80)` | `0x120` |
+| `local_mileage.o` | `[0x003FDC80, 0x003FE0A0)` | `0x420` |
+| `local_ticket.o` | `[0x003FE0A0, 0x003FE268)` | `0x1C8` |
+| `unlock_mode.o` | `[0x003FE268, 0x003FE2B8)` | `0x50` |
+| 票据汇编包装与字面量池 | `[0x003FE2B8, 0x003FE340)` | `0x88` |
+| 未使用新增页空间 | `[0x003FE340, 0x003FF000)` | `0xCC0` |
 
-六个 C 对象合计占用 `0x1360`（4960 字节），加上 136 字节票据作业包装共
-`0x13E8`（5096 字节）；剩余 `[0x00286F90, 0x0028711C)` 为 `0x18C`（396 字节）。
-这里仍是被禁用的旧 HOME
-函数内容，不是天然零填充。尾部区剩余 `[0x00313E2B, 0x00313FC0)` 为
-`0x195`（405 字节）；若放置 4 字节对齐的 ARM 代码，可用起点为
-`0x00313E2C`，即 `0x194`（404 字节）。
+原 `.text` 实际大小不变，Luma LayeredFS 落点不随荷载扩容移动。其路径仍使用
+`.rodata` 尾部 `[0x00369370, 0x00369397)`，本补丁不占用。更换 Luma 时需重新核对
+避让边界，不能仅凭末页零值判断空间可用。
 
-`.text` 声明内容终点到映射终点只有 `0x6F0`（1776 字节），是按页映射留下的
-最后一页余量，不是额外分配了一整页。Luma 在应用 IPS 后安装 LayeredFS，且不会
-自动避开 IPS 已占用的范围：本工程因此单独保留上述 304 字节。该布局下 LayeredFS
-的路径字符串使用 `.rodata` 尾部 `[0x00369370, 0x00369397)` 的 39 字节，
-与 `.text` 中的执行荷载分开，本补丁不占用该处。相关机制可对照
-[Luma 加载器](https://github.com/LumaTeam/Luma3DS/blob/master/sysmodules/loader/source/loader.c)
-与 [LayeredFS 安装逻辑](https://github.com/LumaTeam/Luma3DS/blob/master/sysmodules/loader/source/patcher.c)。
-更换 Luma 实现或原镜像段布局时，需要重新核对其荷载大小和落点，不能假定这条避让
-边界对所有版本都成立。
+### 实机与 Azahar 共用加载器
 
-`.rodata`、`.data` 的其他末页零值不能直接认定为空闲空间；它们也不具备执行权限。
-本补丁没有为注入代码另行分配堆空间。增加荷载时应同时核对 `.area` 上限、实际构建
-符号和相邻原函数，不能只凭连续零值或某个入口被跳过就扩大回收范围。
+发行使用同一套 `code.bps`、`exheader.bin` 与 `romfs/`。BPS 声明扩展后的目标
+长度；Luma 根据新 ExHeader 分配加载空间，Azahar 的 BPS 加载器根据目标长度扩展
+代码缓冲区。原段地址不移动，也不把整个 `.text` 延伸到其他原段。
+
+启动加载器在原构造函数遍历之前执行：
+
+1. `SVC 0x27` 把当前进程伪句柄转换为真实句柄。
+2. `SVC 0x2A` 查询 `type=0x20000, param=0`，只有成功且返回 ID `2` 才认定为 Azahar。
+3. `SVC 0x70` 对新增三页执行 `MEMOP_PROT=6`、权限 `RWX=7`。实机或已实现接口的
+   模拟器必须正常返回成功。
+4. 只对已识别的 Azahar，且未实现 SVC 导致 `r0` 原样保留输入句柄时，允许兼容继续。
+   未知环境不允许这种兼容，其他非零返回仍按失败处理。
+5. 关闭真实句柄。句柄或权限操作失败则停止，不进入新增页；成功恢复寄存器、栈及返回地址，继续原版
+   构造函数遍历。
+
+ExHeader 只修改必要的 `.data`／BSS 字段和 SVC 权限；当前输入只需补上 `0x70`。
+其他能力描述和完整头部中的签名描述副本保留；这是 CFW 加载覆盖，不是重新签名的
+官方 NCCH。扩容环境检测独立于 `ONLINE_TICKET_CHECK_BYPASS`，本次不添加票务自动检测。
+
+公开依据见 [Luma 加载器](https://github.com/LumaTeam/Luma3DS/blob/master/sysmodules/loader/source/loader.c)、[Luma BPS 加载](https://github.com/LumaTeam/Luma3DS/blob/master/sysmodules/loader/source/bps_patcher.cpp) 和 [Azahar BPS 缓冲扩展](https://github.com/azahar-emu/azahar/blob/9e6f523a57fac9564ac0bf8286db3c3702d301ec/src/core/file_sys/patch.cpp)。环境识别对应 [Luma 查询实现](https://github.com/LumaTeam/Luma3DS/blob/master/k11_extension/source/svc/GetSystemInfo.c) 和 [Azahar SVC 实现](https://github.com/azahar-emu/azahar/blob/9e6f523a57fac9564ac0bf8286db3c3702d301ec/src/core/hle/kernel/svc.cpp)。
 
 ## 独立编译与安装
 
-Bank 子项目不依赖 Mover 的源码或构建产物，可以单独完成代码编译、IPS 生成、十套语言
+Bank 子项目不依赖 Mover 的源码或构建产物，可以单独完成代码编译、BPS／ExHeader 生成、十套语言
 文本重建和静态验证。
 
 需要准备 GNU Make、兼容 POSIX 的 shell、Python 3 和 devkitARM，并设置 `DEVKITARM`
@@ -460,20 +480,24 @@ Bank 子项目不依赖 Mover 的源码或构建产物，可以单独完成代�
 1. 在 GodMode9 的 `Title manager` 中选择 Bank 本体并进入 `Open title folder`。
 2. 选择可执行 `.app`，依次执行 `NCCH image options...` → `Extract .code`。
 3. 再次选择同一 `.app`，执行 `NCCH image options...` → `Mount image to drive`，复制挂载
-   分区中的完整 `romfs` 目录。
+   分区中的完整 `romfs` 目录，同时复制挂载根目录的 `extheader.bin`。
 4. 按以下结构放入工程：
 
 ```text
 bank/rom/
+├── exheader.bin
 ├── exefs/
 │   └── 00040000000C9B00.dec.code
 └── romfs/
     └── ...
 ```
 
+将挂载得到的 `extheader.bin` 重命名为 `exheader.bin`。共用发行包使用完整 `0x800`
+字节 ExHeader，它必须来自与代码相同的 Bank 本体。
+
 基底代码必须为 `2,801,664` 字节，SHA-1 必须为
 `5AB630856835DCF2DBDF9A62244DD19E46AE1C7C`。构建脚本会再次检查输入；代码镜像和
-RomFS 不应提交或传播。需要使用其他 RomFS 路径时可显式覆盖 `ROMFS_SOURCE`。
+RomFS 和 ExHeader 不应提交或传播。需要使用其他 RomFS 路径时可显式覆盖 `ROMFS_SOURCE`。
 
 从仓库根目录独立构建 Bank：
 
@@ -496,19 +520,24 @@ make
 make -C bank ARMIPS=/path/to/armips IPS_TOOL=/path/to/flips
 ```
 
-构建顺序为：把八个 C 编译单元分别编译成注入三个已验证区域的对象 → 输出各对象反汇编供检查
-→ armips 导入对象并修改基底镜像 → Floating IPS 对比生成 `code.ips` → 重建十套语言
+构建顺序为：编译九个 C 单元并输出反汇编 → 检查原代码和 ExHeader、补零并预留新增页
+→ armips 注入加载器与功能对象 → Floating IPS 生成 `code.bps` 并复制配套 ExHeader
+→ 重建十套语言
 RomFS → 执行静态验证。完整输出为：
 
 ```text
 release/00040000000C9B00/
-├── code.ips
+├── code.bps
+├── exheader.bin
 └── romfs/
 ```
 
-校验器会检查基底哈希、载荷可执行范围、每个 ARM 钩子、被覆盖原指令、模式分派、IPS
-逐字节还原结果和所有本地化文本。把生成的 `00040000000C9B00` 复制到
-`SD:/luma/titles/`，启用 Luma 游戏补丁。实机使用前请备份 SD 卡和游戏存档。
+校验器检查基底哈希、ExHeader 精确改动、原构造与 BSS 边界、保留的原函数、加载器、
+每个 ARM 钩子、原指令重放、模式分派、BPS 的三个 CRC／逐字节还原和全部本地化文本。
+把完整 `00040000000C9B00` 复制到 `SD:/luma/titles/`，启用 Luma 游戏补丁；
+Azahar 同样使用完整目录。两者都须移除同目录旧 `code.ips` 和 `code.bin`，不能混装。
+构建只移除自身发行目录内生成的旧 IPS，不自动修改模拟器安装目录。
+实机使用前请备份 SD 卡和游戏存档。
 
 ## 外部开源参考
 
@@ -516,7 +545,7 @@ release/00040000000C9B00/
   与[实现](https://github.com/devkitPro/libctru/blob/master/libctru/source/services/fs.c)
   用于核对公开的 FSUSER／FSFILE 接口及结果处理。
 - [Luma3DS loader patcher](https://github.com/LumaTeam/Luma3DS/blob/master/sysmodules/loader/source/patcher.c)
-  用于核对按标题存放的 `code.ips` 与 LayeredFS 布局。
+  用于核对按标题存放的 BPS／ExHeader 与 LayeredFS 布局。
 - [pkNX TextFile](https://github.com/kwsch/pkNX/blob/master/pkNX.Structures/Text/TextFile.cs)
   用于核对公开的消息文件编码与行表格式。
 

@@ -9,6 +9,7 @@ import argparse
 import hashlib
 import importlib.util
 import sys
+import zlib
 from pathlib import Path
 
 
@@ -21,10 +22,17 @@ TICKET_JOB_CALLS = (
     (0x002B0464, "combinepatch_ticketpoll", "ticketjob_poll"),
     (0x002B1994, "combinepatch_ticketunbind", "ticketjob_unbind"),
 )
-HOME_BOX_CAVE_START = 0x00285BA8
-HOME_BOX_CAVE_END = 0x0028711C
-HOME_CAVE_START = 0x002A7BF0
-HOME_CAVE_END = 0x002A8760
+RESTORED_HOME_BOX_START = 0x00285BA8
+RESTORED_HOME_BOX_END = 0x0028711C
+RESTORED_HOME_START = 0x002A7BF0
+RESTORED_HOME_END = 0x002A8760
+TEXT_ACTUAL_END = 0x00313910
+EXPANDED_PAYLOAD_START = 0x003FC000
+EXPANDED_PAYLOAD_SIZE = 0x3000
+DATA_ACTUAL_END = 0x003ABACC
+BSS_ACTUAL_END = 0x003FA904
+READ_WRITE_MAPPED_END = 0x003FB000
+RUNTIME_STORAGE_START = READ_WRITE_MAPPED_END - 0x10
 TAIL_CAVE_START = 0x00313A40
 TEXT_MAPPED_END = 0x00314000
 VERSION_STORAGE_SIZE = 0x40
@@ -139,47 +147,163 @@ def expect_ldr_r0_literal(image: bytes, address: int, value: int, name: str) -> 
     expect_word(image, literal_address, value, name)
 
 
-def apply_ips(base: bytes, ips_bytes: bytes) -> bytes:
-    """Apply a complete IPS stream to a same-size code image.
+def apply_bps(base: bytes, patch: bytes) -> bytes:
+    """Decode the release BPS, checking sizes, copy bounds and all three CRCs."""
+    if len(patch) < 19 or not patch.startswith(b"BPS1"):
+        raise ValueError("invalid BPS stream")
+    cursor, footer = 4, len(patch) - 12
 
-    将完整 IPS 流应用于等长度代码镜像。
-    """
-    if not ips_bytes.startswith(b"PATCH") or not ips_bytes.endswith(b"EOF"):
-        raise ValueError("release code.ips is not a complete IPS patch")
-    output = bytearray(base)
-    cursor = len(b"PATCH")
-    while True:
-        if cursor + 3 > len(ips_bytes):
-            raise ValueError("IPS stream ends before EOF")
-        if ips_bytes[cursor : cursor + 3] == b"EOF":
-            cursor += 3
-            if cursor != len(ips_bytes):
-                raise ValueError("unexpected IPS truncate record for a same-size code image")
-            return bytes(output)
-        offset = int.from_bytes(ips_bytes[cursor : cursor + 3], "big")
-        cursor += 3
-        if cursor + 2 > len(ips_bytes):
-            raise ValueError("IPS stream ends in record length")
-        length = int.from_bytes(ips_bytes[cursor : cursor + 2], "big")
-        cursor += 2
-        if length == 0:
-            if cursor + 3 > len(ips_bytes):
-                raise ValueError("IPS stream ends in RLE record")
-            length = int.from_bytes(ips_bytes[cursor : cursor + 2], "big")
-            value = ips_bytes[cursor + 2]
-            cursor += 3
-            data = bytes([value]) * length
-        else:
-            if cursor + length > len(ips_bytes):
-                raise ValueError("IPS stream ends in data record")
-            data = ips_bytes[cursor : cursor + length]
+    def number() -> int:
+        nonlocal cursor
+        value, shift = 0, 1
+        while cursor < footer:
+            byte = patch[cursor]
+            cursor += 1
+            value += (byte & 0x7F) * shift
+            if byte & 0x80:
+                return value
+            shift <<= 7
+            value += shift
+            if shift > 1 << 35:
+                break
+        raise ValueError("invalid BPS number")
+
+    source_size, target_size, metadata_size = number(), number(), number()
+    if source_size != len(base) or metadata_size != 0:
+        raise ValueError("BPS source length or metadata is incompatible")
+    if target_size != EXPANDED_PAYLOAD_START + EXPANDED_PAYLOAD_SIZE - IMAGE_BASE:
+        raise ValueError("BPS target length differs from the mapped image")
+    source_crc, target_crc, patch_crc = (
+        int.from_bytes(patch[index:index + 4], "little")
+        for index in range(footer, len(patch), 4)
+    )
+    if zlib.crc32(base) != source_crc or zlib.crc32(patch[:-4]) != patch_crc:
+        raise ValueError("BPS source or patch CRC mismatch")
+
+    output = bytearray()
+    source_relative = target_relative = 0
+    while cursor < footer:
+        command = number()
+        operation, length = command & 3, (command >> 2) + 1
+        if length > target_size - len(output):
+            raise ValueError("BPS command exceeds target size")
+        if operation == 0:
+            offset = len(output)
+            if offset + length > source_size:
+                raise ValueError("BPS source read exceeds source size")
+            output.extend(base[offset:offset + length])
+        elif operation == 1:
+            if cursor + length > footer:
+                raise ValueError("truncated BPS literal")
+            output.extend(patch[cursor:cursor + length])
             cursor += length
-        if offset + len(data) > len(output):
-            raise ValueError("IPS record writes outside the base code image")
-        output[offset : offset + len(data)] = data
+        else:
+            encoded = number()
+            distance = -(encoded >> 1) if encoded & 1 else encoded >> 1
+            if operation == 2:
+                source_relative += distance
+                if source_relative < 0 or source_relative + length > source_size:
+                    raise ValueError("BPS source copy exceeds source size")
+                output.extend(base[source_relative:source_relative + length])
+                source_relative += length
+            else:
+                target_relative += distance
+                if target_relative < 0 or target_relative >= len(output):
+                    raise ValueError("BPS target copy does not reference existing output")
+                for _ in range(length):
+                    output.append(output[target_relative])
+                    target_relative += 1
+    if cursor != footer or len(output) != target_size or zlib.crc32(output) != target_crc:
+        raise ValueError("BPS target size or CRC mismatch")
+    return bytes(output)
 
 
-def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> None:
+def verify_expansion(base: bytes, image: bytes, symbols: dict[str, int],
+                     base_exheader: Path, exheader: Path) -> None:
+    """Check the loader, fixed native addresses and restored function bodies."""
+    from tools.prepare_expanded_code import prepare_images
+
+    _, expected_header, _ = prepare_images(
+        base, base_exheader.read_bytes(), EXPANDED_PAYLOAD_START, EXPANDED_PAYLOAD_SIZE
+    )
+    if exheader.read_bytes() != expected_header:
+        raise ValueError("release exheader differs from the exact expanded layout/capabilities")
+    payload_end = EXPANDED_PAYLOAD_START + EXPANDED_PAYLOAD_SIZE
+    used_end = symbols["combinepatch_codeusedend"]
+    if not EXPANDED_PAYLOAD_START < used_end <= payload_end:
+        raise ValueError("payload exceeds the added executable pages")
+    if (symbols["codeexpansion_payloadstart"] != EXPANDED_PAYLOAD_START or
+            symbols["code_expansion_payload_size"] != EXPANDED_PAYLOAD_SIZE):
+        raise ValueError("assembly and exheader payload reservations differ")
+    if image[len(base):image_offset(EXPANDED_PAYLOAD_START)] != bytes(
+            EXPANDED_PAYLOAD_START - IMAGE_BASE - len(base)):
+        raise ValueError("original BSS and pre-payload padding are not zero-filled")
+    if any(image[image_offset(used_end):image_offset(payload_end)]):
+        raise ValueError("unused payload padding is not zero-filled")
+    if (symbols["offlinepatch_runtimestoragestart"] != RUNTIME_STORAGE_START or
+            symbols["offlinepatch_runtimestorageend"] != READ_WRITE_MAPPED_END or
+            symbols["combinepatch_modestorage"] != RUNTIME_STORAGE_START or
+            not BSS_ACTUAL_END <= RUNTIME_STORAGE_START < READ_WRITE_MAPPED_END):
+        raise ValueError("patch runtime storage overlaps native logical BSS")
+    if image[image_offset(TEXT_MAPPED_END):len(base)] != base[image_offset(TEXT_MAPPED_END):]:
+        raise ValueError("native rodata/data contents changed")
+    for start, end, name in (
+        (RESTORED_HOME_BOX_START, RESTORED_HOME_BOX_END, "HOME box-selection UI"),
+        (RESTORED_HOME_START, RESTORED_HOME_END, "HOME/eShop states"),
+        (0x00100024, 0x00100048, "native BSS clear"),
+        (0x00102BA4, 0x00102BC8, "native constructor walker"),
+    ):
+        if image[image_offset(start):image_offset(end)] != base[image_offset(start):image_offset(end)]:
+            raise ValueError(f"{name} no longer matches the original image")
+    expect_word(base, 0x00100040, DATA_ACTUAL_END, "native BSS start")
+    expect_word(base, 0x00100044, BSS_ACTUAL_END, "native BSS end")
+    table_start = 0x00102BAC + read_word(base, 0x00102BC0)
+    table_end = 0x00102BB0 + read_word(base, 0x00102BC4)
+    if (table_start, table_end) != (0x00369050, 0x00369370):
+        raise ValueError("native PREL32 constructor table moved")
+    if image[image_offset(table_start):image_offset(table_end)] != base[
+            image_offset(table_start):image_offset(table_end)]:
+        raise ValueError("native PREL32 constructor entries changed")
+    for current in (base, image):
+        if any(current[image_offset(TEXT_ACTUAL_END):image_offset(TAIL_CAVE_START)]):
+            raise ValueError("Luma LayeredFS reservation changed")
+
+    startup = symbols["codeexpansion_startup"]
+    loader_begin = symbols["codeexpansion_loaderbegin"]
+    loader_end = symbols["codeexpansion_loaderend"]
+    if not (startup == TAIL_CAVE_START < loader_begin <=
+            symbols["codeexpansion_enable"] < loader_end <= TAIL_CAVE_END):
+        raise ValueError("startup loader exceeds original executable padding")
+    expect_word(base, 0x00100010, 0xFA000AE3, "original constructor call")
+    if (symbols["bankstartup_constructorcall"] != 0x00100010 or
+            symbols["bankstartup_runconstructors"] != 0x00102BA4):
+        raise ValueError("startup hook/resume addresses differ")
+    expect_branch(image, 0x00100010, startup, True, ARM_COND_AL, "expansion startup hook")
+    expect_word(image, startup, 0xE92D5FFF, "startup register preservation")
+    expect_word(image, startup + 4, 0xE3A009FF, "added-page address")
+    expect_word(image, startup + 8, 0xE3A01A03, "added-page size")
+    expect_branch(image, startup + 12, symbols["codeexpansion_enable"],
+                  True, ARM_COND_AL, "enable added pages")
+    expect_word(image, startup + 16, 0xE3500000, "loader result check")
+    expect_branch(image, startup + 20, startup + 32, False, ARM_COND_NE, "loader failure")
+    expect_word(image, startup + 24, 0xE8BD5FFF, "startup register restoration")
+    instruction = read_word(image, startup + 28)
+    if instruction & 0xFFFFF000 != 0xE59FF000:
+        raise ValueError("startup does not tail-resume the native Thumb constructor walker")
+    expect_word(image, startup + 36 + (instruction & 0xFFF), 0x00102BA5,
+                "Thumb constructor resume target")
+    expect_word(image, startup + 36, 0xEF00003C, "fail-closed SVC Break")
+    expect_branch(image, startup + 40, startup + 32, False, ARM_COND_AL, "fail-closed loop")
+    for svc in (0x23, 0x27, 0x2A, 0x70):
+        if (0xEF000000 | svc).to_bytes(4, "little") not in image[
+                image_offset(loader_begin):image_offset(loader_end)]:
+            raise ValueError(f"startup loader lacks SVC 0x{svc:02X}")
+    if any(image[image_offset(loader_end):image_offset(TAIL_CAVE_END)]):
+        raise ValueError("unused executable tail padding changed")
+
+
+def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
+                base_exheader: Path, exheader: Path) -> None:
     image = patched.read_bytes()
     base_image = base.read_bytes()
     base_hash = hashlib.sha256(base_image).hexdigest().upper()
@@ -188,10 +312,22 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
             "base code SHA-256 does not match the supported Pokemon Bank v1.5 image: "
             f"{base_hash}"
         )
-    if len(image) != len(base_image):
-        raise ValueError("patched code image length differs from the base image")
+    if len(image) != EXPANDED_PAYLOAD_START + EXPANDED_PAYLOAD_SIZE - IMAGE_BASE:
+        raise ValueError("patched code image length differs from the expanded mapping")
     symbols = read_symbols(symbols_path)
     required = {
+        "combinepatch_codeusedend",
+        "combinepatch_modestorage",
+        "offlinepatch_runtimestoragestart",
+        "offlinepatch_runtimestorageend",
+        "codeexpansion_payloadstart",
+        "code_expansion_payload_size",
+        "codeexpansion_startup",
+        "codeexpansion_enable",
+        "codeexpansion_loaderbegin",
+        "codeexpansion_loaderend",
+        "bankstartup_constructorcall",
+        "bankstartup_runconstructors",
         "combinepatch_networkavailability",
         "combinepatch_titlemodetextinitialize",
         "combinepatch_titlescreenupdate",
@@ -335,6 +471,8 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
     if missing:
         raise ValueError(f"missing armips symbols: {', '.join(missing)}")
 
+    verify_expansion(base_image, image, symbols, base_exheader, exheader)
+
     # Keep the marker at a stable address and reserve the complete zero-padded
     # block for future compatibility metadata.
     # 将标识固定在稳定地址，并为未来兼容性元数据保留完整的零填充区域。
@@ -351,10 +489,8 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
 
     payload_begin = symbols["combinepatch_payloadbegin"]
     payload_end = symbols["combinepatch_payloadend"]
-    if payload_begin != HOME_BOX_CAVE_START:
-        raise ValueError("local payload no longer starts in the HOME box-selection UI region")
-    if not payload_begin < payload_end <= HOME_BOX_CAVE_END:
-        raise ValueError("local payload exceeds the HOME box-selection UI region")
+    if not EXPANDED_PAYLOAD_START <= payload_begin < payload_end <= symbols["combinepatch_codeusedend"]:
+        raise ValueError("local payload exceeds the added executable pages")
     # Only the three job calls may differ; native allocation, construction,
     # result handling, state transitions and destruction must remain intact.
     # 仅允许三个作业调用点变化；保留原版分配、构造、结果处理、状态推进与析构。
@@ -376,9 +512,9 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
         raise ValueError("native ticket job implementation was modified")
     expect_word(
         image,
-        HOME_BOX_CAVE_END,
-        read_word(base_image, HOME_BOX_CAVE_END),
-        "UI function after the HOME box-selection cave",
+        RESTORED_HOME_BOX_END,
+        read_word(base_image, RESTORED_HOME_BOX_END),
+        "UI function after the restored HOME box-selection region",
     )
     if not (
         payload_begin
@@ -398,7 +534,7 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
     ):
         raise ValueError("imported local-file payload objects are not contiguous or ordered")
 
-    home_cave_symbols = (
+    business_wrapper_symbols = (
         "combinepatch_networkavailability",
         "combinepatch_titlemodetextinitialize",
         "combinepatch_titlescreenupdate",
@@ -446,19 +582,19 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
         "turtleredirect_formatbackend",
         "turtleredirect_formatpoll",
     )
-    for name in home_cave_symbols:
+    for name in business_wrapper_symbols:
         address = symbols[name]
-        if not HOME_CAVE_START <= address < HOME_CAVE_END:
-            raise ValueError(f"{name} is outside the reclaimed HOME/Mover code cave")
+        if not EXPANDED_PAYLOAD_START <= address < symbols["combinepatch_codeusedend"]:
+            raise ValueError(f"{name} is outside the added executable pages")
     if not (
-        HOME_CAVE_START
+        EXPANDED_PAYLOAD_START
         <= symbols["turtleredirect_payloadbegin"]
         < symbols["turtleredirect_payloadend"]
-        <= HOME_CAVE_END
+        <= symbols["combinepatch_codeusedend"]
     ):
-        raise ValueError("Turtle redirect payload exceeds the reclaimed HOME/Mover code cave")
+        raise ValueError("Turtle redirect payload exceeds the added executable pages")
 
-    tail_cave_symbols = (
+    metadata_wrapper_symbols = (
         "combinepatch_redirecthometolanguage",
         "combinepatch_showmodegreeting",
         "combinepatch_selectgameselectionmessage",
@@ -480,10 +616,10 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
         "turtlesavepath",
         "turtletemppath",
     )
-    for name in tail_cave_symbols:
+    for name in metadata_wrapper_symbols:
         address = symbols[name]
-        if not TAIL_CAVE_START <= address < TAIL_CAVE_END:
-            raise ValueError(f"{name} is outside the executable tail cave")
+        if not EXPANDED_PAYLOAD_START <= address < symbols["combinepatch_codeusedend"]:
+            raise ValueError(f"{name} is outside the added executable pages")
 
     for name in (
         "offlinepatch_networkupdate",
@@ -604,13 +740,12 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
     ):
         expect_branch(base_image, address, symbols[target_symbol], True, ARM_COND_AL, name)
 
-    # The following state begins the stock transaction-recovery implementation;
-    # the redirect must end before it and leave its entry untouched.
-    # 下一个状态是原版事务恢复实现；重定向必须在此之前结束并保持其入口不变。
+    # Native transaction recovery remains intact alongside the restored HOME states.
+    # 原版事务恢复入口与已恢复的 HOME 状态均保持原状。
     expect_word(
         image,
-        HOME_CAVE_END,
-        read_word(base_image, HOME_CAVE_END),
+        RESTORED_HOME_END,
+        read_word(base_image, RESTORED_HOME_END),
         "transaction-recovery state entry",
     )
 
@@ -847,8 +982,8 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
     # 包装保留 r0-r2、lr 与原版栈对齐；本地初始化分支才把共享数据指针装入 r1。
     ticket_start = symbols["combinepatch_ticketinitialize"]
     ticket_end = symbols["combinepatch_ticketwrappersend"]
-    if not payload_end <= ticket_start < ticket_end <= HOME_BOX_CAVE_END:
-        raise ValueError("ticket job wrappers exceed the HOME box-selection cave")
+    if not payload_end <= ticket_start < ticket_end == symbols["combinepatch_codeusedend"]:
+        raise ValueError("ticket job wrappers exceed the added executable pages")
     policy = symbols["online_ticket_check_bypass"]
     if policy not in (0, 1):
         raise ValueError("ONLINE_TICKET_CHECK_BYPASS must be 0 or 1")
@@ -890,9 +1025,8 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
             expect_word(image, local, 0xE3A00001, "unbound local ticket success")
             expect_word(image, local + 4, 0xE12FFF1E, "local unbind return")
 
-    ips_bytes = ips.read_bytes()
-    if apply_ips(base_image, ips_bytes) != image:
-        raise ValueError("release code.ips does not reproduce the patched code image")
+    if apply_bps(base_image, bps.read_bytes()) != image:
+        raise ValueError("release code.bps does not reproduce the patched code image")
 
 
 def verify_messages(source_romfs: Path, output_romfs: Path) -> None:
@@ -1016,11 +1150,14 @@ def main() -> None:
     parser.add_argument("--base", required=True, type=Path)
     parser.add_argument("--patched", required=True, type=Path)
     parser.add_argument("--symbols", required=True, type=Path)
-    parser.add_argument("--ips", required=True, type=Path)
+    parser.add_argument("--bps", required=True, type=Path)
+    parser.add_argument("--base-exheader", required=True, type=Path)
+    parser.add_argument("--exheader", required=True, type=Path)
     parser.add_argument("--source-romfs", required=True, type=Path)
     parser.add_argument("--output-romfs", required=True, type=Path)
     args = parser.parse_args()
-    verify_code(args.base, args.patched, args.symbols, args.ips)
+    verify_code(args.base, args.patched, args.symbols, args.bps,
+                args.base_exheader, args.exheader)
     verify_messages(args.source_romfs, args.output_romfs)
     print("combined patch static verification passed")
 
