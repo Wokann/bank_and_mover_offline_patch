@@ -896,7 +896,7 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, ips: Path) -> Non
 
 
 def verify_messages(source_romfs: Path, output_romfs: Path) -> None:
-    module = load_module("patch_messages_verify", Path(__file__).with_name("patch_messages.py"))
+    module = load_module("patch_messages_verify", Path(__file__).resolve().parents[1] / "src" / "patch_messages.py")
     for archive in module.ARCHIVES:
         source = source_romfs / "a" / Path(archive)
         output = output_romfs / "a" / Path(archive)

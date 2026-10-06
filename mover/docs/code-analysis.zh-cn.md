@@ -1,7 +1,7 @@
 # Poke Mover 代码分析
 
 本文记录受支持原版二进制的流程分析，以及离线适配与原版的执行顺序对照。补丁的
-构建方式和事务规则见 [`../src/README.zh-cn.md`](../src/README.zh-cn.md)。
+构建方式和事务规则见 [`../README.zh-cn.md`](../README.zh-cn.md)。
 
 ## 目标与内存分布
 

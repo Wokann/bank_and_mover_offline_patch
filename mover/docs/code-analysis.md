@@ -1,7 +1,7 @@
 # Poke Mover Code Analysis
 
 This document analyzes the supported stock binary and compares its execution
-order with the offline adaptation. See [`../src/README.md`](../src/README.md)
+order with the offline adaptation. See [`../README.md`](../README.md)
 for build instructions and transaction rules.
 
 ## Target and memory layout

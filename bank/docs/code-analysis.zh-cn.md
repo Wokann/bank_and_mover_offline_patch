@@ -2,7 +2,7 @@
 
 本文只记录对受支持原版二进制得到的静态分析结论，不描述补丁设计或构建步骤。原版逐状态
 分支及其与当前补丁的对照见 [`state-machine.zh-cn.md`](state-machine.zh-cn.md)；当前维护补丁的
-实现、事务规则和独立编译方式见 [`../src/README.zh-cn.md`](../src/README.zh-cn.md)。
+实现、事务规则和独立编译方式见 [`../README.zh-cn.md`](../README.zh-cn.md)。
 
 ## 目标与内存分布
 

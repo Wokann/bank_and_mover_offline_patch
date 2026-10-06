@@ -103,8 +103,8 @@ interoperability and claims no ownership of the underlying original content.
 
 Bank and Mover can be built independently. Each subproject documents its inputs, build commands, implementation, state machine, file transactions, verification, and references:
 
-- [Pokemon Bank developer documentation](bank/src/README.md)
-- [Poke Mover developer documentation](mover/src/README.md)
+- [Pokemon Bank developer documentation](bank/README.md)
+- [Poke Mover developer documentation](mover/README.md)
 
 ### Basic requirements
 

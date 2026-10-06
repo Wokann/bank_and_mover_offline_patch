@@ -1,7 +1,7 @@
 # 离线、下载与解锁合并补丁
 
 原版程序的内存分布、状态表、网络路径、BankObject 与 bankdata 结构见
-[`../docs/code-analysis.zh-cn.md`](../docs/code-analysis.zh-cn.md)。本文只说明当前补丁的设计、
+[`docs/code-analysis.zh-cn.md`](docs/code-analysis.zh-cn.md)。本文只说明当前补丁的设计、
 实现与独立构建方法。
 
 这是 Pokemon Bank v1.5 本体 `00040000000C9B00` 当前维护的补丁。它把旧版独立
@@ -93,7 +93,7 @@
 
 `sav.bin` 是固定 `0x200` 字节的逻辑记录镜像，其中原版对象序列化长度为 `0x30`，
 当前已确认字段占前 `0x2C` 字节。结构声明见
-[`../include/turtle_redirect.h`](../include/turtle_redirect.h)。该记录可由原存档重新迁移或由
+[`include/turtle_redirect.h`](include/turtle_redirect.h)。该记录可由原存档重新迁移或由
 首次使用流程重建，因此只使用 `sav.tmp` 防止短写，不另建 `.bak` 或 `.break`。
 
 ## 下载模式
@@ -180,7 +180,7 @@
 
 ## 票务与联网礼物：固定测试开关
 
-在 [`main.s`](main.s) 顶部修改以下值，然后重新编译：
+在 [`src/main.s`](src/main.s) 顶部修改以下值，然后重新编译：
 
 ```asm
 .definelabel ONLINE_TICKET_CHECK_BYPASS, 0
@@ -350,35 +350,35 @@
 
 | 文件 | 作用 |
 |---|---|
-| `main.s` | 原址 hook、模式分派、小型跳板、状态路由，以及各 C 对象的注入位置 |
-| `bankdata_redirect.c` | 经过检查的银行数据校验、恢复、载入与本地事务实现 |
-| `fs_helpers.c` | Bankdata 与 Turtle 后端共用的带检查 SD 文件系统实现 |
-| `offline_flow.c` | 本地连接、断开连接与保存提示状态更新 |
-| `local_mileage.c` | 把主机时间转换成原版宝可里程状态读取的日期格式；不替代原版点数计算 |
-| `local_ticket.c` | 为原版使用权状态的作业接口提供本地票据结果；不实现宝可里程计算 |
-| `unlock_mode.c` | 为原版挑战码界面选择并归一化服务器返回的第一个解锁候选值 |
-| `patch_paths.c` | 放入已验证代码尾部区域的路径常量 |
-| `turtle_redirect.c` | 放入已验证 HOME 代码区域的 Turtle 记录重定向后端 |
-| `../include/bankdata_redirect.h` | 已确认的 Bankdata 序列化布局、原版 Bank 局部视图、重定向常量与原版入口 |
-| `../include/fs_helpers.h` | 共用的文件系统类型、SDK 入口与带检查的 SD 辅助函数声明 |
-| `../include/local_mileage.h` | 本地里程日期输入声明 |
-| `../include/local_ticket.h` | 票据作业与共享数据视图、使用权常量和本地作业接口 |
-| `../include/offline_flow.h` | 本地流程状态使用的原版计时器入口 |
-| `../include/patch_types.h` | 注入 C 对象共用的固定宽度基础类型 |
-| `../include/patch_paths.h` | 分别放置的对象所共用的路径声明 |
-| `../include/system_time.h` | 共享内存系统时间结构及地址 |
-| `../include/turtle_redirect.h` | `sav.bin` 的已确认逻辑记录布局、后端返回协议、原版入口与导出后端声明 |
-| `../include/unlock_mode.h` | 解锁候选值显示辅助函数声明 |
-| `patch_messages.py` | 重建并验证十套本地化 LayeredFS 档案 |
-| `message_archive.py` | 自包含的 GARC 与加密消息文件编解码器 |
-| `verify_patch.py` | 验证基底哈希、代码范围、钩子、IPS 还原、原指令重放与资源 |
+| `src/main.s` | 原址 hook、模式分派、小型跳板、状态路由，以及各 C 对象的注入位置 |
+| `src/bankdata_redirect.c` | 经过检查的银行数据校验、恢复、载入与本地事务实现 |
+| `src/fs_helpers.c` | Bankdata 与 Turtle 后端共用的带检查 SD 文件系统实现 |
+| `src/offline_flow.c` | 本地连接、断开连接与保存提示状态更新 |
+| `src/local_mileage.c` | 把主机时间转换成原版宝可里程状态读取的日期格式；不替代原版点数计算 |
+| `src/local_ticket.c` | 为原版使用权状态的作业接口提供本地票据结果；不实现宝可里程计算 |
+| `src/unlock_mode.c` | 为原版挑战码界面选择并归一化服务器返回的第一个解锁候选值 |
+| `src/patch_paths.c` | 放入已验证代码尾部区域的路径常量 |
+| `src/turtle_redirect.c` | 放入已验证 HOME 代码区域的 Turtle 记录重定向后端 |
+| `include/bankdata_redirect.h` | 已确认的 Bankdata 序列化布局、原版 Bank 局部视图、重定向常量与原版入口 |
+| `include/fs_helpers.h` | 共用的文件系统类型、SDK 入口与带检查的 SD 辅助函数声明 |
+| `include/local_mileage.h` | 本地里程日期输入声明 |
+| `include/local_ticket.h` | 票据作业与共享数据视图、使用权常量和本地作业接口 |
+| `include/offline_flow.h` | 本地流程状态使用的原版计时器入口 |
+| `include/patch_types.h` | 注入 C 对象共用的固定宽度基础类型 |
+| `include/patch_paths.h` | 分别放置的对象所共用的路径声明 |
+| `include/system_time.h` | 共享内存系统时间结构及地址 |
+| `include/turtle_redirect.h` | `sav.bin` 的已确认逻辑记录布局、后端返回协议、原版入口与导出后端声明 |
+| `include/unlock_mode.h` | 解锁候选值显示辅助函数声明 |
+| `src/patch_messages.py` | 重建并验证十套本地化 LayeredFS 档案 |
+| `tools/message_archive.py` | 自包含的 GARC 与加密消息文件编解码器 |
+| `tools/verify_patch.py` | 验证基底哈希、代码范围、钩子、IPS 还原、原指令重放与资源 |
 | `Makefile` | 编译、注入、创建 IPS、重建文本并写出 Luma 发行目录 |
 
 ### 注入空间来源与边界
 
 以下地址均为游戏运行时的虚拟地址，不是 IPS 文件偏移。范围统一采用
-`[起点, 终点)`：包含起点，不包含终点。布局定义见 [`main.s`](main.s) 和
-[`symbol.inc`](../include/symbol.inc)，构建后的实际落点见
+`[起点, 终点)`：包含起点，不包含终点。布局定义见 [`src/main.s`](src/main.s) 和
+[`symbol.inc`](include/symbol.inc)，构建后的实际落点见
 `bank/build/armips-symbols.txt`。
 
 原版可执行镜像的段边界如下；本补丁不扩大 ExHeader 中的段大小，也不移动后续段。
@@ -482,11 +482,12 @@ make -C bank clean
 make -C bank
 ```
 
-也可以直接调用子项目：
+也可以进入子项目目录后构建：
 
 ```sh
-make -C bank/src clean
-make -C bank/src all
+cd bank
+make clean
+make
 ```
 
 非 Windows 平台示例：
@@ -495,7 +496,7 @@ make -C bank/src all
 make -C bank ARMIPS=/path/to/armips IPS_TOOL=/path/to/flips
 ```
 
-构建顺序为：把七个 C 编译单元分别编译成注入三个已验证区域的对象 → 输出各对象反汇编供检查
+构建顺序为：把八个 C 编译单元分别编译成注入三个已验证区域的对象 → 输出各对象反汇编供检查
 → armips 导入对象并修改基底镜像 → Floating IPS 对比生成 `code.ips` → 重建十套语言
 RomFS → 执行静态验证。完整输出为：
 

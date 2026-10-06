@@ -415,7 +415,7 @@ def main() -> None:
         if patched[start - IMAGE_BASE:end - IMAGE_BASE] != base[start - IMAGE_BASE:end - IMAGE_BASE]:
             raise ValueError(f"native validation/conversion range changed: {start:08X}-{end:08X}")
 
-    messages = load_helper(Path(__file__).with_name("patch_messages.py"))
+    messages = load_helper(Path(__file__).resolve().parents[1] / "src" / "patch_messages.py")
     for archive in messages.ARCHIVES:
         source_entries = messages.message_codec.read_garc(
             (args.source_romfs / "a" / Path(archive)).read_bytes()

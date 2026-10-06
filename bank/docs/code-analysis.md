@@ -3,7 +3,7 @@
 This document records static-analysis conclusions about the supported stock
 binary only. See [`state-machine.md`](state-machine.md) for exact stock
 transitions and a comparison with the current patch. See
-[`../src/README.md`](../src/README.md) for the maintained implementation,
+[`../README.md`](../README.md) for the maintained implementation,
 transaction rules, and independent build procedure.
 
 ## Target and memory layout

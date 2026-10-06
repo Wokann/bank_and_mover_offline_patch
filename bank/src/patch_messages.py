@@ -8,7 +8,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-import message_archive as message_codec
+from tools import message_archive as message_codec
 
 
 ARCHIVES = (

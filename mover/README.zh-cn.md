@@ -1,7 +1,7 @@
 # 原版与离线合并补丁
 
 原版程序的内存分布、网络路径、BankObject 与传送盒结构见
-[`../docs/code-analysis.zh-cn.md`](../docs/code-analysis.zh-cn.md)。本文只说明当前补丁的设计、
+[`docs/code-analysis.zh-cn.md`](docs/code-analysis.zh-cn.md)。本文只说明当前补丁的设计、
 实现与独立构建方法。
 
 这是 Poke Mover v5.5.0 本体 `00040000000C9C00` 当前维护的补丁。它把已经验证的
@@ -146,7 +146,7 @@ sd:/3ds/Bank/bankdata.bin
 天数 `999`、总小时数 `23976` 和有效标志。已有账户字段保持原值，购买次数保持
 未知 `-1`，不伪造购票历史或活动奖励。日期越界或作业分配失败进入原版错误退出，
 不会假装成功。更详细的字段和分支对照见
-[`票务状态与本地结果`](../docs/code-analysis.zh-cn.md#票务状态与本地结果)。
+[`票务状态与本地结果`](docs/code-analysis.zh-cn.md#票务状态与本地结果)。
 
 原版候选转换状态继续负责读取来源游戏、筛选记录并构造传送候选。离线模式绕过两处
 服务器合法性请求后，会补齐原版后续状态机依赖的逐槽结果。第五世代分类器按原版
@@ -169,7 +169,7 @@ sd:/3ds/Bank/bankdata.bin
 | 保存 | 远端暂存、来源游戏保存、远端提交或回滚 | 沿用下文的本地 bankdata 事务 |
 
 `0` 不是最终传送批准。前置分类也不会重做后面的传送条件判断；完整执行顺序、
-字段与算法见[逐槽传送判定](../docs/code-analysis.zh-cn.md#逐槽传送判定)。
+字段与算法见[逐槽传送判定](docs/code-analysis.zh-cn.md#逐槽传送判定)。
 
 ### 保留的 14 项本地检查
 
@@ -250,16 +250,16 @@ sd:/3ds/Bank/bankdata.bin
 
 | 文件 | 作用 |
 |---|---|
-| `main.s` | 标题模式锁定，以及每个离线钩子的模式分派 |
-| `fs_helpers.c` | 本地载入与事务共用的带检查 SD 归档／文件原语 |
-| `bankdata_redirect.c` | 本地 Bankdata 载入、传送槽保留、资格状态，以及防崩溃临时写入、提交与回滚 |
-| `local_ticket.c` | 原版票务作业接口的本地结果、活动结果与主机日历计算 |
-| `local_validation.c` | 只读分类第五世代记录完整性与空槽，并隔离第五世代／VC 的逐槽服务器结果 |
-| `offline_flow.c` | 相互独立的网络、断开、远端检查、无传送与保存延时状态更新 |
-| `patch_paths.c` | 共用的 SD 路径常量 |
-| `patch_messages.py` | 为十套语言档案追加并验证标题／离线文本 |
-| `message_archive.py` | 自包含的 GARC 与加密消息文件编解码器 |
-| `verify_patch.py` | 验证基底哈希、代码区域、钩子、原版重放、IPS 还原与资源 |
+| `src/main.s` | 标题模式锁定，以及每个离线钩子的模式分派 |
+| `src/fs_helpers.c` | 本地载入与事务共用的带检查 SD 归档／文件原语 |
+| `src/bankdata_redirect.c` | 本地 Bankdata 载入、传送槽保留、资格状态，以及防崩溃临时写入、提交与回滚 |
+| `src/local_ticket.c` | 原版票务作业接口的本地结果、活动结果与主机日历计算 |
+| `src/local_validation.c` | 只读分类第五世代记录完整性与空槽，并隔离第五世代／VC 的逐槽服务器结果 |
+| `src/offline_flow.c` | 相互独立的网络、断开、远端检查、无传送与保存延时状态更新 |
+| `src/patch_paths.c` | 共用的 SD 路径常量 |
+| `src/patch_messages.py` | 为十套语言档案追加并验证标题／离线文本 |
+| `tools/message_archive.py` | 自包含的 GARC 与加密消息文件编解码器 |
+| `tools/verify_patch.py` | 验证基底哈希、代码区域、钩子、原版重放、IPS 还原与资源 |
 | `Makefile` | 编译各功能对象、注入已审计代码区域、创建 IPS、重建文本并写出发行目录 |
 
 ## 独立编译与安装
@@ -299,11 +299,12 @@ make -C mover clean
 make -C mover
 ```
 
-也可以直接调用子项目：
+也可以进入子项目目录后构建：
 
 ```sh
-make -C mover/src clean
-make -C mover/src all
+cd mover
+make clean
+make
 ```
 
 非 Windows 平台示例：

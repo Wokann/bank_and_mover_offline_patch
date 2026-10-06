@@ -1,6 +1,6 @@
 # Combined offline, download, and unlock patch
 
-See [`../docs/code-analysis.md`](../docs/code-analysis.md) for the stock
+See [`docs/code-analysis.md`](docs/code-analysis.md) for the stock
 program's memory map, state table, network paths, BankObject, and bankdata
 layout. This document covers only the maintained patch design, implementation,
 and independent build procedure.
@@ -111,7 +111,7 @@ stock save.
 `sav.bin` is a fixed `0x200`-byte logical-record image. The stock serialized
 object occupies `0x30` bytes, of which the first `0x2C` bytes are currently
 identified fields. See
-[`../include/turtle_redirect.h`](../include/turtle_redirect.h) for the declaration.
+[`include/turtle_redirect.h`](include/turtle_redirect.h) for the declaration.
 Because the record can be migrated again from the stock save or rebuilt by the
 first-use flow, it uses only `sav.tmp` to prevent short writes and does not
 create `.bak` or `.break` files.
@@ -209,7 +209,7 @@ and its recovery state remains the stock state machine. The local offline
 
 ## Ticket and online-gift checks: fixed test switch
 
-Change this value at the top of [`main.s`](main.s), then rebuild:
+Change this value at the top of [`src/main.s`](src/main.s), then rebuild:
 
 ```asm
 .definelabel ONLINE_TICKET_CHECK_BYPASS, 0
@@ -407,36 +407,36 @@ Spanish, Korean, Simplified Chinese, and Traditional Chinese.
 
 | File | Role |
 |---|---|
-| `main.s` | Original-address hooks, mode dispatch, small trampolines, state routing, and placement of imported C objects |
-| `bankdata_redirect.c` | Checked Bank-data validation, recovery, loading, and local transaction implementation |
-| `fs_helpers.c` | Shared checked SD-filesystem implementation used by Bankdata and Turtle backends |
-| `offline_flow.c` | Local connection, disconnection, and save-display state updates |
-| `local_mileage.c` | Converts console time into the packed date consumed by the stock Poké Mile states; it does not replace the native point calculation |
-| `local_ticket.c` | Supplies local ticket results at the native entitlement state's job interfaces without implementing Poké Mile calculation |
-| `unlock_mode.c` | Selects and normalizes the first server-returned unlock candidate for the stock challenge-code UI |
-| `patch_paths.c` | Path constants placed in the verified tail-code region |
-| `turtle_redirect.c` | Redirected Turtle-record backend placed in the verified HOME-code region |
-| `../include/bankdata_redirect.h` | Confirmed serialized Bankdata layout, partial native Bank views, redirection constants, and stock entry points |
-| `../include/fs_helpers.h` | Shared filesystem types, SDK entry points, and checked SD-helper declarations |
-| `../include/local_mileage.h` | Local mileage-date input declaration |
-| `../include/local_ticket.h` | Ticket-job and shared-data views, entitlement constants, and local job interfaces |
-| `../include/offline_flow.h` | Stock timer entry points used by local flow states |
-| `../include/patch_types.h` | Fixed-width primitive types shared by the injected C objects |
-| `../include/patch_paths.h` | Path declarations shared across the separately placed objects |
-| `../include/system_time.h` | Shared-memory system-time structure and addresses |
-| `../include/turtle_redirect.h` | Confirmed logical-record layout, backend result contract, stock entry points, and exported backend declarations |
-| `../include/unlock_mode.h` | Unlock-candidate display helper declaration |
-| `patch_messages.py` | Rebuilds and validates the ten localized LayeredFS archives |
-| `message_archive.py` | Self-contained GARC and encrypted message-file codec |
-| `verify_patch.py` | Verifies base hash, code ranges, hooks, IPS reconstruction, native instruction replay, and resources |
+| `src/main.s` | Original-address hooks, mode dispatch, small trampolines, state routing, and placement of imported C objects |
+| `src/bankdata_redirect.c` | Checked Bank-data validation, recovery, loading, and local transaction implementation |
+| `src/fs_helpers.c` | Shared checked SD-filesystem implementation used by Bankdata and Turtle backends |
+| `src/offline_flow.c` | Local connection, disconnection, and save-display state updates |
+| `src/local_mileage.c` | Converts console time into the packed date consumed by the stock Poké Mile states; it does not replace the native point calculation |
+| `src/local_ticket.c` | Supplies local ticket results at the native entitlement state's job interfaces without implementing Poké Mile calculation |
+| `src/unlock_mode.c` | Selects and normalizes the first server-returned unlock candidate for the stock challenge-code UI |
+| `src/patch_paths.c` | Path constants placed in the verified tail-code region |
+| `src/turtle_redirect.c` | Redirected Turtle-record backend placed in the verified HOME-code region |
+| `include/bankdata_redirect.h` | Confirmed serialized Bankdata layout, partial native Bank views, redirection constants, and stock entry points |
+| `include/fs_helpers.h` | Shared filesystem types, SDK entry points, and checked SD-helper declarations |
+| `include/local_mileage.h` | Local mileage-date input declaration |
+| `include/local_ticket.h` | Ticket-job and shared-data views, entitlement constants, and local job interfaces |
+| `include/offline_flow.h` | Stock timer entry points used by local flow states |
+| `include/patch_types.h` | Fixed-width primitive types shared by the injected C objects |
+| `include/patch_paths.h` | Path declarations shared across the separately placed objects |
+| `include/system_time.h` | Shared-memory system-time structure and addresses |
+| `include/turtle_redirect.h` | Confirmed logical-record layout, backend result contract, stock entry points, and exported backend declarations |
+| `include/unlock_mode.h` | Unlock-candidate display helper declaration |
+| `src/patch_messages.py` | Rebuilds and validates the ten localized LayeredFS archives |
+| `tools/message_archive.py` | Self-contained GARC and encrypted message-file codec |
+| `tools/verify_patch.py` | Verifies base hash, code ranges, hooks, IPS reconstruction, native instruction replay, and resources |
 | `Makefile` | Compiles, injects, creates the IPS, rebuilds messages, and writes the Luma release tree |
 
 ### Injection-space provenance and bounds
 
 All addresses below are runtime virtual addresses, not IPS file offsets. Ranges
 use `[start, end)`: the start is included and the end is excluded. Layout
-definitions are in [`main.s`](main.s) and
-[`symbol.inc`](../include/symbol.inc); actual placements after a build are in
+definitions are in [`src/main.s`](src/main.s) and
+[`symbol.inc`](include/symbol.inc); actual placements after a build are in
 `bank/build/armips-symbols.txt`.
 
 The original executable has the following segment bounds. This patch neither
@@ -554,11 +554,12 @@ make -C bank clean
 make -C bank
 ```
 
-The subproject can also be invoked directly:
+From the subproject directory:
 
 ```sh
-make -C bank/src clean
-make -C bank/src all
+cd bank
+make clean
+make
 ```
 
 Example for a non-Windows host:
@@ -567,7 +568,7 @@ Example for a non-Windows host:
 make -C bank ARMIPS=/path/to/armips IPS_TOOL=/path/to/flips
 ```
 
-The build compiles the seven C translation units into objects for three verified
+The build compiles the eight C translation units into objects for three verified
 injection regions, emits their disassemblies for inspection, imports them and patches the
 base image with armips, creates `code.ips` with Floating IPS, rebuilds the
 ten-language RomFS, and runs static verification. The complete output is:

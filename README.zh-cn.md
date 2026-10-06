@@ -100,8 +100,8 @@ python .\gui\bank_viewer.py
 
 Bank 与 Mover 可以分别独立构建。各子项目的实现原理、内存与状态机、文件事务、输入提取、编译、验证和参考资料见：
 
-- [Pokemon Bank 开发文档](bank/src/README.zh-cn.md)
-- [Poke Mover 开发文档](mover/src/README.zh-cn.md)
+- [Pokemon Bank 开发文档](bank/README.zh-cn.md)
+- [Poke Mover 开发文档](mover/README.zh-cn.md)
 
 ### 基本工具
 

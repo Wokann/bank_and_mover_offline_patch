@@ -1,6 +1,6 @@
 # Combined original and offline patch
 
-See [`../docs/code-analysis.md`](../docs/code-analysis.md) for the stock
+See [`docs/code-analysis.md`](docs/code-analysis.md) for the stock
 program's memory map, network path, BankObject, and Transport Box layout. This
 document covers only the maintained patch design, implementation, and
 independent build procedure.
@@ -169,7 +169,7 @@ Native getters calculate `999` remaining days, `23976` total hours and the
 validity flag. Existing account fields are preserved; purchase counts remain
 unknown (`-1`), without inventing purchases or campaign rewards. An out-of-range
 date or failed job allocation uses the native error exit instead of success.
-See [Ticket state and local results](../docs/code-analysis.md#ticket-state-and-local-results)
+See [Ticket state and local results](docs/code-analysis.md#ticket-state-and-local-results)
 for the field and branch comparison.
 
 The native candidate-conversion state remains responsible for reading the
@@ -200,7 +200,7 @@ recreated in Offline Mode.
 
 Result `0` is not final transfer approval. The classifier does not duplicate
 the transfer-condition checks that follow. See
-[Per-slot transfer decisions](../docs/code-analysis.md#per-slot-transfer-decisions)
+[Per-slot transfer decisions](docs/code-analysis.md#per-slot-transfer-decisions)
 for the full order, fields, and algorithms.
 
 ### Retained 14 local checks
@@ -295,16 +295,16 @@ state object; the native state exit path performs cleanup.
 
 | File | Role |
 |---|---|
-| `main.s` | Title-mode latch and mode dispatch for every offline hook |
-| `fs_helpers.c` | Checked SD archive/file primitives shared by local loading and transactions |
-| `bankdata_redirect.c` | Local Bankdata loading, transfer-slot preservation, eligibility update, and crash-safe temporary write, commit, and rollback |
-| `local_ticket.c` | Local native-job/campaign results and console-calendar calculation |
-| `local_validation.c` | Read-only Gen 5 integrity/empty-slot classification and Gen 5/VC per-slot result isolation |
-| `offline_flow.c` | Independent network, disconnect, remote-check, no-transfer, and save-delay state updates |
-| `patch_paths.c` | Shared SD path constants |
-| `patch_messages.py` | Appends and validates title/offline text in all ten language archives |
-| `message_archive.py` | Self-contained GARC and encrypted message-file codec |
-| `verify_patch.py` | Verifies the base hash, code regions, hooks, native replay, IPS reconstruction, and resources |
+| `src/main.s` | Title-mode latch and mode dispatch for every offline hook |
+| `src/fs_helpers.c` | Checked SD archive/file primitives shared by local loading and transactions |
+| `src/bankdata_redirect.c` | Local Bankdata loading, transfer-slot preservation, eligibility update, and crash-safe temporary write, commit, and rollback |
+| `src/local_ticket.c` | Local native-job/campaign results and console-calendar calculation |
+| `src/local_validation.c` | Read-only Gen 5 integrity/empty-slot classification and Gen 5/VC per-slot result isolation |
+| `src/offline_flow.c` | Independent network, disconnect, remote-check, no-transfer, and save-delay state updates |
+| `src/patch_paths.c` | Shared SD path constants |
+| `src/patch_messages.py` | Appends and validates title/offline text in all ten language archives |
+| `tools/message_archive.py` | Self-contained GARC and encrypted message-file codec |
+| `tools/verify_patch.py` | Verifies the base hash, code regions, hooks, native replay, IPS reconstruction, and resources |
 | `Makefile` | Compiles the functional objects, injects them into audited code regions, creates IPS, rebuilds messages, and writes the release tree |
 
 ## Independent build and installation
@@ -349,11 +349,12 @@ make -C mover clean
 make -C mover
 ```
 
-The subproject can also be invoked directly:
+From the subproject directory:
 
 ```sh
-make -C mover/src clean
-make -C mover/src all
+cd mover
+make clean
+make
 ```
 
 Example for a non-Windows host:
