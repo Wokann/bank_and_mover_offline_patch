@@ -26,11 +26,16 @@ SYMBOLS := $(BUILD)/armips-symbols.txt
 
 CC := $(DEVKITARM)/bin/arm-none-eabi-gcc
 OBJDUMP := $(DEVKITARM)/bin/arm-none-eabi-objdump
-CFLAGS := -std=c11 -Os -march=armv6k -mtune=mpcore -marm -mfloat-abi=soft \
+ARM_CFLAGS := -std=c11 -Os -march=armv6k -mtune=mpcore -marm -mfloat-abi=soft \
 	-ffreestanding -fno-builtin -fno-stack-protector -fno-unwind-tables \
 	-fno-asynchronous-unwind-tables -fomit-frame-pointer -fno-common \
 	-ffunction-sections -fdata-sections -MMD -MP -Wall -Wextra -Werror \
 	-Iinclude
+THUMB_CFLAGS := $(filter-out -marm,$(ARM_CFLAGS)) -mthumb -fno-jump-tables
+CFLAGS := $(ARM_CFLAGS)
+
+$(BUILD)/bankdata_redirect.o $(BUILD)/fs_helpers.o $(BUILD)/local_validation.o \
+$(BUILD)/offline_flow.o $(BUILD)/nds_fs.o $(BUILD)/nds_sources.o: CFLAGS := $(THUMB_CFLAGS)
 
 -include $(OBJECTS:.o=.d)
 
@@ -43,7 +48,8 @@ $(BUILD)/%.o: $(SRC)/%.c | $(BUILD)
 	"$(CC)" $(CFLAGS) -c "$<" -o "$@"
 	"$(OBJDUMP)" -dr -z "$@" > "$(@:.o=.s)"
 
-$(PATCHED): FORCE $(SRC)/main.s $(OBJECTS) $(BASE)
+$(PATCHED): FORCE $(SRC)/main.s $(OBJECTS) $(BASE) $(TOOLS)/verify_patch.py
+	"$(PYTHON)" -B -c "from pathlib import Path; from tools.verify_patch import verify_code_cave; verify_code_cave(Path('$(BASE)').read_bytes())"
 	cd "$(SRC)" && "$(ARMIPS)" -erroronwarning -stat -sym "../$(SYMBOLS)" main.s
 
 $(RELEASE_IPS): $(PATCHED)

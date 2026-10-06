@@ -14,6 +14,17 @@
 .definelabel RodataMappedEnd,                   0x002EC000
 .definelabel DataMappedStart,                   0x002EC000
 .definelabel DataMappedEnd,                     0x0032A000
+.definelabel DataActualEnd,                     0x003293FC
+.definelabel BssActualEnd,                      0x003638A4
+.definelabel ReadWriteMappedEnd,                0x00364000
+
+; The final mapped read/write page extends past the logical end of .bss. Keep
+; all patch-owned runtime words in the last 16 bytes of that zero-filled page.
+; 最后一个可读写映射页超出逻辑 .bss 末尾。补丁自身的运行时字均固定使用该零填充
+; 页最后 16 字节。
+.definelabel OfflinePatch_RuntimeStorageStart,  0x00363FF0
+.definelabel NDS_SCANNER_CONTEXT_SLOT,          OfflinePatch_RuntimeStorageStart
+.definelabel OfflinePatch_RuntimeStorageEnd,    ReadWriteMappedEnd
 
 ; -----------------------------------------------------------------------------
 ; Bank object and serialized-file routines
@@ -75,6 +86,24 @@
 .definelabel MoverGetPokemonState_Update,           0x002455D0
 .definelabel MoverGetPokemonState_Initialize,       0x00246A2C
 .definelabel MoverGetPokemon_BankMessageIdLoad,     0x00246A5C
+.definelabel MoverSourceList_Update,                 0x00244D2C
+.definelabel MoverNds_StartLoad,                    0x0019ADEC
+.definelabel MoverNds_PollLoad,                     0x0019AD60
+.definelabel MoverNds_ValidateSave,                 0x0019AA30
+.definelabel MoverNds_SelectSaveFace,               0x0019A9FC
+.definelabel MoverNds_GetSelectedSave,              0x0019C154
+.definelabel MoverNds_GetDisplayName,               0x0019A994
+.definelabel MoverNds_GetDisplayValue,              0x0019A970
+.definelabel MoverNds_GetDisplayFlag,               0x0019A94C
+.definelabel MoverHeap_Allocate,                    0x001D1D0C
+.definelabel MoverMemory_Clear,                    0x001E6D84
+.definelabel MoverMemory_Copy,                     0x001E6F8C
+.definelabel MoverSourceList_UpdateVtableSlot,       0x002E6620
+.definelabel MoverSourceSelection_IdCompare,         0x00244870
+.definelabel MoverVcSource_IncrementCount,           0x0024149C
+.definelabel MoverNds_ReadSave,                      0x0021A7E0
+.definelabel MoverNds_ReadGameCode,                  0x0021AA0C
+.definelabel MoverNds_WriteSave,                     0x0021AB50
 
 ; Remote legality checks embedded in the native candidate-conversion state.
 ; 原版候选转换状态中嵌入的远端合法性检查。
@@ -101,13 +130,11 @@
 .definelabel MoverSave_RollbackCall,             0x0024A420
 .definelabel MoverSave_AfterRollbackState,       0x0024A428
 
-; This range covers the leading portion of an unreferenced NEX/Quazal-style
-; global-registration routine. No external ARM branch or aligned code/data
-; pointer in the supported binary targets this range. The combined patch uses
-; it for mode wrappers and the shared filesystem module.
-; 该区域是一个未被引用的 NEX/Quazal 风格全局注册例程的前部。受支持镜像中没有
-; 外部 ARM 分支或对齐代码／数据指针指向该区域。合并补丁将其用于模式包装函数和共用
-; 文件系统模块。
+; Existing payload bounds, not a proven-safe cave. Native PREL32 constructor
+; entry 0x002EB7BC calls 0x00261C74; its overlap is a known issue deferred from
+; the source-redirection change. Do not extend the overwritten range.
+; 现有荷载边界，并非已证明安全的空洞。原版 PREL32 构造表项 0x002EB7BC 会调用
+; 0x00261C74；该覆盖问题在来源重定向之外另行处理，不得扩大覆盖范围。
 .definelabel MoverCombine_CodeCaveStart,          0x00261C74
 .definelabel MoverCombine_CodeCaveEnd,            0x00262C10
 
@@ -157,9 +184,13 @@
 .definelabel FS_ARCHIVE_ID_SDMC,                 9
 .definelabel FS_PATH_TYPE_EMPTY,                 1
 .definelabel FS_PATH_TYPE_ASCII,                 3
+.definelabel FS_PATH_TYPE_UTF16,                 4
 .definelabel FSUSER_CMD_OPEN_ARCHIVE,            0x080C00C2
 .definelabel FSUSER_CMD_CREATE_DIRECTORY,        0x08090182
 .definelabel FSUSER_CMD_DELETE_FILE,              0x08040142
 .definelabel FSUSER_CMD_RENAME_FILE,              0x08050244
+.definelabel FSUSER_CMD_OPEN_DIRECTORY,           0x080B0102
 .definelabel FSUSER_CMD_CLOSE_ARCHIVE,            0x080E0080
 .definelabel FSFILE_CMD_SET_SIZE,                0x08050080
+.definelabel FSDIR_CMD_READ,                     0x08010042
+.definelabel FSDIR_CMD_CLOSE,                    0x08020000

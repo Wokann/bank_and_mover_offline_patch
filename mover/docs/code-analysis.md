@@ -15,8 +15,9 @@ for build instructions and transaction rules.
 |---|---|---|
 | `.text` | `0x00100000–0x0028E000` | Read/execute; actual content ends at `0x0028D1AC` |
 | `.rodata` | `0x0028E000–0x002EC000` | Read-only, non-executable |
-| `.data` | `0x002EC000–0x0032A000` | Read/write |
-| `.bss` | Starts at `0x0032A000`, length `0x3A4A8` | Read/write, zero-initialized |
+| `.data` | `0x002EC000–0x003293FC`, with loaded pages through `0x0032A000` | Read/write |
+| `.bss` | Logical range `0x003293FC–0x003638A4` | Read/write, zero-initialized |
+| RW page padding | `0x003638A4–0x00364000` | Read/write, zero-initialized |
 | Thread stack | Length `0x40000` | ExHeader setting |
 
 The ExHeader declares the `.text` content end at `0x0028D1AC`, while the last
@@ -30,24 +31,54 @@ must be rechecked if that payload grows. See the official
 [installation logic](https://raw.githubusercontent.com/LumaTeam/Luma3DS/master/sysmodules/loader/source/patcher.c)
 and [payload assembly](https://raw.githubusercontent.com/LumaTeam/Luma3DS/master/sysmodules/loader/source/romfsredir.s).
 
-The first project tail area is `0x0028D2E0–0x0028DD00`, and the per-slot
-local-validation payload occupies `0x0028DDE0–0x0028DF54`.
-The `0xE0` bytes at `0x0028DD00–0x0028DDE0` form a dedicated area reserved for
-the Transporter Redirect Patch, and `0x0028DFC0–0x0028E000` holds this project's
-version identifier. Project payloads may use both
-`0x0028D2E0–0x0028DD00` and `0x0028DDE0–0x0028DFC0`, totaling `0xC00` bytes before
-subtracting their contents. Assembly area limits and static verification protect
-the LayeredFS and external-patch reservations.
+The project tail area is `0x0028D2E0–0x0028DFC0`; the final
+`0x0028DFC0–0x0028E000` (`0x40` bytes) remains reserved for the version
+identifier. The integrated Gen 5 source redirect owns the native cartridge I/O
+hooks, so the external Transporter Redirect Patch's `0xE0` reservation is
+removed. Assembly limits and static verification still protect LayeredFS and
+the version marker.
+
+`0x00261C74–0x00262C10` is part of an active native global-registration
+initializer, not a reclaimable gap. Startup enters `0x00102ADC`, which walks
+the PREL32 constructor table at `0x002EB744–0x002EBA58`. Entry `0x002EB7BC`
+stores `0xFFF764B8`; adding it to the entry address gives `0x00261C74`.
+This call is indirect and therefore absent from direct-branch and absolute-pointer
+searches. The current mode wrappers, shared FS, and NDS scanner overwrite this
+initializer while its constructor-table entry remains unchanged. This is a
+known startup risk, not a safe code cave. Disabling exception handling to
+continue execution does not establish safety. No native ticket-job or
+free-campaign function is reclaimed.
+
+| Payload area | Modules | Used end / remaining space |
+|---|---|---|
+| Overwritten initializer `0x00261C74–0x00262C10` | ARM dispatch and native trampolines, shared FS, NDS scanner | `0x00262BB8` / `0x58` bytes |
+| Text tail `0x0028D2E0–0x0028DFC0` | ARM entries, local ticket, Bankdata, offline flow, paths, classification, UTF-16 FS | `0x0028DFA6` / `0x1A` bytes |
+
+The ticket module remains ARM. Other functional modules use Thumb; shared
+TLS/SVC primitives remain non-inlined ARM functions called through literal
+addresses. ARM dispatch explicitly switches state with `BX/BLX`, and verification
+rejects unsafe immediate Thumb-to-ARM calls produced by the object importer.
+The card I/O entries, list vtable slot,
+and source-selection comparison are in-place hooks; their native bodies remain
+available through trampolines rather than holding new payloads. Native data/BSS
+addresses do not move.
+
+The scanner allocates a `0xE60`-byte context from the native heap on demand.
+Its pointer uses `0x00363FF0`, and the three mode bytes begin at `0x00363FF4`.
+These addresses are after the logical BSS end `0x003638A4` and before the RW
+page end `0x00364000`, rather than in the native resource-pointer table at
+`0x00329FF8/0x00329FFC`. Source scanning ignores the mode bytes and is shared
+by Online and Offline Mode.
 
 The four ticket hooks replace existing four-byte `BL` instructions in place.
 The remaining native ticket-state and job bytes are unchanged.
 
 The zero-filled tails in `.rodata` (`0x002EBA58–0x002EC000`, `0x5A8` bytes)
-and `.data` (`0x003293FC–0x0032A000`, `0xC04` bytes) are non-executable and may
-still be referenced. Expanding only the ExHeader `.text` size would overlap
-the existing `.rodata` mapping. Expansion beyond `0x0028E000` therefore needs
-a relocated full code image and matching ExHeader segment addresses, not only
-a Luma `code.ips`.
+and the code image padding at `0x003293FC–0x0032A000` (`0xC04` bytes) are
+non-executable. The latter is the start of the logical runtime BSS, not free
+data. Static zeros do not establish the absence of references. Expanding only
+the ExHeader `.text` size would overlap the existing `.rodata` mapping; the
+current patch does not enlarge the executable mapping.
 
 ## Ticket state and local results
 
@@ -55,7 +86,7 @@ The native ticket state is `0x00249600`; its local substate is at state `+0x10`.
 Both modes retain this function, callback `0x0024991C` and cleanup `0x00249CD8`.
 Only these interfaces are routed:
 
-| Call site | Native function | Offline or test policy `1` | Original Mode, policy `0` |
+| Call site | Native function | Offline or test policy `1` | Online Mode, policy `0` |
 |---|---|---|---|
 | `0x00249754` | `0x0023D3C0` initialization | Populate local job fields; return `0` on failure | Original call and arguments |
 | `0x00249774` | `0x0023E230` polling | Report completion and successful result | Original call and arguments |
@@ -100,7 +131,7 @@ This does not calculate Poke Miles or change Bankdata transactions or Pokemon
 validation.
 
 `ONLINE_TICKET_CHECK_BYPASS` defaults to `0` and selects local test results only
-in Original Mode; Offline Mode always uses local interfaces. Setting `1` does
+in Online Mode; Offline Mode always uses local interfaces. Setting `1` does
 not replace NNID authentication, other server requests or remote permission.
 It is for emulator testing, not evidence of server-side transfer approval.
 
@@ -125,6 +156,52 @@ Select game
   → save the game
   → commit or roll back
 ```
+
+## Source list and Gen 5 cartridge interfaces
+
+`0x00244D2C` updates the source-list state, and its vtable slot is at
+`0x002E6620`. The fields directly involved in enumeration are:
+
+| Object offset | Content |
+|---:|---|
+| `+0x08` | Gen 5 source/save context |
+| `+0x10` | List state number |
+| `+0x38` | List UI object |
+| `+0x3C` | 40-entry source-ID array |
+| `+0x64` | Current source count |
+| `+0x66` | Current cursor |
+| `+0x68` | Asynchronous-read work area |
+| `+0x78` | VC enumerator |
+
+Source IDs `1–4` represent Black, White, Black 2, and White 2; IDs from `5`
+enter the VC route. The native list first detects, reads, and validates the
+current physical cartridge, then appends VC sources in states 3/4. Its total
+capacity is fixed at 40. The selection branch at `0x00244870` distinguishes
+Gen 5 from VC with `sourceId < 5`.
+
+The shared scanner can emit up to four Gen 5 sources before VC enumeration.
+The hook at the native VC count store `0x0024149C` therefore replays
+`strh r0,[r6,#0x58]`, then checks the combined Gen 5 and VC count. At 40 it
+causes the native loop to exit after its next increment; below 40 it leaves the
+loop state unchanged. This guard runs in both modes and prevents an overrun of
+the fixed array.
+
+Gen 5 source reads and the final save use three separate entries:
+
+| Address | Native role |
+|---:|---|
+| `0x0021A7E0` | Read cartridge-save bytes at an offset |
+| `0x0021AA0C` | Read the cartridge game code |
+| `0x0021AB50` | Write cartridge-save bytes at an offset |
+
+The native asynchronous save load starts at `0x0019ADEC`, is polled at
+`0x0019AD60`, and performs format/redundant-side selection at `0x0019AA30`.
+The current patch reuses that upper state and validation. A digital source
+selected in either mode redirects the three low-level entries to its SD save.
+A physical cartridge in either mode uses exact trampolines that replay the
+original prologues and continue through the untouched function bodies. Mode
+differences begin only in the later Bank, network, legality-service, and
+transaction states.
 
 ## Network states
 
@@ -158,7 +235,7 @@ layers:
 
 1. The source save must load and pass the native integrity checks; a Gen 5 save
    also selects a usable redundant side.
-2. For Gen 5, Original Mode submits all 30 raw BOX1 records, including empty
+2. For Gen 5, Online Mode submits all 30 raw BOX1 records, including empty
    slots, before running the 14 local checks or converting transfer records. VC
    converts its candidates earlier. After validating the response, the client obtains
    one 32-bit result code for each of the 30 slots. A code tells the client to
@@ -237,7 +314,7 @@ loop does not stop at the first failure.
 
 The caller explicitly removes failure bits `0x0004`, `0x0008`, and `0x0010`.
 Items are removed. The two name bits retain repair branches, but their local
-check functions always succeed and therefore do not set those bits. In Original
+check functions always succeed and therefore do not set those bits. In Online
 Mode, remote result `250` requests nickname normalization, `251` requests
 Original Trainer normalization, and `252` requests both; this remote behavior
 is independent of the two always-successful local functions.
@@ -281,7 +358,7 @@ It does not run the Gen 5 14-entry local table.
 
 ### What this patch changes
 
-Original Mode submits all 30 candidates and, after validating the reply,
+Online Mode submits all 30 candidates and, after validating the reply,
 replaces the complete result array. Source accessor `0x0019A6D8` directly
 locates BOX1 in the selected save side without normalizing empty records.
 `0x002B3FD4` is the template used to clear successfully transferred source
@@ -312,9 +389,9 @@ read-only classification:
    Result `1` is only a local generic rejection value; it does not reproduce
    a specific server error code or the server's complete legality algorithm.
 
-### Original and offline execution order
+### Online and offline execution order
 
-| Step | Gen 5 Original Mode | Gen 5 Offline Mode |
+| Step | Gen 5 Online Mode | Gen 5 Offline Mode |
 |---|---|---|
 | Load source | Native read, save-block validation, redundant-side selection | Unchanged |
 | Prepare 30 slots | Copy raw `0x88`-byte records, including empty slots | Read-only integrity and species classification of the same buffer |
@@ -338,9 +415,9 @@ The remaining adaptations are:
   results and resumes at `0x002461D0`. VC already skips null candidates before
   consulting the result, so a synthetic result `20` is unnecessary.
 - Both offline paths replace all 30 entries every time, preventing values from
-  an Original Mode attempt in the same process from surviving a title-screen
+  an Online Mode attempt in the same process from surviving a title-screen
   mode switch.
-- Original Mode returns to the original remote-request code. The 14 Gen 5
+- Online Mode returns to the original remote-request code. The 14 Gen 5
   functions, failure-bit postprocessing, VC null/item/egg logic, and candidate
   insertion are unchanged.
 

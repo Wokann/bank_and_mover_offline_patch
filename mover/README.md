@@ -1,13 +1,20 @@
-# Combined original and offline patch
+# Combined online and offline patch
 
 See [`docs/code-analysis.md`](docs/code-analysis.md) for the stock
 program's memory map, network path, BankObject, and Transport Box layout. This
 document covers only the maintained patch design, implementation, and
 independent build procedure.
 
+The current payload overwrites `0x00261C74–0x00262C10`, an active native
+startup initializer rather than a safe code cave. This is a known startup
+risk, documented in the analysis. Continuing after disabling exception
+handling does not make the layout safe; static checks and source-scanning
+tests do not establish safe end-to-end operation.
+
 This is the maintained Poke Mover v5.5.0 patch for base title
 `00040000000C9C00`. It combines the verified standalone offline behavior with
-an exact runtime path back to the original application.
+native online Bank/network transactions. Gen 5 source redirection is shared
+by both modes.
 
 Poke Mover has no download mode. It neither creates a new local Bank nor
 downloads the supported local file. Use Pokemon Bank's combined patch in
@@ -22,7 +29,7 @@ committed only to the local Bank file and are never uploaded by this project.
 ## Mode selection
 
 The title screen starts in **Offline Mode**. Press the physical **R** button to
-switch between **Offline Mode** and **Original Mode**. The mode line is shown
+switch between **Offline Mode** and **Online Mode**. The mode line is shown
 below the HOME-menu help text, uses the same button glyph as the Bank patch,
 and updates immediately.
 
@@ -32,18 +39,18 @@ for the session. R no longer changes mode after leaving the title screen.
 ```text
 Title screen (default: Offline)
         │
-        ├── R ───────────────► Original
+        ├── R ───────────────► Online
         ├── R again ─────────► Offline
         └── A / START / touch
                   │ latch displayed mode
                   ├── Offline ─► local bankdata.bin and local transactions
-                  └── Original ─► official network and server flow
+                  └── Online ─► official network and server flow
 ```
 
-## Strict separation between modes
+## Mode-specific Bank/network flow, shared source redirection
 
 Every hook inherited from the offline patch reads the latched session flag.
-Offline Mode enters the local implementation. Original Mode replays the exact
+Offline Mode enters the local implementation. Online Mode replays the exact
 overwritten instruction or resumes the original function body for:
 
 - network availability and connection jobs;
@@ -53,11 +60,18 @@ overwritten instruction or resumes the original function body for:
 - transfer eligibility and candidate states;
 - remote staging, commit, rollback, and disconnect.
 
-Original Mode therefore does not read, write, create, rename, or delete any
-file under `sd:/3ds/Bank/`. It keeps the original server flow and original
-messages.
+That separation applies to the Bank backend, network transactions, tickets,
+and legality services. Gen 5 source discovery and I/O for the selected digital
+`.sav` form a shared input layer in both modes; they do not switch Online
+Mode to the local Bank backend.
 
-The ticket test policy defaults to `0`. Setting it to `1` makes Original Mode
+Online Mode therefore does not read, write, create, rename, or delete any
+Bank file under `sd:/3ds/Bank/`. It keeps the official server flow and its network
+messages. If an SD-backed Gen 5 source is selected, however, Online Mode uses
+the same redirect to read and write its paired `.sav` under
+`sd:/roms/nds/saves/`.
+
+The ticket test policy defaults to `0`. Setting it to `1` makes Online Mode
 use local ticket/campaign results for emulator testing; NNID connection, remote
 Pokemon validation, downloading and remote saving remain native. This test
 configuration is not unmodified online behavior and does not prove server-side
@@ -85,10 +99,59 @@ The local Transfer Box must be empty before a new transfer. Existing Transfer
 Box contents are never overwritten. Back up `bankdata.bin` before testing on
 hardware.
 
-## Offline transfer route
+## Shared source discovery and the offline transfer route
+
+### Gen 5 source discovery shared by both modes
+
+After the native physical-cartridge detection and validation finish, Online
+Mode and Offline Mode both enumerate one regular file per frame from
+`sd:/roms/nds/`. The `.nds` extension is case-insensitive. Names pass through
+the FS UTF-16 interface, so ASCII names continue to work as a subset of UTF-16.
+Only the first `0x10` bytes of each ROM are read. Bytes `0x0C–0x0F` identify
+Black (`IRB?`), White (`IRA?`), Black 2 (`IRE?`), or White 2 (`IRD?`).
+
+`sd:/roms/nds/<name>.nds` is paired with
+`sd:/roms/nds/saves/<name>.sav`. The save must open for read and write without
+creation, then pass the native asynchronous save load, redundant-side
+selection, and integrity validation. The patch neither repairs checksums itself
+nor admits a candidate from its filename alone.
+
+Only one valid source is retained for each game:
+
+1. A physical cartridge that passes native validation locks its game and cannot
+   be replaced by a digital copy. An invalid cartridge still falls back to SD.
+2. Digital copies use `J > O > F > I > D > S > K`, taken from the final game-code
+   byte. A later valid copy replaces the current candidate only at a better rank.
+3. Among valid copies of the same language, the first encountered wins. An
+   invalid copy occupies no slot, so later duplicates are still tested.
+4. Enumeration can stop early only after all four games have an unbeatable
+   source: a valid cartridge or a valid `J` copy. Otherwise it reaches the end
+   of the directory.
+
+A missing directory means that no SD digital source is present and the native
+flow continues. If directory enumeration IPC fails after opening the directory,
+the current uncommitted scan is discarded and the native no-usable-software
+error route is used; the failure is not mistaken for a normal end of directory
+and no partial list is shown. Custom directory and save-validation phases still
+run the native loading-view update once per frame. Closing a file performs both
+the FSFILE service close and the kernel-handle close, preventing handle leaks
+while many candidates are scanned.
+
+Up to four logical Gen 5 sources are emitted first, after which the native flow
+continues appending VC sources. Because the stock array holds only 40 entries,
+the hook at `0x0024149C` replays the original count store and ends VC enumeration
+when Gen 5 plus VC sources reach 40; below that limit, the stock loop is left
+unchanged. Selecting a digital source pins its UTF-16 save path; the actual
+transfer reopens it and runs native validation again. A later I/O failure
+follows the current mode's native error or rollback route instead of silently
+changing to another copy mid-transaction.
+
+The Bank connection, validation, and save state diagram below applies only to
+Offline Mode. Online Mode performs the same source selection, then continues
+through the stock network, server-Bank, and transaction flow.
 
 ```text
-Stock source-game selection
+Source-game selection (valid cartridge / local Gen 5 ROM / native VC)
         │
         ▼
 Generic Connecting message
@@ -103,7 +166,7 @@ Enter the native ticket state; supply console time + 999 days at its job interfa
 Connect to local offline Bank data (at least 2 seconds)
         │
         ▼
-Stock cartridge read, filtering, and Pokemon conversion
+Native source-save reading, filtering, and Pokemon conversion
         │
         ├── Gen 5: mark empty slots as stock result 20;
         │          run stock local checks for non-empty slots
@@ -133,8 +196,8 @@ remain in the same image:
 | Session mode | Policy byte | Ticket job / free-campaign query |
 |---|---:|---|
 | Offline | `0` or `1` | Local results; no ticket network client or system shop job |
-| Original | `0` (default) | Native online checks and callbacks |
-| Original | `1` | Local results for emulator testing; other network operations remain native |
+| Online | `0` (default) | Native online checks and callbacks |
+| Online | `1` | Local results for emulator testing; other network operations remain native |
 
 At the time of this ticket-routing commit, official Azahar does not implement
 `am:net`'s `GetRightsOnlyTicketData` (command `0x0821`; see the
@@ -187,9 +250,9 @@ result. The VC null/item/egg decisions remain unchanged; all 30 stale results
 are cleared. Unknown server-only legality rules and name normalization are not
 recreated in Offline Mode.
 
-### Gen 5 original and offline order
+### Gen 5 online and offline order
 
-| Stage | Original | Offline |
+| Stage | Online | Offline |
 |---|---|---|
 | Source load | Validate the source save and select its redundant side | Native flow retained |
 | Before submission | Obtain 30 raw records before the 14 checks or transfer conversion | Read-only decode and integrity-check the same records |
@@ -229,8 +292,8 @@ Rejected records are excluded from this transfer's candidates, not erased from
 their source save. The classifier never resets them to empty slots.
 
 The offline remote-check state also clears transaction parameters left by a
-prior Original Mode attempt in the same process and sets the shared Bank status
-to its known ready value. Original Mode still obtains fresh values from
+prior Online Mode attempt in the same process and sets the shared Bank status
+to its known ready value. Online Mode still obtains fresh values from
 the server.
 
 Before loading `bankdata.bin`, the patch preserves candidates in native
@@ -281,7 +344,7 @@ locally before entering the stock disconnect route.
 
 - The initial Internet line becomes a generic **Connecting...** message.
 - The local Bank-data connection message remains visible for at least two
-  seconds before stock cartridge reading and conversion proceed.
+  seconds before source-save reading and conversion proceed.
 - The save message identifies local offline Bank data and remains visible for
   at least two seconds after the complete staging write.
 - The disconnect line is generic. Its existing 1.5-second local first phase is
@@ -295,8 +358,10 @@ state object; the native state exit path performs cleanup.
 
 | File | Role |
 |---|---|
-| `src/main.s` | Title-mode latch and mode dispatch for every offline hook |
-| `src/fs_helpers.c` | Checked SD archive/file primitives shared by local loading and transactions |
+| `src/main.s` | Title-mode latch, offline-hook dispatch, and shared source entries/native trampolines |
+| `src/fs_helpers.c` / `include/fs_helpers.h` | Shared checked SD operations; TLS/SVC primitives remain ARM |
+| `src/nds_fs.c` / `include/nds_fs.h` | UTF-16 directory enumeration and ranged file I/O |
+| `src/nds_sources.c` / `include/nds_sources.h` | Per-frame Gen 5 source discovery, native validation, ranking, and save-I/O dispatch |
 | `src/bankdata_redirect.c` | Local Bankdata loading, transfer-slot preservation, eligibility update, and crash-safe temporary write, commit, and rollback |
 | `src/local_ticket.c` | Local native-job/campaign results and console-calendar calculation |
 | `src/local_validation.c` | Read-only Gen 5 integrity/empty-slot classification and Gen 5/VC per-slot result isolation |
@@ -305,7 +370,7 @@ state object; the native state exit path performs cleanup.
 | `src/patch_messages.py` | Appends and validates title/offline text in all ten language archives |
 | `tools/message_archive.py` | Self-contained GARC and encrypted message-file codec |
 | `tools/verify_patch.py` | Verifies the base hash, code regions, hooks, native replay, IPS reconstruction, and resources |
-| `Makefile` | Compiles the functional objects, injects them into audited code regions, creates IPS, rebuilds messages, and writes the release tree |
+| `Makefile` | Compiles functional objects, enforces payload bounds, creates IPS, rebuilds messages, and writes the release tree |
 
 ## Independent build and installation
 
@@ -365,10 +430,13 @@ make -C mover ARMIPS=/path/to/armips IPS_TOOL=/path/to/flips
 
 The build compiles the functional C modules into separate objects while
 retaining module-local inlining, and emits an `.s` disassembly beside each
-object for inspection. armips imports those objects consecutively into the
-audited reclaimed range and executable tail. Floating IPS creates `code.ips`,
-the ten-language RomFS is rebuilt, and the static verifier checks the complete result. The
-complete output is:
+object for inspection. armips imports those objects into the initializer-overwrite
+region and executable text tail, subject to the known startup risk above.
+The local ticket module and
+TLS/SVC primitives use ARM; the filesystem, source scanner, local classification,
+Bankdata and offline-flow modules use Thumb with explicit interworking entries.
+Floating IPS creates `code.ips`, the ten-language RomFS is rebuilt, and the static
+verifier checks the complete result. The complete output is:
 
 ```text
 release/00040000000C9C00/
@@ -377,23 +445,20 @@ release/00040000000C9C00/
 ```
 
 The verifier checks the base hash, executable payload ranges, every ARM hook,
-overwritten stock instructions, Offline/Original mode dispatch and continuation
+overwritten stock instructions, Offline/Online mode dispatch and continuation
 sites, byte-for-byte IPS reconstruction, and all stock and added localized
 messages. Copy `00040000000C9C00` to `SD:/luma/titles/` and enable Luma game
 patching. Back up the SD card and source-game saves before real-console use.
 
-## Transporter Redirect Patch compatibility
+## Relationship to other cartridge-redirect patches
 
-This patch leaves the stock hook ranges `0x0021A7E0–0x0021A7E4`,
-`0x0021AA0C–0x0021AA24`, and `0x0021AB50–0x0021AB68`, plus the executable-tail
-range `0x0028DD00–0x0028DDE0`, available for the
-[DreamRadarCartRedirect Transporter Redirect Patch](https://github.com/zaksabeast/DreamRadarCartRedirect/blob/b518a9868c23c69fe94c2818a9e600fd09c24a92/transporter.s).
-Those bytes remain identical to the supported stock image, and the build
-verifier prevents future payload growth from entering them. Two IPS files made
-against the same v5.5.0 base can therefore be combined with an IPS merger that
-supports disjoint records. This reservation guarantees address compatibility
-only with the audited external-patch revision; this project does not bundle or
-redistribute the external patch.
+This patch now owns the three native NDS cartridge-I/O entries and includes
+multi-ROM scanning, source ranking, and native save validation. The former
+`0xE0` reservation for the
+[DreamRadarCartRedirect Transporter Redirect Patch](https://github.com/zaksabeast/DreamRadarCartRedirect/blob/b518a9868c23c69fe94c2818a9e600fd09c24a92/transporter.s)
+has therefore been removed. Both patches modify the same entry points and
+**must no longer be combined directly with an IPS merger**. Do not install the
+external Transporter redirect patch together with this patch.
 
 ## External open-source references
 
@@ -405,7 +470,9 @@ redistribute the external patch.
 - [devkitPro/libctru FS declarations](https://github.com/devkitPro/libctru/blob/master/libctru/include/3ds/services/fs.h)
   and [implementation](https://github.com/devkitPro/libctru/blob/master/libctru/source/services/fs.c)
   were used to verify the public FSUSER/FSFILE interfaces and result handling.
+- [GBATEK's DS cartridge-header documentation](https://problemkaputt.de/gbatek-ds-cartridge-header.htm)
+  was used to cross-check the location of the header game-code field.
 
 The current Poke Mover binary remains authoritative for addresses, state
-transitions, object layouts, file offsets, patch sites, and every Original Mode
+transitions, object layouts, file offsets, patch sites, and every Online Mode
 continuation. External projects were used only as public cross-checks.

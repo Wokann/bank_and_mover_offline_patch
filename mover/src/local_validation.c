@@ -68,10 +68,10 @@ int OfflinePatch_PrepareGen5Validation(MoverStateView *state)
 }
 
 /* VC conversion already skips null Pokemon before consulting the server
-   result. Clear every slot so a prior original-mode session cannot leak old
+   result. Clear every slot so a prior online-mode session cannot leak old
    server results into the offline conversion. */
 /* VC 转换会在读取服务器结果前先跳过空宝可梦。这里清零全部槽位，防止此前
-   原版模式会话的旧服务器结果残留到离线转换。 */
+   在线模式会话的旧服务器结果残留到离线转换。 */
 __attribute__((used,noinline,section(".text.offline.04_validation_gen12")))
 void OfflinePatch_PrepareGen12Validation(MoverStateView *state)
 {

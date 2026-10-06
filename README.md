@@ -15,7 +15,7 @@ The patches never upload offline changes to the official server. An upload patch
 | Application | Title-screen modes | Purpose |
 |---|---|---|
 | Pokemon Bank | Offline / Download / Unlock | Load, edit, and save the local Bank offline; download a complete official Bank to the SD card; or enter the stock forced-unlock flow for a mismatched save |
-| Poke Mover | Offline / Original | Transfer Pokemon into the same local Bank's Transport Box, or use the unmodified official server path |
+| Poke Mover | Offline / Online | Transfer Pokemon into the same local Bank's Transport Box, or use the official server path |
 
 - Press the physical **R** button on the title screen to switch modes. Pressing **A**, **START**, or the lower screen latches the displayed mode for that session.
 - Bank Offline Mode can invoke the stock first-use initializer to create a new local Bank when no usable file exists.
@@ -23,6 +23,7 @@ The patches never upload offline changes to the official server. An upload patch
 - Bank Download Mode retains the official account, game-detection, and server-download flow. It commits the data locally and returns to the title screen without entering the boxes or uploading data.
 - Bank Unlock Mode preserves the stock online transaction-recovery flow and exposes one server-returned unlock candidate on the official challenge-code screen.
 - Poke Mover Offline Mode retains stock game reading, filtering, conversion, Transport Box checks, and source-game saving while replacing server Bank I/O with local transactions.
+- Both Poke Mover modes can scan Gen 5 ROM/save pairs on the SD card in addition to a physical cartridge and redirect subsequent I/O for the selected digital save back to the SD card.
 - Added messages cover all ten language archives shipped with both applications.
 
 ## Download and installation
@@ -64,12 +65,30 @@ Unlock Mode is intended only for the stock save-mismatch lock. Enter its first m
 
 ### Poke Mover
 
-The title screen defaults to **Offline Mode**. Press **R** to select **Original Mode**.
+The title screen defaults to **Offline Mode**. Press **R** to select **Online Mode**.
 
 - Offline Mode requires a `bankdata.bin` previously downloaded or initialized by Bank. Mover does not download or create this file.
 - A successful offline transfer writes Pokemon into the Transport Box of the same local Bank; retrieve them later with Bank in Offline Mode.
-- Original Mode follows the official network path and does not read, write, rename, or remove files under `SD:/3ds/Bank/`.
-- If the local file is invalid or its Transport Box is occupied, Mover preserves the file and follows the corresponding error path.
+- Online Mode follows the official network path and does not read, write, rename, or remove local Bank files under `SD:/3ds/Bank/`.
+- If the offline Bank file is invalid or its Transport Box is occupied, Mover preserves the file and follows the corresponding error path.
+
+Gen 5 source redirection is shared by both modes: Online Mode and Offline
+Mode both scan the following directory and read or write the paired `.sav` when
+a digital source is selected. A ROM and save must have the same base filename:
+
+```text
+sd:/roms/nds/
+├── any-name.nds
+└── saves/
+    └── any-name.sav
+```
+
+The scanner accepts only Black, White, Black 2, and White 2. A `.sav` must be
+readable, writable, and pass Mover's native save validation. At most one source
+is shown for each game: a valid physical cartridge takes priority over an SD
+copy; digital copies use `J > O > F > I > D > S > K`, retaining the first valid
+copy at the best language rank encountered. Invalid candidates are skipped and
+do not prevent later files from being tested.
 
 ### bankdata viewer
 
@@ -86,7 +105,10 @@ python .\gui\bank_viewer.py
 - Do not mix Bank files belonging to different accounts.
 - Download Mode is server-to-local only; Offline Mode is local only; no local-to-server upload feature exists.
 - Unlock Mode uses the official online recovery path and may change the official transaction state. It does not upload the local offline `bankdata.bin`.
-- Poke Mover Original Mode and the local offline Bank are independent.
+- Poke Mover's server Bank in Online Mode and the local offline Bank remain
+  independent. Gen 5 source discovery and selected digital-save I/O are shared
+  by both modes.
+- Mover now includes its own Gen 5 SD-source redirect. Do not merge or install it together with DreamRadarCartRedirect's external Transporter Redirect Patch.
 
 ## Unofficial-project disclaimer
 
@@ -120,7 +142,8 @@ Do not commit or redistribute extracted code and resources. The project supports
 | Pokemon Bank | `bank/rom/exefs/00040000000C9B00.dec.code` | 2,801,664 bytes | `5AB630856835DCF2DBDF9A62244DD19E46AE1C7C` |
 | Poke Mover | `mover/rom/exefs/00040000000C9C00.dec.code` | 2,269,184 bytes | `583859C1E874D11650EFBDDE51F470ECF96900C4` |
 
-Place each complete RomFS at `bank/rom/romfs/` or `mover/rom/romfs/`. With the inputs prepared, run from the repository root:
+Place each complete RomFS at `bank/rom/romfs/` or `mover/rom/romfs/`.
+With the inputs prepared, run from the repository root:
 
 ```sh
 make -C bank clean

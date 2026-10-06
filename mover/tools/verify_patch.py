@@ -18,29 +18,28 @@ EXPECTED_BASE_SHA256 = "001C20ADA74016507C969BB44A0A50F8EDF803EC06A3FC46834263BA
 CAVE_START = 0x00261C74
 CAVE_END = 0x00262C10
 TEXT_ACTUAL_END = 0x0028D1AC
+FOLLOWING_STOCK_CODE_START = CAVE_END
+FOLLOWING_STOCK_CODE_END = 0x002638D8
 TEXT_MAPPED_END = 0x0028E000
 LAYEREDFS_RESERVED_SIZE = 0x130
 VERSION_STORAGE_SIZE = 0x40
 VERSION_STORAGE_START = TEXT_MAPPED_END - VERSION_STORAGE_SIZE
 VERSION_IDENTIFIER = b"offline_patch_v1.0.0\0"
 PAYLOAD_START = 0x0028D2E0
-TRANSPORTER_REDIRECT_AREA_START = 0x0028DD00
-TRANSPORTER_REDIRECT_AREA_SIZE = 0xE0
-LOCAL_VALIDATION_AREA_START = (
-    TRANSPORTER_REDIRECT_AREA_START + TRANSPORTER_REDIRECT_AREA_SIZE
-)
 PAYLOAD_END = VERSION_STORAGE_START
-TRANSPORTER_REDIRECT_HOOK_RANGES = (
-    (0x0021A7E0, 0x0021A7E4),
-    (0x0021AA0C, 0x0021AA24),
-    (0x0021AB50, 0x0021AB68),
-)
 TICKET_INTERFACES = (
     (0x00249754, "initialize", "ticketjob_initialize", 0x0023D3C0),
     (0x00249774, "poll", "ticketjob_poll", 0x0023E230),
     (0x00249818, "campaignrequest", "movercampaign_request", 0x0023BE4C),
     (0x00249CEC, "unbind", "ticketjob_unbind", 0x0023E63C),
 )
+DATA_ACTUAL_END = 0x003293FC
+BSS_SIZE = 0x0003A4A8
+BSS_ACTUAL_END = DATA_ACTUAL_END + BSS_SIZE
+READ_WRITE_MAPPED_END = (BSS_ACTUAL_END + 0xFFF) & ~0xFFF
+RUNTIME_STORAGE_START = READ_WRITE_MAPPED_END - 0x10
+NDS_SCANNER_CONTEXT_SLOT = RUNTIME_STORAGE_START
+MODE_STORAGE = RUNTIME_STORAGE_START + 4
 
 
 def symbols(path: Path) -> dict[str, int]:
@@ -57,6 +56,32 @@ def word(image: bytes, address: int) -> int:
     return int.from_bytes(image[offset:offset + 4], "little")
 
 
+def verify_code_cave(base: bytes) -> None:
+    # Native startup calls each PREL32 entry as entry address + stored offset.
+    # Direct branches and absolute pointers alone do not cover these calls.
+    # 原版启动以“表项地址 + 相对偏移”调用 PREL32 构造表，不能只检查直接分支和绝对指针。
+    table_start = 0x00102AE4 + word(base, 0x00102AF8)
+    table_end = 0x00102AE8 + word(base, 0x00102AFC)
+    if not (
+        IMAGE_BASE <= table_start < table_end <= IMAGE_BASE + len(base)
+        and (table_end - table_start) % 4 == 0
+    ):
+        raise ValueError("invalid native startup constructor table")
+    for entry in range(table_start, table_end, 4):
+        target = ((entry + word(base, entry)) & 0xFFFFFFFF) & ~1
+        if CAVE_START <= target < CAVE_END:
+            if (entry, target) == (0x002EB7BC, CAVE_START):
+                print(
+                    "WARNING: retained existing payload overlap with native "
+                    "startup initializer 00261C74; its repair is deferred"
+                )
+                continue
+            raise ValueError(
+                f"code cave overlaps native startup initializer {target:08X}; "
+                f"PREL32 constructor entry {entry:08X} references it"
+            )
+
+
 def branch_target(image: bytes, address: int) -> tuple[int, bool, int]:
     instruction = word(image, address)
     if ((instruction >> 25) & 7) != 5:
@@ -66,6 +91,55 @@ def branch_target(image: bytes, address: int) -> tuple[int, bool, int]:
         displacement -= 0x04000000
     return address + 8 + displacement, bool(instruction & 0x01000000), instruction >> 28
 
+
+def arm_literal_value(
+    image: bytes, address: int, register: int, condition: int = 0xE
+) -> int:
+    instruction = word(image, address)
+    expected = (condition << 28) | 0x059F0000 | (register << 12)
+    if instruction & 0xFFFFF000 != expected:
+        raise ValueError(f"expected ARM literal load at {address:08X}")
+    return word(image, address + 8 + (instruction & 0xFFF))
+
+
+def verify_reclaimed_range_unreferenced(image: bytes) -> None:
+    """Reject ordinary pointers or ARM B/BL edges into the reclaimed range."""
+    for offset in range(0, len(image) - 3, 4):
+        address = IMAGE_BASE + offset
+        if CAVE_START <= address < CAVE_END:
+            continue
+        instruction = int.from_bytes(image[offset:offset + 4], "little")
+        if CAVE_START <= instruction < CAVE_END:
+            raise ValueError(
+                f"external aligned pointer enters reclaimed range at {address:08X}"
+            )
+        if ((instruction >> 25) & 7) != 5:
+            continue
+        displacement = (instruction & 0xFFFFFF) << 2
+        if displacement & 0x02000000:
+            displacement -= 0x04000000
+        target = address + 8 + displacement
+        if CAVE_START <= target < CAVE_END:
+            raise ValueError(
+                f"external ARM branch enters reclaimed range at {address:08X}"
+            )
+
+
+def verify_no_immediate_thumb_blx(image: bytes, start: int, end: int) -> None:
+    """Reject importer-generated Thumb-to-ARM immediate calls.
+
+    armips resolves R_ARM_THM_CALL as an immediate Thumb BLX without applying
+    the interworking relocation correctly. All calls from these Thumb objects
+    into ARM code must therefore use a literal address followed by BLX Rm.
+    """
+    for address in range((start + 1) & ~1, end - 2, 2):
+        offset = address - IMAGE_BASE
+        first = int.from_bytes(image[offset:offset + 2], "little")
+        second = int.from_bytes(image[offset + 2:offset + 4], "little")
+        if first & 0xF800 == 0xF000 and second & 0xF800 == 0xE800:
+            raise ValueError(
+                f"unsafe immediate Thumb-to-ARM call at {address:08X}"
+            )
 
 def apply_ips(base: bytes, patch: bytes) -> bytes:
     if not patch.startswith(b"PATCH") or not patch.endswith(b"EOF"):
@@ -111,16 +185,26 @@ def main() -> None:
     digest = hashlib.sha256(base).hexdigest().upper()
     if digest != EXPECTED_BASE_SHA256:
         raise ValueError(f"unsupported base code SHA-256: {digest}")
+    verify_code_cave(base)
+    verify_reclaimed_range_unreferenced(base)
     if len(base) != len(patched):
         raise ValueError("patched image length differs from base")
     if apply_ips(base, args.ips.read_bytes()) != patched:
         raise ValueError("release IPS does not reproduce the patched image")
+    registration_offset = FOLLOWING_STOCK_CODE_START - IMAGE_BASE
+    registration_size = FOLLOWING_STOCK_CODE_END - FOLLOWING_STOCK_CODE_START
+    if patched[
+        registration_offset:registration_offset + registration_size
+    ] != base[registration_offset:registration_offset + registration_size]:
+        raise ValueError("startup registration code after the reclaimed cave changed")
 
     sym = symbols(args.symbols)
     required = {
         "combinepatch_codeusedend", "combinepatch_offlinepayloadusedend",
         "combinepatch_offlinepayloadstart", "textactualend", "textmappedend",
         "fshelpers_payloadbegin", "fshelpers_payloadend",
+        "ndssources_payloadbegin", "ndssources_payloadend",
+        "ndsfs_payloadbegin", "ndsfs_payloadend",
         "bankdataredirect_payloadbegin", "bankdataredirect_payloadend",
         "localticket_payloadbegin", "localticket_payloadend",
         "localvalidation_payloadbegin", "localvalidation_payloadend",
@@ -137,7 +221,15 @@ def main() -> None:
         "offlinepatch_networkupdate", "offlinepatch_stage", "offlinepatch_commit",
         "offlinepatch_rollback", "offlinepatch_preparegen5validation",
         "offlinepatch_preparegen12validation",
-        "offlinepatch_versionidentifier",
+        "ndssources_listupdate", "ndssources_selectlistid",
+        "ndssources_readsave", "ndssources_readgamecode", "ndssources_writesave",
+        "ndssources_originalreadsave", "ndssources_originalreadgamecode",
+        "ndssources_originalwritesave", "combinepatch_selectndssource",
+        "combinepatch_vcsourceadded", "combinepatch_ndsreadsaveentry",
+        "combinepatch_ndsreadgamecodeentry", "combinepatch_ndswritesaveentry",
+        "offlinepatch_versionidentifier", "offlinepatch_runtimestoragestart",
+        "nds_scanner_context_slot", "offlinepatch_runtimestorageend",
+        "combinepatch_modestorage",
     }
     for _, operation, native_name, _ in TICKET_INTERFACES:
         required.update((f"combinepatch_ticket{operation}",
@@ -146,7 +238,7 @@ def main() -> None:
     if missing:
         raise ValueError(f"missing armips symbols: {', '.join(missing)}")
     if not CAVE_START < sym["combinepatch_codeusedend"] <= CAVE_END:
-        raise ValueError("code-cave payload exceeds the audited range")
+        raise ValueError("payload exceeds the existing overwritten range")
     if not (
         sym["textactualend"] == TEXT_ACTUAL_END
         and sym["textmappedend"] == TEXT_MAPPED_END
@@ -160,28 +252,31 @@ def main() -> None:
             PAYLOAD_START - TEXT_ACTUAL_END
         ):
             raise ValueError("Luma LayeredFS reservation is not untouched padding")
-    if not (
-        PAYLOAD_START < sym["combinepatch_offlinepayloadusedend"]
-        <= TRANSPORTER_REDIRECT_AREA_START
-    ):
+    if not PAYLOAD_START < sym["combinepatch_offlinepayloadusedend"] <= PAYLOAD_END:
         raise ValueError("offline payload exceeds the executable tail")
     payload_objects = (
         ("fshelpers_payloadbegin", "fshelpers_payloadend"),
+        ("ndssources_payloadbegin", "ndssources_payloadend"),
         ("localticket_payloadbegin", "localticket_payloadend"),
         ("bankdataredirect_payloadbegin", "bankdataredirect_payloadend"),
         ("offlineflow_payloadbegin", "offlineflow_payloadend"),
         ("patchpaths_payloadbegin", "patchpaths_payloadend"),
+        ("localvalidation_payloadbegin", "localvalidation_payloadend"),
+        ("ndsfs_payloadbegin", "ndsfs_payloadend"),
     )
     for begin, end in payload_objects:
         if sym[begin] >= sym[end]:
             raise ValueError(f"empty or reversed payload object: {begin}")
-    if not (
-        CAVE_START < sym["fshelpers_payloadbegin"]
-        < sym["fshelpers_payloadend"] == sym["localticket_payloadbegin"]
-        < sym["localticket_payloadend"] == sym["combinepatch_codeusedend"]
-        <= CAVE_END
-    ):
-        raise ValueError("filesystem/ticket objects exceed the audited code cave")
+    cave_objects = payload_objects[:2]
+    if not CAVE_START < sym[cave_objects[0][0]]:
+        raise ValueError("first code-cave object precedes the audited code cave")
+    for (_, previous_end), (next_begin, _) in zip(cave_objects, cave_objects[1:]):
+        if sym[previous_end] != sym[next_begin]:
+            raise ValueError("code-cave payload objects are not consecutive")
+    if sym[cave_objects[-1][1]] != sym["combinepatch_codeusedend"]:
+        raise ValueError("code-cave payload end does not follow the final object")
+    if sym[cave_objects[-1][1]] > CAVE_END:
+        raise ValueError("code-cave payload exceeds the audited range")
     tail_objects = payload_objects[2:]
     if sym[tail_objects[0][0]] < PAYLOAD_START:
         raise ValueError("first tail payload object precedes the executable tail")
@@ -190,40 +285,35 @@ def main() -> None:
             raise ValueError("tail payload objects are not consecutive")
     if sym[tail_objects[-1][1]] != sym["combinepatch_offlinepayloadusedend"]:
         raise ValueError("offline payload end does not follow the final object")
-    if not (
-        LOCAL_VALIDATION_AREA_START
-        <= sym["localvalidation_payloadbegin"]
-        < sym["localvalidation_payloadend"]
-        <= VERSION_STORAGE_START
-    ):
-        raise ValueError("local-validation object exceeds its audited tail area")
-
-    # The external Transporter Redirect Patch replaces these three stock hook
-    # ranges and injects its SD-save payload at 0x0028DD00. Keep every byte
-    # untouched so independently generated IPS patches can be merged.
-    # 外部 Transporter Redirect Patch 会覆盖这三处原版钩子区域，并从
-    # 0x0028DD00 注入 SD 存档载荷。所有相关字节都必须保持不变，以便
-    # 独立生成的 IPS 补丁可以合并。
-    redirect_ranges = TRANSPORTER_REDIRECT_HOOK_RANGES + (
-        (
-            TRANSPORTER_REDIRECT_AREA_START,
-            TRANSPORTER_REDIRECT_AREA_START + TRANSPORTER_REDIRECT_AREA_SIZE,
-        ),
+    for module in ("fshelpers", "ndssources", "bankdataredirect",
+                   "offlineflow", "localvalidation", "ndsfs"):
+        verify_no_immediate_thumb_blx(
+            patched, sym[f"{module}_payloadbegin"], sym[f"{module}_payloadend"]
+        )
+    thumb_tail_routes = (
+        ("combinepatch_networkupdate", "offlinepatch_networkupdate"),
+        ("combinepatch_remotecheckupdate", "offlinepatch_remotecheckupdate"),
+        ("combinepatch_notransferupdate", "offlinepatch_notransferupdate"),
+        ("combinepatch_disconnectupdate", "offlinepatch_disconnectupdate"),
+        ("combinepatch_stage", "offlinepatch_stage"),
+        ("combinepatch_commit", "offlinepatch_commit"),
+        ("combinepatch_rollback", "offlinepatch_rollback"),
     )
-    for start, end in redirect_ranges:
-        start_offset = start - IMAGE_BASE
-        end_offset = end - IMAGE_BASE
-        if patched[start_offset:end_offset] != base[start_offset:end_offset]:
-            raise ValueError(
-                f"Transporter Redirect Patch range was modified: {start:08X}-{end:08X}"
-            )
-    redirect_payload_offset = TRANSPORTER_REDIRECT_AREA_START - IMAGE_BASE
-    if base[
-        redirect_payload_offset:
-        redirect_payload_offset + TRANSPORTER_REDIRECT_AREA_SIZE
-    ] != bytes(TRANSPORTER_REDIRECT_AREA_SIZE):
-        raise ValueError("Transporter Redirect Patch reservation is not stock padding")
-
+    for wrapper_name, helper_name in thumb_tail_routes:
+        wrapper = sym[wrapper_name]
+        if arm_literal_value(patched, wrapper + 12, 12, 0) != sym[helper_name] + 1 or \
+                word(patched, wrapper + 16) != 0x012FFF1C:
+            raise ValueError(f"incorrect conditional Thumb dispatch: {wrapper_name}")
+    save_wait = sym["combinepatch_savewait"]
+    if arm_literal_value(patched, save_wait + 20, 12) != \
+            sym["offlinepatch_savedisplaydelayupdate"] + 1 or \
+            word(patched, save_wait + 24) != 0xE12FFF3C:
+        raise ValueError("save-delay call does not interwork to Thumb")
+    eligibility_entry = sym["offlinepatch_eligibilityentry"]
+    if arm_literal_value(patched, eligibility_entry + 12, 12) != \
+            sym["offlinepatch_eligibilityupdate"] + 1 or \
+            word(patched, eligibility_entry + 16) != 0xE12FFF1C:
+        raise ValueError("eligibility entry does not interwork to Thumb")
     # Keep the marker in the final mapped text bytes. The remaining bytes stay
     # zero for a longer future identifier or metadata.
     # 将标识固定在已映射 text 段的最后部分。其余字节保持为零，供未来更长的标识
@@ -268,6 +358,12 @@ def main() -> None:
         0x0024A420: 0xEBFD44EA,
         0x0024A428: 0x13A0000D,
         0x0024A6F0: 0xE3A01009,
+        0x00244870: 0xE3500005,
+        0x0024149C: 0xE1C605B8,
+        0x0021A7E0: 0xE92D4008,
+        0x0021AA0C: 0xE92D40F0,
+        0x0021AB50: 0xE92D4FFF,
+        0x002E6620: 0x00244D2C,
     }
     for address, expected in expected_base_words.items():
         actual = word(base, address)
@@ -304,6 +400,11 @@ def main() -> None:
         0x0024A420: ("combinepatch_rollback", True, 0xE),
         0x0024A428: ("combinepatch_afterrollback", False, 0x1),
         0x0024A6F0: ("combinepatch_selectsavemessage", True, 0xE),
+        0x00244870: ("combinepatch_selectndssource", True, 0xE),
+        0x0024149C: ("combinepatch_vcsourceadded", True, 0xE),
+        0x0021A7E0: ("combinepatch_ndsreadsaveentry", False, 0xE),
+        0x0021AA0C: ("combinepatch_ndsreadgamecodeentry", False, 0xE),
+        0x0021AB50: ("combinepatch_ndswritesaveentry", False, 0xE),
     }
     for address, operation, native_name, native_address in TICKET_INTERFACES:
         if branch_target(base, address) != (native_address, True, 0xE):
@@ -390,22 +491,24 @@ def main() -> None:
     for wrapper_name, helper_name, local_continuation, original_continuation in validation_routes:
         wrapper = sym[wrapper_name]
         expected_branches = (
-            (wrapper + 0x0C, wrapper + (0x24 if wrapper_name ==
-                "combinepatch_gen5validation" else 0x1C), False, 0x1),
-            (wrapper + 0x14, sym[helper_name], True, 0xE),
-            (wrapper + (0x20 if wrapper_name == "combinepatch_gen5validation"
-                else 0x18), local_continuation, False, 0xE),
-            (wrapper + (0x28 if wrapper_name == "combinepatch_gen5validation"
-                else 0x20), original_continuation, False, 0xE),
+            (wrapper + 0x0C, wrapper + (0x28 if wrapper_name ==
+                "combinepatch_gen5validation" else 0x20), False, 0x1),
+            (wrapper + (0x24 if wrapper_name == "combinepatch_gen5validation"
+                else 0x1C), local_continuation, False, 0xE),
+            (wrapper + (0x2C if wrapper_name == "combinepatch_gen5validation"
+                else 0x24), original_continuation, False, 0xE),
         )
         for address, target, link, condition in expected_branches:
             actual_target, actual_link, actual_condition = branch_target(patched, address)
             if (actual_target, actual_link, actual_condition) != (target, link, condition):
                 raise ValueError(f"incorrect validation route at {address:08X}")
+        if arm_literal_value(patched, wrapper + 0x14, 12) != sym[helper_name] + 1 or \
+                word(patched, wrapper + 0x18) != 0xE12FFF3C:
+            raise ValueError("validation preparation does not interwork to Thumb")
         if wrapper_name == "combinepatch_gen5validation":
-            if word(patched, wrapper + 0x18) != 0xE3500000:
+            if word(patched, wrapper + 0x1C) != 0xE3500000:
                 raise ValueError("Gen 5 validation does not test preparation failure")
-            if branch_target(patched, wrapper + 0x1C) != (0x00246368, False, 0x0):
+            if branch_target(patched, wrapper + 0x20) != (0x00246368, False, 0x0):
                 raise ValueError("Gen 5 source failure does not return through stock cleanup")
 
     # Keep the native local checks, conversion, and result consumer unchanged.
@@ -414,6 +517,92 @@ def main() -> None:
                        (0x00245800, 0x002460B8), (0x002461C8, 0x00246A2C)):
         if patched[start - IMAGE_BASE:end - IMAGE_BASE] != base[start - IMAGE_BASE:end - IMAGE_BASE]:
             raise ValueError(f"native validation/conversion range changed: {start:08X}-{end:08X}")
+
+    if word(patched, 0x002E6620) != sym["ndssources_listupdate"] + 1:
+        raise ValueError("NDS source-list vtable slot does not target the scanner")
+
+    thumb_entries = (
+        ("combinepatch_ndsreadsaveentry", "ndssources_readsave"),
+        ("combinepatch_ndsreadgamecodeentry", "ndssources_readgamecode"),
+        ("combinepatch_ndswritesaveentry", "ndssources_writesave"),
+    )
+    for entry_name, thumb_name in thumb_entries:
+        entry = sym[entry_name]
+        if arm_literal_value(patched, entry, 12) != sym[thumb_name] + 1:
+            raise ValueError(f"{entry_name} does not switch to its Thumb target")
+        if word(patched, entry + 4) != 0xE12FFF1C:
+            raise ValueError(f"{entry_name} does not end in bx r12")
+    select_wrapper = sym["combinepatch_selectndssource"]
+    if arm_literal_value(patched, select_wrapper + 4, 12) != (
+        sym["ndssources_selectlistid"] + 1
+    ):
+        raise ValueError("NDS source-selection wrapper does not call its Thumb target")
+
+    if word(patched, sym["combinepatch_vcsourceadded"]) != 0xE1C605B8:
+        raise ValueError("VC source-cap wrapper does not replay the count store")
+
+    # Runtime words live after the logical .bss end but inside its final mapped
+    # page. They are therefore patch-owned and zero-filled by process creation;
+    # unlike the former .data-tail addresses, they cannot alias stock objects.
+    # 运行时字位于逻辑 .bss 末尾之后、最终映射页以内，因此属于补丁且由进程创建时
+    # 清零；它们不会再像旧的 .data 尾地址那样与原版对象重叠。
+    if BSS_ACTUAL_END != 0x003638A4 or READ_WRITE_MAPPED_END != 0x00364000:
+        raise ValueError("unexpected read/write layout calculation")
+    if word(base, 0x00100040) != DATA_ACTUAL_END:
+        raise ValueError("stock BSS-clear start no longer matches the audited data end")
+    if word(base, 0x00100044) != BSS_ACTUAL_END:
+        raise ValueError("stock BSS-clear end no longer matches the audited BSS end")
+    if not BSS_ACTUAL_END <= RUNTIME_STORAGE_START < READ_WRITE_MAPPED_END:
+        raise ValueError("runtime storage is outside mapped .bss padding")
+    for offset in range(0, len(base) - 3, 4):
+        value = int.from_bytes(base[offset:offset + 4], "little")
+        if RUNTIME_STORAGE_START <= value < READ_WRITE_MAPPED_END:
+            raise ValueError(
+                f"stock aligned pointer enters runtime storage at "
+                f"{IMAGE_BASE + offset:08X}"
+            )
+    expected_runtime_symbols = {
+        "offlinepatch_runtimestoragestart": RUNTIME_STORAGE_START,
+        "nds_scanner_context_slot": NDS_SCANNER_CONTEXT_SLOT,
+        "combinepatch_modestorage": MODE_STORAGE,
+        "offlinepatch_runtimestorageend": READ_WRITE_MAPPED_END,
+    }
+    for name, expected in expected_runtime_symbols.items():
+        if sym[name] != expected:
+            raise ValueError(f"incorrect runtime storage symbol: {name}")
+    if NDS_SCANNER_CONTEXT_SLOT < IMAGE_BASE + len(base):
+        raise ValueError("scanner context slot unexpectedly lies in the code image")
+    nds_payload = patched[
+        sym["ndssources_payloadbegin"] - IMAGE_BASE:
+        sym["ndssources_payloadend"] - IMAGE_BASE
+    ]
+    if NDS_SCANNER_CONTEXT_SLOT.to_bytes(4, "little") not in nds_payload:
+        raise ValueError("NDS scanner payload does not reference its runtime slot")
+    if (0x00329FF8).to_bytes(4, "little") in nds_payload:
+        raise ValueError("NDS scanner payload still references the stock resource table")
+
+    trampoline_routes = (
+        ("ndssources_originalreadsave", 0xE92D4008, 0x0021A7E4),
+        ("ndssources_originalreadgamecode", 0xE92D40F0, 0x0021AA10),
+        ("ndssources_originalwritesave", 0xE92D4FFF, 0x0021AB54),
+    )
+    for name, prologue, continuation in trampoline_routes:
+        address = sym[name]
+        if word(patched, address) != prologue:
+            raise ValueError(f"incorrect stock prologue replay in {name}")
+        target, link, condition = branch_target(patched, address + 4)
+        if (target, link, condition) != (continuation, False, 0xE):
+            raise ValueError(f"incorrect stock continuation in {name}")
+
+    # Preserve discovery, the asynchronous worker, save validation, and card
+    # I/O bodies. Only the three entry instructions are redirected.
+    # 保留原版来源发现、异步作业、存档校验及卡带 I/O 函数体；只转接三个入口指令。
+    for start, end in ((0x0019A94C, 0x0019AF04),
+                       (0x0021A7E4, 0x0021AA0C), (0x0021AA10, 0x0021AB50),
+                       (0x0021AB54, 0x0021ADCC), (0x00243510, 0x00243AC0),
+                       (0x00244D2C, 0x002450F4)):
+        if patched[start - IMAGE_BASE:end - IMAGE_BASE] != base[start - IMAGE_BASE:end - IMAGE_BASE]:
+            raise ValueError(f"native source/save implementation changed: {start:08X}-{end:08X}")
 
     messages = load_helper(Path(__file__).resolve().parents[1] / "src" / "patch_messages.py")
     for archive in messages.ARCHIVES:

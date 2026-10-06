@@ -17,7 +17,7 @@ ARCHIVES = ("0/0/4", "0/0/5", "0/0/6", "0/0/7", "0/0/8", "0/0/9",
 MESSAGE_FILE_INDEX = 23
 TITLE_HOME_LINE = 39
 TITLE_OFFLINE_LINE = 67
-TITLE_ORIGINAL_LINE = 68
+TITLE_ONLINE_LINE = 68
 STOCK_INITIAL_CONNECT_LINE = 13
 STOCK_BANK_CONNECT_LINE = 15
 STOCK_SAVE_LINE = 9
@@ -107,17 +107,17 @@ TITLE_OFFLINE = {
     "0/1/3": f"目前模式：離線模式（按{R_BUTTON}鍵切換模式）",
 }
 
-TITLE_ORIGINAL = {
-    "0/0/4": f"現在のモード：オリジナル（{R_BUTTON}で切替）",
-    "0/0/5": f"現在のモード：オリジナル（{R_BUTTON}で切替）",
-    "0/0/6": f"Current: Original ({R_BUTTON}:switch mode)",
-    "0/0/7": f"Mode : original ({R_BUTTON} : changer)",
-    "0/0/8": f"Modalità: originale ({R_BUTTON}: cambia modo)",
-    "0/0/9": f"Modus: Original ({R_BUTTON}: Modus wechseln)",
-    "0/1/0": f"Modo: original ({R_BUTTON}: cambiar modo)",
-    "0/1/1": f"현재 모드: 원본 ({R_BUTTON}로 전환)",
-    "0/1/2": f"当前模式：原版模式（按{R_BUTTON}键切换模式）",
-    "0/1/3": f"目前模式：原版模式（按{R_BUTTON}鍵切換模式）",
+TITLE_ONLINE = {
+    "0/0/4": f"現在のモード：オンライン（{R_BUTTON}で切替）",
+    "0/0/5": f"現在のモード：オンライン（{R_BUTTON}で切替）",
+    "0/0/6": f"Current: Online ({R_BUTTON}:switch mode)",
+    "0/0/7": f"Mode : en ligne ({R_BUTTON} : changer)",
+    "0/0/8": f"Modalità: online ({R_BUTTON}: cambia modo)",
+    "0/0/9": f"Modus: Online ({R_BUTTON}: Modus wechseln)",
+    "0/1/0": f"Modo: en línea ({R_BUTTON}: cambiar modo)",
+    "0/1/1": f"현재 모드: 온라인 ({R_BUTTON}로 전환)",
+    "0/1/2": f"当前模式：在线模式（按{R_BUTTON}键切换模式）",
+    "0/1/3": f"目前模式：在線模式（按{R_BUTTON}鍵切換模式）",
 }
 
 
@@ -142,8 +142,8 @@ def main() -> None:
             return message_codec.u16(original, section_offset + 4 + line * 8 + 6)
 
         offline_title = f"{TITLE_HOME_SHORT[archive]}\n{TITLE_OFFLINE[archive]}"
-        original_title = f"{TITLE_HOME_SHORT[archive]}\n{TITLE_ORIGINAL[archive]}"
-        for mode, text in (("offline", offline_title), ("original", original_title)):
+        online_title = f"{TITLE_HOME_SHORT[archive]}\n{TITLE_ONLINE[archive]}"
+        for mode, text in (("offline", offline_title), ("online", online_title)):
             if len(text) > TITLE_TEXT_BUFFER_LENGTH:
                 raise ValueError(
                     f"{archive} {mode} title text exceeds "
@@ -155,7 +155,7 @@ def main() -> None:
             {},
             (
                 (offline_title, flags(TITLE_HOME_LINE)),
-                (original_title, flags(TITLE_HOME_LINE)),
+                (online_title, flags(TITLE_HOME_LINE)),
                 (INTERNET_MESSAGES[archive], flags(STOCK_INITIAL_CONNECT_LINE)),
                 (BANK_CONNECTION_MESSAGES[archive], flags(STOCK_BANK_CONNECT_LINE)),
                 (SAVE_MESSAGES[archive], flags(STOCK_SAVE_LINE)),
@@ -169,7 +169,7 @@ def main() -> None:
         expected = {
             TITLE_HOME_LINE: original_lines[TITLE_HOME_LINE],
             TITLE_OFFLINE_LINE: offline_title,
-            TITLE_ORIGINAL_LINE: original_title,
+            TITLE_ONLINE_LINE: online_title,
             INITIAL_CONNECT_LINE: INTERNET_MESSAGES[archive],
             BANK_CONNECT_LINE: BANK_CONNECTION_MESSAGES[archive],
             SAVE_LINE: SAVE_MESSAGES[archive],

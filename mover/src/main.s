@@ -16,14 +16,14 @@
 .definelabel CombinePatch_CodeEnd, MoverCombine_CodeCaveEnd
 .definelabel CombinePatch_OfflinePayloadStart, 0x0028D2E0
 .definelabel CombinePatch_OfflinePayloadEnd,   OfflinePatch_VersionStorageStart
-.definelabel CombinePatch_ModeStorage,         0x00329FFC
+.definelabel CombinePatch_ModeStorage,         OfflinePatch_RuntimeStorageStart + 4
 .definelabel CombinePatch_ModeOffline,         0
-.definelabel CombinePatch_ModeOriginal,        1
+.definelabel CombinePatch_ModeOnline,          1
 .definelabel CombinePatch_SessionModeOffset,   0
 .definelabel CombinePatch_SelectedModeOffset,  1
 .definelabel CombinePatch_TitleRPreviousOffset,2
 .definelabel CombinePatch_TitleOfflineMessage, 67
-.definelabel CombinePatch_TitleOriginalMessage,68
+.definelabel CombinePatch_TitleOnlineMessage,  68
 .definelabel CombinePatch_InitialConnectMessage,69
 .definelabel CombinePatch_BankConnectMessage,  70
 .definelabel CombinePatch_SaveMessage,         71
@@ -40,9 +40,9 @@
 .org MoverTitleState_Update
     b CombinePatch_TitleStateUpdate
 
-// Every offline hook is routed through a mode-aware wrapper. Original mode
+// Every offline hook is routed through a mode-aware wrapper. Online mode
 // replays the exact overwritten instruction or enters the untouched function.
-// 所有离线钩子均经由模式包装函数分派。原版模式会精确重放被覆盖指令，或进入
+// 所有离线钩子均经由模式包装函数分派。在线模式会精确重放被覆盖指令，或进入
 // 未修改函数的后续位置。
 .org MoverNetworkState_Update
     b CombinePatch_NetworkUpdate
@@ -84,6 +84,25 @@
     b CombinePatch_DisconnectSkipRemoteJob
 .org MoverFlow_RemoteCheckSuccessState
     beq CombinePatch_RemoteCheckSuccessState
+
+// Shared source discovery keeps the stock list and save-validation state, but
+// supplies SD-backed Gen 5 candidates at the three native card I/O edges in
+// both session modes. Physical-card winners continue through exact prologue
+// trampolines into the untouched implementations.
+// 公共来源发现保留原版列表与存档校验状态，并在两种会话模式中通过三个原生卡带 I/O
+// 边界提供 SD 上的第五世代候选。实体卡带胜出项经精确序言跳板进入未修改实现。
+.org MoverSourceList_UpdateVtableSlot
+    .word NdsSources_ListUpdate + 1
+.org MoverSourceSelection_IdCompare
+    bl CombinePatch_SelectNdsSource
+.org MoverVcSource_IncrementCount
+    bl CombinePatch_VcSourceAdded
+.org MoverNds_ReadSave
+    b CombinePatch_NdsReadSaveEntry
+.org MoverNds_ReadGameCode
+    b CombinePatch_NdsReadGameCodeEntry
+.org MoverNds_WriteSave
+    b CombinePatch_NdsWriteSaveEntry
 
 .org MoverSave_SkipRemoteJob
     b CombinePatch_SaveSkipRemoteJob
@@ -175,8 +194,8 @@ CombinePatch_TitleProcessModeToggle:
     ldr r0,[r4,#0x38]
     cmp r0,#0
     beq @@done
-    cmp r3,#CombinePatch_ModeOriginal
-    moveq r3,#CombinePatch_TitleOriginalMessage
+    cmp r3,#CombinePatch_ModeOnline
+    moveq r3,#CombinePatch_TitleOnlineMessage
     movne r3,#CombinePatch_TitleOfflineMessage
     mov r1,#1
     mov r2,#0x10
@@ -210,7 +229,8 @@ CombinePatch_NetworkUpdate:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12]
     cmp r12,#CombinePatch_ModeOffline
-    beq OfflinePatch_NetworkUpdate
+    ldreq r12,=OfflinePatch_NetworkUpdate + 1
+    bxeq r12
     push {r4-r6,lr}
     b MoverNetworkState_Update + 4
 
@@ -218,7 +238,8 @@ CombinePatch_RemoteCheckUpdate:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12]
     cmp r12,#CombinePatch_ModeOffline
-    beq OfflinePatch_RemoteCheckUpdate
+    ldreq r12,=OfflinePatch_RemoteCheckUpdate + 1
+    bxeq r12
     push {r4-r8,lr}
     b MoverRemoteCheckState_Update + 4
 
@@ -242,7 +263,8 @@ CombinePatch_NoTransferUpdate:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12]
     cmp r12,#CombinePatch_ModeOffline
-    beq OfflinePatch_NoTransferUpdate
+    ldreq r12,=OfflinePatch_NoTransferUpdate + 1
+    bxeq r12
     push {r4-r6,lr}
     b MoverNoTransferState_Update + 4
 
@@ -250,7 +272,8 @@ CombinePatch_DisconnectUpdate:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12]
     cmp r12,#CombinePatch_ModeOffline
-    beq OfflinePatch_DisconnectUpdate
+    ldreq r12,=OfflinePatch_DisconnectUpdate + 1
+    bxeq r12
     push {r4,lr}
     b MoverDisconnectState_Update + 4
 
@@ -260,7 +283,8 @@ CombinePatch_Gen5Validation:
     cmp r12,#CombinePatch_ModeOffline
     bne @@original
     mov r0,r5
-    bl OfflinePatch_PrepareGen5Validation
+    ldr r12,=OfflinePatch_PrepareGen5Validation + 1
+    blx r12
     cmp r0,#0
     beq MoverGetPokemon_UpdateWaitingReturn
     b MoverGetPokemon_Gen5LocalContinuation
@@ -274,7 +298,8 @@ CombinePatch_Gen12Validation:
     cmp r12,#CombinePatch_ModeOffline
     bne @@original
     mov r0,r5
-    bl OfflinePatch_PrepareGen12Validation
+    ldr r12,=OfflinePatch_PrepareGen12Validation + 1
+    blx r12
     b MoverGetPokemon_Gen12LocalContinuation
 @@original:
     ldr r0,=0x003293A8
@@ -315,7 +340,8 @@ CombinePatch_Stage:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12]
     cmp r12,#CombinePatch_ModeOffline
-    beq OfflinePatch_Stage
+    ldreq r12,=OfflinePatch_Stage + 1
+    bxeq r12
     b 0x0023E9EC
 
 CombinePatch_SaveWait:
@@ -324,7 +350,8 @@ CombinePatch_SaveWait:
     cmp r12,#CombinePatch_ModeOffline
     bne @@original
     mov r0,r4
-    bl OfflinePatch_SaveDisplayDelayUpdate
+    ldr r12,=OfflinePatch_SaveDisplayDelayUpdate + 1
+    blx r12
     b MoverSave_UpdateEpilogue
 @@original:
     ldrb r1,[r4,#0x44]
@@ -334,7 +361,8 @@ CombinePatch_Commit:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12]
     cmp r12,#CombinePatch_ModeOffline
-    beq OfflinePatch_Commit
+    ldreq r12,=OfflinePatch_Commit + 1
+    bxeq r12
     b 0x0019B91C
 
 CombinePatch_AfterCommit:
@@ -349,7 +377,8 @@ CombinePatch_Rollback:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12]
     cmp r12,#CombinePatch_ModeOffline
-    beq OfflinePatch_Rollback
+    ldreq r12,=OfflinePatch_Rollback + 1
+    bxeq r12
     b 0x0019B7D0
 
 CombinePatch_AfterRollback:
@@ -360,9 +389,9 @@ CombinePatch_AfterRollback:
     movne r0,#0x0D
     b 0x0024A4C0
 
-// Select appended offline lines without replacing any stock message. Original
+// Select appended offline lines without replacing any stock message. Online
 // mode keeps the unmodified message IDs and therefore the original resources.
-// 选择追加的离线文本，不替换任何原版消息。原版模式保持原消息编号，因此继续
+// 选择追加的离线文本，不替换任何原版消息。在线模式保持原消息编号，因此继续
 // 使用原始资源。
 CombinePatch_SelectInitialConnectMessage:
     ldr r12,=CombinePatch_ModeStorage
@@ -397,9 +426,9 @@ CombinePatch_SelectDisconnectMessage:
     bx lr
     .pool
 
-// The single-byte test policy affects Original Mode only. Offline Mode always
+// The single-byte test policy affects Online Mode only. Offline Mode always
 // supplies local ticket results through the same native job interfaces.
-// 单字节测试策略只影响原版模式。离线模式始终经原版作业接口提供本地票据结果。
+// 单字节测试策略只影响在线模式。离线模式始终经原版作业接口提供本地票据结果。
 CombinePatch_OnlineTicketBypass:
     .byte ONLINE_TICKET_CHECK_BYPASS
     .align 4
@@ -463,13 +492,71 @@ CombinePatch_TicketUnbindLocal:
     .pool
 CombinePatch_TicketWrappersEnd:
 
+// Preserve the selected source ID and restore the original comparison flags
+// after pinning the associated SD path.
+// 固定相应 SD 路径后保留所选来源 ID，并恢复原比较指令的标志位。
+CombinePatch_SelectNdsSource:
+    push {r1-r3,lr}
+    ldr r12,=NdsSources_SelectListId + 1
+    blx r12
+    pop {r1-r3,lr}
+    cmp r0,#5
+    bx lr
+
+// The stock 40-entry array assumes at most one Gen 5 cartridge plus 39 VC
+// sources. Shared SD discovery can contribute four Gen 5 entries, so end the
+// native VC scan as soon as the combined count reaches 40 in either mode.
+// 原版 40 项数组按“最多一个第五世代卡带＋39 个 VC 来源”设计。公共 SD 来源发现可加入
+// 四个第五世代来源，因此两种模式都会在总数达到 40 时结束原生 VC 扫描。
+CombinePatch_VcSourceAdded:
+    strh r0,[r6,#0x58]
+    ldrh r1,[r6,#0x5A]
+    add r1,r1,r0
+    cmp r1,#40
+    movhs r7,#39
+    bx lr
+    .pool
+
+// Exact entry trampolines for the three stock card operations.
+// 三个原版卡带操作的精确入口跳板。
+NdsSources_OriginalReadSave:
+    push {r3,lr}
+    b MoverNds_ReadSave + 4
+NdsSources_OriginalReadGameCode:
+    push {r4-r7,lr}
+    b MoverNds_ReadGameCode + 4
+NdsSources_OriginalWriteSave:
+    push {r0-r3,r4-r11,lr}
+    b MoverNds_WriteSave + 4
+
+// ARM entry veneers switch to the compact Thumb implementations without
+// changing the three stock call sites' ABI.
+// ARM 入口跳板切换到精简的 Thumb 实现，同时保持三个原版调用点的 ABI 不变。
+CombinePatch_NdsReadSaveEntry:
+    ldr r12,=NdsSources_ReadSave + 1
+    bx r12
+CombinePatch_NdsReadGameCodeEntry:
+    ldr r12,=NdsSources_ReadGameCode + 1
+    bx r12
+CombinePatch_NdsWriteSaveEntry:
+    ldr r12,=NdsSources_WriteSave + 1
+    bx r12
+    .pool
+
+// Stay within the existing payload bounds. The known startup-initializer
+// overlap is tracked separately; this change does not expand that range.
+// 保持现有荷载边界。已知启动初始化覆盖问题另行处理，本次不扩大该区域。
+// Bankdata and SD sources share one filesystem implementation. TLS/SVC
+// primitives remain ARM; the checked file operations use Thumb.
+// Bankdata 与 SD 来源共用一份文件系统实现。TLS／SVC 原语保留 ARM，其余带检查
+// 的文件操作采用 Thumb。
 FsHelpers_PayloadBegin:
     .importobj "../build/fs_helpers.o"
 FsHelpers_PayloadEnd:
 
-LocalTicket_PayloadBegin:
-    .importobj "../build/local_ticket.o"
-LocalTicket_PayloadEnd:
+NdsSources_PayloadBegin:
+    .importobj "../build/nds_sources.o"
+NdsSources_PayloadEnd:
 
 CombinePatch_CodeUsedEnd:
 .endarea
@@ -483,12 +570,13 @@ CombinePatch_CodeUsedEnd:
 .endarea
 
 .org CombinePatch_OfflinePayloadStart
-.area 0x0028DD00-CombinePatch_OfflinePayloadStart
+.area CombinePatch_OfflinePayloadEnd-CombinePatch_OfflinePayloadStart
 OfflinePatch_EligibilityEntry:
     ldr r1,[r0,#0x10]
     cmp r1,#7
     bhs @@resumeNative
-    b OfflinePatch_EligibilityUpdate
+    ldr r12,=OfflinePatch_EligibilityUpdate + 1
+    bx r12
 @@resumeNative:
     push {r4-r6,lr}
     b MoverTransferEligibilityState_Update + 4
@@ -506,11 +594,15 @@ OfflinePatch_GetPokemonEntry:
     b MoverGetPokemonState_Update + 4
     .pool
 
-// Keep the remaining feature modules consecutive before 0x0028DD00. The
-// immediately following dedicated area is reserved for the external
-// Transporter Redirect Patch and must remain identical to the stock image.
-// 其余功能模块在 0x0028DD00 之前连续排列。紧随其后的独立区域
-// 专门保留给外部 Transporter Redirect Patch，必须与原版镜像保持一致。
+// Keep all remaining feature modules consecutive in the executable tail.
+// The former external redirect reservation is deliberately gone: this patch
+// now owns the native card I/O hooks and provides the more capable scanner.
+// 其余功能模块在可执行尾部连续排列。原外部重定向预留已刻意移除：本补丁现在接管
+// 原生卡带 I/O 钩子，并提供功能更完整的扫描器。
+LocalTicket_PayloadBegin:
+    .importobj "../build/local_ticket.o"
+LocalTicket_PayloadEnd:
+
 BankdataRedirect_PayloadBegin:
     .importobj "../build/bankdata_redirect.o"
 BankdataRedirect_PayloadEnd:
@@ -522,26 +614,14 @@ OfflineFlow_PayloadEnd:
 PatchPaths_PayloadBegin:
     .importobj "../build/patch_paths.o"
 PatchPaths_PayloadEnd:
-CombinePatch_OfflinePayloadUsedEnd:
-.endarea
 
-// Protect only the external patch's aligned 0xE0-byte payload allocation.
-// This area intentionally emits no bytes. 0x0028DDE0..0x0028DFC0 remains
-// available for future payloads maintained by this project.
-// 仅保护外部补丁对齐后的 0xE0 字节载荷区。该区域刻意不输出任何
-// 字节；0x0028DDE0..0x0028DFC0 仍可供本项目以后的载荷使用。
-.org 0x0028DD00
-.area 0xE0
-.endarea
-
-// The per-slot local validation adapter occupies this project's free tail
-// immediately after the external redirect reservation.
-// 逐槽本地校验适配器放在外部重定向补丁保留区之后的本项目可用尾部空间。
-.org 0x0028DDE0
-.area OfflinePatch_VersionStorageStart-0x0028DDE0
 LocalValidation_PayloadBegin:
     .importobj "../build/local_validation.o"
 LocalValidation_PayloadEnd:
+NdsFs_PayloadBegin:
+    .importobj "../build/nds_fs.o"
+NdsFs_PayloadEnd:
+CombinePatch_OfflinePayloadUsedEnd:
 .endarea
 
 // Reserve the final 64 bytes of the mapped text segment as a zero-padded ASCII

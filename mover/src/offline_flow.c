@@ -41,8 +41,8 @@ int OfflinePatch_RemoteCheckUpdate(MoverStateView *state)
         (MoverCommonDataPrefixView *)state->sharedData;
     if (shared) {
         /* Offline mode has no remote transaction. Clear data that may remain
-           after returning from an original-mode attempt in the same process. */
-        /* 离线模式没有远端事务。清除同一进程内从原版模式返回后可能残留的
+           after returning from an online-mode attempt in the same process. */
+        /* 离线模式没有远端事务。清除同一进程内从在线模式返回后可能残留的
            事务数据。 */
         shared->transaction.dataId=0;
         shared->transaction.currentVersion=0;
