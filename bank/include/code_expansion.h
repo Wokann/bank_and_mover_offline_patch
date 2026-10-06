@@ -14,5 +14,6 @@ enum CodeExpansionConstant {
 /* Enable the added pages; only identified Azahar may retain an unhandled SVC. */
 /* 启用新增页；仅已识别的 Azahar 可兼容未处理的 SVC。 */
 s32 CodeExpansion_Enable(u32 address,u32 size);
+int CodeExpansion_IsAzahar(void) __attribute__((noinline));
 
 #endif

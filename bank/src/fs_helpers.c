@@ -3,71 +3,79 @@
 
 /* Shared checked SD filesystem implementation used by both local backends. */
 /* Bankdata 与 Turtle 本地后端共用的带检查 SD 文件系统实现。 */
-static volatile u32 *commandBuffer(void)
+volatile u32 *fsCommandBuffer(void)
 {
     u32 tls;
     __asm__ volatile("mrc p15, 0, %0, c13, c0, 3" : "=r"(tls));
     return (volatile u32 *)(tls + 0x80u);
 }
 
-static s32 sync(u32 handle)
+s32 fsSync(u32 handle)
 {
     register u32 r0 __asm__("r0") = handle;
     __asm__ volatile("svc 0x32" : "+r"(r0) : : "r1", "r2", "r3", "r12", "memory", "cc");
     return (s32)r0;
 }
 
+s32 fsCloseHandle(u32 handle)
+{
+    register u32 r0 __asm__("r0")=handle;
+    __asm__ volatile("svc 0x23":"+r"(r0)::
+        "r1","r2","r3","r12","memory","cc");
+    return (s32)r0;
+}
+
 s32 openArchive(u64 *archive)
 {
-    volatile u32 *c = commandBuffer();
+    volatile u32 *c = fsCommandBuffer();
     s32 r;
     c[0]=FSUSER_CMD_OPEN_ARCHIVE; c[1]=FS_ARCHIVE_ID_SDMC; c[2]=FS_PATH_TYPE_EMPTY; c[3]=1;
     c[4]=(1u<<14)|2u; c[5]=(u32)emptyPath;
-    r=sync(*FSUSER_HandleSlot); if (r) return r; r=(s32)c[1];
+    r=fsSync(*FSUSER_HandleSlot); if (r) return r; r=(s32)c[1];
     if (!r) *archive=(u64)c[2]|((u64)c[3]<<32);
     return r;
 }
 
 void closeArchive(u64 archive)
 {
-    volatile u32 *c=commandBuffer();
+    volatile u32 *c=fsCommandBuffer();
     c[0]=FSUSER_CMD_CLOSE_ARCHIVE; c[1]=(u32)archive; c[2]=(u32)(archive>>32);
-    (void)sync(*FSUSER_HandleSlot);
+    (void)fsSync(*FSUSER_HandleSlot);
 }
 
 s32 pathCommand(u32 command,u64 archive,const char *path,u32 pathSize)
 {
-    volatile u32 *c=commandBuffer(); s32 result;
+    volatile u32 *c=fsCommandBuffer(); s32 result;
     c[0]=command; c[1]=0; c[2]=(u32)archive; c[3]=(u32)(archive>>32);
     c[4]=FS_PATH_TYPE_ASCII; c[5]=pathSize; c[6]=(pathSize<<14)|2u; c[7]=(u32)path;
-    result=sync(*FSUSER_HandleSlot);
+    result=fsSync(*FSUSER_HandleSlot);
     return result?result:(s32)c[1];
 }
 
 static void createDirectory(u64 archive,const char *path,u32 pathSize)
 {
-    volatile u32 *c=commandBuffer();
+    volatile u32 *c=fsCommandBuffer();
     c[0]=FSUSER_CMD_CREATE_DIRECTORY; c[1]=0; c[2]=(u32)archive; c[3]=(u32)(archive>>32);
     c[4]=FS_PATH_TYPE_ASCII; c[5]=pathSize; c[6]=0; c[7]=(pathSize<<14)|2u; c[8]=(u32)path;
-    (void)sync(*FSUSER_HandleSlot);
+    (void)fsSync(*FSUSER_HandleSlot);
 }
 
 s32 renamePath(u64 archive,const char *from,u32 fromSize,const char *to,u32 toSize)
 {
-    volatile u32 *c=commandBuffer(); s32 result;
+    volatile u32 *c=fsCommandBuffer(); s32 result;
     c[0]=FSUSER_CMD_RENAME_FILE; c[1]=0; c[2]=(u32)archive; c[3]=(u32)(archive>>32);
     c[4]=FS_PATH_TYPE_ASCII; c[5]=fromSize; c[6]=(u32)archive; c[7]=(u32)(archive>>32);
     c[8]=FS_PATH_TYPE_ASCII; c[9]=toSize; c[10]=(fromSize<<14)|0x402u; c[11]=(u32)from;
     c[12]=(toSize<<14)|0x802u; c[13]=(u32)to;
-    result=sync(*FSUSER_HandleSlot);
+    result=fsSync(*FSUSER_HandleSlot);
     return result?result:(s32)c[1];
 }
 
 s32 setSize(u32 handle,u64 size)
 {
-    volatile u32 *c=commandBuffer(); s32 result;
+    volatile u32 *c=fsCommandBuffer(); s32 result;
     c[0]=FSFILE_CMD_SET_SIZE; c[1]=(u32)size; c[2]=(u32)(size>>32);
-    result=sync(handle);
+    result=fsSync(handle);
     return result?result:(s32)c[1];
 }
 

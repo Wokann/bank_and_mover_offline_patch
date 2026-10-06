@@ -38,6 +38,10 @@ typedef s32 (*FSFILE_GetSizeFn)(u32 *,u64 *);
 #define FSUSER_CMD_CLOSE_ARCHIVE 0x080E0080u
 #define FSFILE_CMD_SET_SIZE 0x08050080u
 
+volatile u32 *fsCommandBuffer(void);
+s32 fsSync(u32 handle);
+s32 fsCloseHandle(u32 handle);
+
 s32 openArchive(u64 *archive);
 void closeArchive(u64 archive);
 s32 pathCommand(u32 command,u64 archive,const char *path,u32 pathSize);

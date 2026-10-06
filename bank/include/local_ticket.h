@@ -42,6 +42,26 @@ typedef struct BankTicketJobView {
     u32 currentDate[2];
 } BankTicketJobView;
 
+typedef s32 (*SRV_GetServiceHandleFn)(u32 *,const char *,s32,u32);
+typedef int (*TicketJob_InitializeFn)(BankTicketJobView *);
+
+#define SRV_GetServiceHandle ((SRV_GetServiceHandleFn)0x0023514Cu)
+#define TicketJob_Initialize ((TicketJob_InitializeFn)0x002A04C0u)
+#define LocalTicket_BackendStorage ((volatile u8 *)0x003FAFF4u)
+
+enum TicketProbeConstant {
+    TICKET_MODE_OFFLINE = 0,
+    TICKET_ALLOW_EMULATOR_FALLBACK = 1,
+    TICKET_BACKEND_NATIVE = 0,
+    TICKET_BACKEND_LOCAL = 1,
+    TICKET_SERVICE_NAME_LENGTH = 6,
+    TICKET_SERVICE_NONBLOCKING = 1,
+    TICKET_RIGHTS_REQUEST = 0x08210142,
+    TICKET_RIGHTS_UNIMPLEMENTED_REPLY = 0x08210040,
+    TICKET_PROBE_BUFFER_SIZE = 4,
+    TICKET_MAPPED_BUFFER_WRITE = 0x0C
+};
+
 enum BankTicketConstant {
     BANK_TICKET_ENTITLEMENT_DAYS = 999,
     BANK_TICKET_PURCHASE_COUNT_UNKNOWN = -1,
@@ -51,6 +71,8 @@ enum BankTicketConstant {
 };
 
 int LocalTicket_Initialize(BankTicketJobView *job,BankTicketSharedView *shared);
+int LocalTicket_InitializeSelected(BankTicketJobView *job,
+    BankTicketSharedView *shared,u32 mode,u32 allowEmulatorFallback);
 int LocalTicket_Poll(BankTicketJobView *job,u32 *result,u32 minimumDays);
 
 #endif

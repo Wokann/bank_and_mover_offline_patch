@@ -4,10 +4,10 @@
 
 .include "../include/symbol.inc"
 
-// 0: native online ticket/campaign checks; 1: local bypass for emulator tests.
-// Both routes remain in the image; the policy is stored as a single byte.
-// 0：联网模式走原版票据／活动检查；1：模拟器测试时提供本地结果。
-// 两条路线始终保留在镜像中；策略只占一个字节。
+// 0: require native online tickets (public build); 1: auto-fallback only when
+// identified Azahar lacks the ticket interface (test build). Offline stays local.
+// 0：联网必须使用真实票务接口（公开版）；1：仅确认 Azahar 缺接口时自动使用
+// 本地结果（测试版）。离线模式始终使用本地结果。
 .definelabel ONLINE_TICKET_CHECK_BYPASS, 0
 
 .definelabel OfflinePatch_VersionStorageSize,   0x40
@@ -428,35 +428,19 @@ CombinePatch_SelectDisconnectMessage:
     bx lr
     .pool
 
-// The single-byte test policy affects Online Mode only. Offline Mode always
-// supplies local ticket results through the same native job interfaces.
-// 单字节测试策略只影响在线模式。离线模式始终经原版作业接口提供本地票据结果。
-CombinePatch_OnlineTicketBypass:
-    .byte ONLINE_TICKET_CHECK_BYPASS
-    .align 4
-
-// Intercept only native job interfaces and the campaign request. Tail calls
-// preserve their ABI, the original BL return address and stack alignment.
-// 只转接原版作业接口及活动请求。尾调用保留 ABI、原 BL 返回地址与栈对齐。
+// Select once at job initialization; poll, campaign and cleanup use the stored
+// backend. Tail calls preserve the original BL return address and aligned stack.
+// 作业初始化时仅选择一次；轮询、活动和清理沿用保存的后端。
+// 尾调用保留原 BL 返回地址与栈对齐。
 CombinePatch_TicketInitialize:
-    ldr r12,=CombinePatch_ModeStorage
-    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
-    cmp r12,#CombinePatch_ModeOffline
-    beq CombinePatch_TicketInitializeLocal
-    ldr r12,=CombinePatch_OnlineTicketBypass
-    ldrb r12,[r12]
-    cmp r12,#0
-    bne CombinePatch_TicketInitializeLocal
-    b TicketJob_Initialize
-CombinePatch_TicketInitializeLocal:
     ldr r1,[r4,#0x28]
-    b LocalTicket_Initialize
-CombinePatch_TicketPoll:
     ldr r12,=CombinePatch_ModeStorage
-    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
-    cmp r12,#CombinePatch_ModeOffline
-    beq CombinePatch_TicketPollLocal
-    ldr r12,=CombinePatch_OnlineTicketBypass
+    ldrb r2,[r12,#CombinePatch_SessionModeOffset]
+    ldr r12,=CombinePatch_OnlineTicketFallback
+    ldrb r3,[r12]
+    b LocalTicket_InitializeSelected
+CombinePatch_TicketPoll:
+    ldr r12,=LocalTicket_BackendStorage
     ldrb r12,[r12]
     cmp r12,#0
     bne CombinePatch_TicketPollLocal
@@ -464,11 +448,7 @@ CombinePatch_TicketPoll:
 CombinePatch_TicketPollLocal:
     b LocalTicket_Poll
 CombinePatch_TicketCampaignRequest:
-    ldr r12,=CombinePatch_ModeStorage
-    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
-    cmp r12,#CombinePatch_ModeOffline
-    beq CombinePatch_TicketCampaignRequestLocal
-    ldr r12,=CombinePatch_OnlineTicketBypass
+    ldr r12,=LocalTicket_BackendStorage
     ldrb r12,[r12]
     cmp r12,#0
     bne CombinePatch_TicketCampaignRequestLocal
@@ -477,11 +457,7 @@ CombinePatch_TicketCampaignRequestLocal:
     mov r0,r4
     b LocalTicket_CampaignResult
 CombinePatch_TicketUnbind:
-    ldr r12,=CombinePatch_ModeStorage
-    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
-    cmp r12,#CombinePatch_ModeOffline
-    beq CombinePatch_TicketUnbindLocal
-    ldr r12,=CombinePatch_OnlineTicketBypass
+    ldr r12,=LocalTicket_BackendStorage
     ldrb r12,[r12]
     cmp r12,#0
     bne CombinePatch_TicketUnbindLocal
@@ -493,6 +469,9 @@ CombinePatch_TicketUnbindLocal:
     bx lr
     .pool
 CombinePatch_TicketWrappersEnd:
+CombinePatch_OnlineTicketFallback:
+    .byte ONLINE_TICKET_CHECK_BYPASS
+    .align 4
 
 // Preserve the selected source ID and restore the original comparison flags
 // after pinning the associated SD path.

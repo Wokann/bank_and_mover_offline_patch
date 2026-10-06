@@ -235,6 +235,7 @@ def main() -> None:
         raise ValueError("native startup registration code changed")
 
     required = {
+        "online_ticket_check_bypass", "combinepatch_onlineticketfallback",
         "combinepatch_codeusedend", "combinepatch_offlinepayloadusedend",
         "combinepatch_offlinepayloadstart", "textactualend", "textmappedend",
         "fshelpers_payloadbegin", "fshelpers_payloadend",
@@ -248,9 +249,10 @@ def main() -> None:
         "combinepatch_titletextinitialize", "combinepatch_titlestateupdate",
         "combinepatch_titleprocessmodetoggle", "combinepatch_networkupdate",
         "combinepatch_networkavailability",
-        "combinepatch_onlineticketbypass", "online_ticket_check_bypass",
         "combinepatch_modestorage", "combinepatch_ticketwrappersend",
         "localticket_initialize", "localticket_poll", "localticket_campaignresult",
+        "localticket_initializeselected", "localticket_backendstorage",
+        "srv_getservicehandle", "codeexpansion_isazahar",
         "combinepatch_eligibilityupdate", "combinepatch_getpokemonupdate",
         "combinepatch_saveskipremotejob",
         "offlinepatch_networkupdate", "offlinepatch_stage", "offlinepatch_commit",
@@ -269,8 +271,9 @@ def main() -> None:
         "codeexpansion_loaderbegin", "codeexpansion_loaderend",
     }
     for _, operation, native_name, _ in TICKET_INTERFACES:
-        required.update((f"combinepatch_ticket{operation}",
-                         f"combinepatch_ticket{operation}local", native_name))
+        required.update((f"combinepatch_ticket{operation}", native_name))
+        if operation != "initialize":
+            required.add(f"combinepatch_ticket{operation}local")
     missing = sorted(required - sym.keys())
     if missing:
         raise ValueError(f"missing armips symbols: {', '.join(missing)}")
@@ -496,39 +499,55 @@ def main() -> None:
         if patched[start - IMAGE_BASE:end - IMAGE_BASE] != base[start - IMAGE_BASE:end - IMAGE_BASE]:
             raise ValueError(f"native ticket implementation changed: {start:08X}-{end:08X}")
 
-    policy = sym["online_ticket_check_bypass"]
-    policy_address = sym["combinepatch_onlineticketbypass"]
     wrapper_start = sym["combinepatch_ticketinitialize"]
     wrapper_end = sym["combinepatch_ticketwrappersend"]
-    if policy not in (0, 1) or patched[policy_address - IMAGE_BASE] != policy:
-        raise ValueError("ONLINE_TICKET_CHECK_BYPASS must be a matching 0/1 byte")
-    if not code_start <= policy_address < wrapper_start < wrapper_end <= sym["fshelpers_payloadbegin"]:
-        raise ValueError("ticket policy/wrappers exceed the added pages")
+    if not code_start <= wrapper_start < wrapper_end <= sym["fshelpers_payloadbegin"]:
+        raise ValueError("ticket wrappers exceed the added pages")
+    policy = sym["online_ticket_check_bypass"]
+    policy_address = sym["combinepatch_onlineticketfallback"]
+    if policy not in (0, 1) or policy_address != wrapper_end or \
+            patched[policy_address - IMAGE_BASE] != policy:
+        raise ValueError("ticket fallback policy must be one byte: 0 native, 1 auto-test")
+    backend = sym["localticket_backendstorage"]
+    if backend != sym["offlinepatch_runtimestoragestart"] + 8:
+        raise ValueError("ticket backend flag overlaps native or scanner/mode storage")
+    if sym["srv_getservicehandle"] != 0x001E596C:
+        raise ValueError("Mover SRV entry point does not match its native image")
+    selector = sym["localticket_initializeselected"]
+    if not sym["localticket_payloadbegin"] <= selector < sym["localticket_payloadend"]:
+        raise ValueError("ticket selector is outside its module")
+    if word(patched, wrapper_start) != 0xE5941028 or \
+            word(patched, wrapper_start + 8) != 0xE5DC2000 or \
+            word(patched, wrapper_start + 16) != 0xE5DC3000:
+        raise ValueError("ticket selector arguments differ from job/shared/mode/policy ABI")
+    for offset, pointer in ((4, sym["combinepatch_modestorage"]),
+                            (12, policy_address)):
+        if arm_literal_value(patched, wrapper_start + offset, 12) != pointer:
+            raise ValueError("ticket initialization argument pointer differs")
+    if branch_target(patched, wrapper_start + 20) != (selector, False, 0xE):
+        raise ValueError("ticket initialization does not tail-call its backend selector")
     for _, operation, native_name, _ in TICKET_INTERFACES:
+        if operation == "initialize":
+            continue
         wrapper = sym[f"combinepatch_ticket{operation}"]
         local = sym[f"combinepatch_ticket{operation}local"]
-        if local != wrapper + 36:
+        if local != wrapper + 20:
             raise ValueError(f"incorrect ticket {operation} wrapper layout")
-        for offset, pointer in ((0, sym["combinepatch_modestorage"]),
-                                (16, policy_address)):
+        for offset, pointer in ((0, backend),):
             address = wrapper + offset
             instruction = word(patched, address)
             if instruction & 0xFFFFF000 != 0xE59FC000:
-                raise ValueError(f"ticket {operation} does not load its policy pointer")
+                raise ValueError(f"ticket {operation} does not load its selected-backend pointer")
             literal = address + 8 + (instruction & 0xFFF)
             if not wrapper_start <= literal < wrapper_end or word(patched, literal) != pointer:
-                raise ValueError(f"incorrect ticket {operation} policy literal")
+                raise ValueError(f"incorrect ticket {operation} backend literal")
             if word(patched, address + 4) != 0xE5DCC000 or word(patched, address + 8) != 0xE35C0000:
-                raise ValueError(f"ticket {operation} does not test the session/policy byte")
-        for offset, target, condition in ((12, local, 0x0), (28, local, 0x1),
-                                           (32, sym[native_name], 0xE)):
+                raise ValueError(f"ticket {operation} does not test its backend byte")
+        for offset, target, condition in ((12, local, 0x1),
+                                           (16, sym[native_name], 0xE)):
             if branch_target(patched, wrapper + offset) != (target, False, condition):
                 raise ValueError(f"incorrect ticket {operation} route")
-        if operation == "initialize":
-            if word(patched, local) != 0xE5941028 or \
-                    branch_target(patched, local + 4) != (sym["localticket_initialize"], False, 0xE):
-                raise ValueError("local ticket initialization loses the shared-data argument")
-        elif operation == "poll":
+        if operation == "poll":
             if branch_target(patched, local) != (sym["localticket_poll"], False, 0xE):
                 raise ValueError("local ticket poll is not a tail call")
         elif operation == "campaignrequest":

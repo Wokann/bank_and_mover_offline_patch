@@ -80,6 +80,8 @@
 .definelabel TicketJob_Initialize,               0x0023D3C0
 .definelabel TicketJob_Poll,                     0x0023E230
 .definelabel TicketJob_Unbind,                   0x0023E63C
+.definelabel SRV_GetServiceHandle,               0x001E596C
+.definelabel LocalTicket_BackendStorage,         OfflinePatch_RuntimeStorageStart + 8
 .definelabel MoverCampaign_Request,              0x0023BE4C
 .definelabel MoverRemoteCheckState_Update,      0x00248814
 .definelabel MoverTransferEligibilityState_Update, 0x00248C68

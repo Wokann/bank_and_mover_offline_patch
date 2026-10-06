@@ -1,5 +1,15 @@
 #include "code_expansion.h"
 
+int CodeExpansion_IsAzahar(void)
+{
+    register u32 r0 __asm__("r0")=0;
+    register u32 r1 __asm__("r1")=CODE_EXPANSION_EMULATOR_INFO;
+    register u32 r2 __asm__("r2")=0;
+    __asm__ volatile("svc 0x2A":"+r"(r0),"+r"(r1),"+r"(r2)::
+        "r3","r12","memory","cc");
+    return r0==0 && r1==CODE_EXPANSION_AZAHAR_ID && r2==0;
+}
+
 s32 CodeExpansion_Enable(u32 address,u32 size)
 {
     register u32 r0 __asm__("r0")=0;
@@ -15,14 +25,7 @@ s32 CodeExpansion_Enable(u32 address,u32 size)
     if ((s32)r0) return (s32)r0;
     process=r1;
 
-    {
-        register u32 r2 __asm__("r2")=0;
-        r0=0;
-        r1=CODE_EXPANSION_EMULATOR_INFO;
-        __asm__ volatile("svc 0x2A":"+r"(r0),"+r"(r1),"+r"(r2)::
-            "r3","r12","memory","cc");
-        isAzahar=r0==0 && r1==CODE_EXPANSION_AZAHAR_ID && r2==0;
-    }
+    isAzahar=CodeExpansion_IsAzahar();
 
     {
         register u32 r2 __asm__("r2")=address;

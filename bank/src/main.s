@@ -4,10 +4,10 @@
 
 .include "../include/symbol.inc"
 
-// 0: native online entitlement/campaign checks; 1: local bypass for emulator tests.
-// This value is stored as one byte; both dispatch paths remain in either build.
-// 0：联网模式走原版使用权／活动检查；1：模拟器测试时使用本地跳过逻辑。
-// 此值只占一个字节；两条分派路径在两种构建中都会保留。
+// 0: require native online tickets (public build); 1: auto-fallback only when
+// identified Azahar lacks the ticket interface (test build). Offline stays local.
+// 0：联网必须使用真实票务接口（公开版）；1：仅确认 Azahar 缺接口时自动使用
+// 本地结果（测试版）。离线模式始终使用本地结果。
 .definelabel ONLINE_TICKET_CHECK_BYPASS, 0
 
 // Offline behavior is the baseline. Mode wrappers branch to these native entry
@@ -727,12 +727,6 @@ CombinePatch_InitialRemoteRecordUpdate:
     b InitialRemoteRecordState_Update + 4
     .pool
 
-// One-byte online entitlement policy, independent of the selected session mode.
-// 单字节联网使用权策略，与选定的会话模式相互独立。
-CombinePatch_OnlineTicketBypass:
-    .byte ONLINE_TICKET_CHECK_BYPASS
-    .align 4
-
 CombinePatch_FirstPresentDispatch:
     cmp r0,#0
     beq RewardReceive_FirstPresentPath
@@ -1203,31 +1197,19 @@ UnlockMode_PayloadBegin:
 UnlockMode_PayloadEnd:
 CombinePatch_PayloadEnd:
 
-// Replace only the job interfaces in local/test sessions. Keep the native state,
-// constructor, result handling and destructor. Dispatch touches only caller-saved
-// r12; tail branches preserve the BL return address and stack alignment.
-// 本地／测试会话只替换作业接口，保留原版状态、构造、结果处理与析构。分派只使用
-// 易失的 r12；尾跳转保留 BL 返回地址与栈对齐。
+// Choose the job backend once at initialization; subsequent interfaces read
+// the stored result. Keep the native state, constructor and destructor.
+// 初始化时选择作业后端，后续接口读取已保存的结果。保留原版状态、构造与析构。
 .align 4
 CombinePatch_TicketInitialize:
-    ldr r12,=CombinePatch_ModeStorage
-    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
-    cmp r12,#CombinePatch_ModeOffline
-    beq CombinePatch_TicketInitializeLocal
-    ldr r12,=CombinePatch_OnlineTicketBypass
-    ldrb r12,[r12]
-    cmp r12,#0
-    bne CombinePatch_TicketInitializeLocal
-    b TicketJob_Initialize
-CombinePatch_TicketInitializeLocal:
     ldr r1,[r4,#0x28]
-    b LocalTicket_Initialize
-CombinePatch_TicketPoll:
     ldr r12,=CombinePatch_ModeStorage
-    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
-    cmp r12,#CombinePatch_ModeOffline
-    beq CombinePatch_TicketPollLocal
-    ldr r12,=CombinePatch_OnlineTicketBypass
+    ldrb r2,[r12,#CombinePatch_SessionModeOffset]
+    ldr r12,=CombinePatch_OnlineTicketFallback
+    ldrb r3,[r12]
+    b LocalTicket_InitializeSelected
+CombinePatch_TicketPoll:
+    ldr r12,=LocalTicket_BackendStorage
     ldrb r12,[r12]
     cmp r12,#0
     bne CombinePatch_TicketPollLocal
@@ -1235,11 +1217,7 @@ CombinePatch_TicketPoll:
 CombinePatch_TicketPollLocal:
     b LocalTicket_Poll
 CombinePatch_TicketUnbind:
-    ldr r12,=CombinePatch_ModeStorage
-    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
-    cmp r12,#CombinePatch_ModeOffline
-    beq CombinePatch_TicketUnbindLocal
-    ldr r12,=CombinePatch_OnlineTicketBypass
+    ldr r12,=LocalTicket_BackendStorage
     ldrb r12,[r12]
     cmp r12,#0
     bne CombinePatch_TicketUnbindLocal
@@ -1251,6 +1229,9 @@ CombinePatch_TicketUnbindLocal:
     bx lr
     .pool
 CombinePatch_TicketWrappersEnd:
+CombinePatch_OnlineTicketFallback:
+    .byte ONLINE_TICKET_CHECK_BYPASS
+    .align 4
 CombinePatch_CodeUsedEnd:
 .endarea
 

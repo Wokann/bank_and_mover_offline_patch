@@ -36,8 +36,10 @@ The project tail area is `0x0028D2E0–0x0028DFC0`; the final
 identifier. The integrated Gen 5 source redirect owns the native cartridge I/O
 hooks, so the external Transporter Redirect Patch's `0xE0` reservation is
 removed. Assembly limits and static verification still protect LayeredFS and
-the version marker. All feature objects use the added-page layout below;
-environment detection changes only the startup permission-result policy.
+the version marker. All feature objects use the added-page layout below.
+The loader and ticket test policy share the environment-identification helper;
+the latter also checks ticket-interface replies rather than assuming that the
+environment alone establishes ticket support.
 
 `0x00261C74–0x00262C10` is part of an active native global-registration
 initializer, not a reclaimable gap. Startup enters `0x00102ADC`, which walks
@@ -49,8 +51,8 @@ byte for byte. No native ticket-job or free-campaign function is reclaimed.
 
 | Payload area | Modules | Used end / remaining space |
 |---|---|---|
-| Text tail `0x0028D2E0–0x0028DFC0`: mapped executable padding | Startup trampoline and automatic-environment `code_expansion.o` | `0x0028D3B0` / `0xC10` bytes |
-| Added pages `0x00365000–0x00367000`: extended data, executable after startup | All mode wrappers, native trampolines, and feature objects | `0x00366C06` / `0x3FA` bytes |
+| Text tail `0x0028D2E0–0x0028DFC0`: mapped executable padding | Startup trampoline and automatic-environment `code_expansion.o` | `0x0028D3C0` / `0xC00` bytes |
+| Added pages `0x00365000–0x00367000`: extended data, executable after startup | All mode wrappers, native trampolines, and feature objects | `0x00366D26` / `0x2DA` bytes |
 
 The startup hook redirects only the call at `0x00100010` to the small loader.
 It preserves `r0–r12/LR`, duplicates the current-process pseudo-handle with SVC
@@ -107,6 +109,7 @@ addresses do not move.
 
 The scanner allocates a `0xE60`-byte context from the native heap on demand.
 Its pointer uses `0x00363FF0`, and the three mode bytes begin at `0x00363FF4`.
+The current ticket-job backend is stored at `0x00363FF8`.
 These addresses are after the logical BSS end `0x003638A4` and before the RW
 page end `0x00364000`, rather than in the native resource-pointer table at
 `0x00329FF8/0x00329FFC`. Source scanning ignores the mode bytes and is shared
@@ -200,7 +203,8 @@ together. Use `SD:/luma/titles/00040000000C9C00/` with Luma game patching enable
 on hardware, or the user directory's `load/mods/00040000000C9C00/` with a full
 `0x800`-byte ExHeader in Azahar. Remove stale `code.ips` and `code.bin` from that
 directory. No expansion macro or platform-specific layout is required. The
-ticket-test switch is separate and is not automatically changed by this detection.
+ticket policy separately enables missing-interface fallback. Its test setting
+reuses environment detection but probes ticket replies, not permission results.
 
 This project's new contribution is the unified combination of fixed-address
 data-tail expansion, BPS target-length loading, and Azahar identity/unhandled-SVC
@@ -219,17 +223,20 @@ The native ticket state is `0x00249600`; its local substate is at state `+0x10`.
 Both modes retain this function, callback `0x0024991C` and cleanup `0x00249CD8`.
 Only these interfaces are routed:
 
-| Call site | Native function | Offline or test policy `1` | Online Mode, policy `0` |
+| Call site | Native function | Selected local backend: Offline, or test policy `1` with a confirmed missing Azahar interface | Selected native backend: public policy `0`, or other online cases |
 |---|---|---|---|
 | `0x00249754` | `0x0023D3C0` initialization | Populate local job fields; return `0` on failure | Original call and arguments |
 | `0x00249774` | `0x0023E230` polling | Report completion and successful result | Original call and arguments |
 | `0x00249818` | `0x0023BE4C` free-campaign request | No campaign; set substate `3` | Original request and asynchronous callback |
 | `0x00249CEC` | `0x0023E63C` unbind | No client was bound; proceed with destruction | Original unbind |
 
-The wrappers use caller-temporary `r12` for mode/policy checks. Tail calls
-preserve the original `BL` return address and stack. Only local initialization
-loads shared data from state `+0x28` into `r1`; only local campaign completion
-passes the state in `r0`. Native routes preserve their original arguments.
+Initialization keeps the job in `r0`, loads shared state `+0x28` into `r1`,
+passes mode/policy in `r2/r3`, and tail-calls the C selector. Its native route
+passes only the job to native initialization. The backend is selected once and
+stored at `0x00363FF8`. Polling, campaign and unbinding use only volatile `r12`
+to read that flag; local campaign completion passes the state in `r0`, while
+native routes preserve their original arguments. The original `BL` return
+address, stack alignment and callee-saved registers are preserved.
 
 | Substate / node | Native flow | Local-result flow |
 |---|---|---|
@@ -263,10 +270,23 @@ purchase count remains `-1`; the free-campaign flag at `+0x335` is `0`.
 This does not calculate Poke Miles or change Bankdata transactions or Pokemon
 validation.
 
-`ONLINE_TICKET_CHECK_BYPASS` defaults to `0` and selects local test results only
-in Online Mode; Offline Mode always uses local interfaces. Setting `1` does
-not replace NNID authentication, other server requests or remote permission.
-It is for emulator testing, not evidence of server-side transfer approval.
+Public releases set `ONLINE_TICKET_CHECK_BYPASS` to `0`: Online Mode uses native
+tickets, retaining errors for missing interfaces or failed checks rather than
+fabricating results. Policy `1` allows a read-only probe only in identified
+Azahar. Only the exact short-success unimplemented reply and successful handle
+closure select local results. Full replies, missing tickets, service/transport
+errors and unknown responses stay native. Offline Mode is unaffected.
+The subproject README documents the request/reply criteria; the probe adds no
+ExHeader service permissions.
+
+Policy `1` is for the author's tests, not an online-safety promise. Native cleanup
+does not copy the job's current date into Bank's shared-date/mileage path.
+Download callback `0x0025C978` loads the server Bankdata body and transaction
+descriptor. Commit state `0x0024A0C4` serializes that body; no path was identified
+that writes local ticket dates or entitlement display fields into it. Local
+results still change entitlement/campaign decisions. NNID, other requests and
+server permission are not replaced. Public builds default to `0`, accepting
+native errors rather than continuing real online operations with local results.
 
 ## Main flow and function addresses
 

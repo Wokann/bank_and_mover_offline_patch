@@ -141,6 +141,8 @@
 .definelabel TicketJob_Initialize,               0x002A04C0
 .definelabel TicketJob_Poll,                     0x002A1CAC
 .definelabel TicketJob_Unbind,                   0x002A20B8
+.definelabel SRV_GetServiceHandle,               0x0023514C
+.definelabel LocalTicket_BackendStorage,         0x003FAFF4
 .definelabel BankSaveState_Update,              0x002B1CF8
 .definelabel BankSave_SerializeAndStage,        0x002B2320
 .definelabel BankSaveState_Initialize,           0x002B2520

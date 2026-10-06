@@ -74,11 +74,12 @@ messages. If an SD-backed Gen 5 source is selected, however, Online Mode uses
 the same redirect to read and write its paired `.sav` under
 `sd:/roms/nds/saves/`.
 
-The ticket test policy defaults to `0`. Setting it to `1` makes Online Mode
-use local ticket/campaign results for emulator testing; NNID connection, remote
-Pokemon validation, downloading and remote saving remain native. This test
-configuration is not unmodified online behavior and does not prove server-side
-entitlement approval.
+Public ticket policy should be `0`: Online Mode requires native tickets
+and retains native errors when the interface is missing. Test policy `1` uses
+local results only after identifying Azahar's missing interface; implemented
+interfaces, hardware and unknown environments remain native. This does not
+prove server-side approval or exclude downstream effects on cloud operations.
+NNID, remote Pokemon checks, downloading and remote saving remain native.
 
 Stock message entries remain unchanged. The LayeredFS archive only appends two
 title variants and four offline connection/save messages; runtime hooks select
@@ -191,23 +192,28 @@ The ticket step supplies Mover's runtime entitlement date, remaining-day/hour,
 and validity fields. It is not a Poké Mile calculation: Mover has no local
 Poké Mile accumulation or reward path in this patch.
 
-### Ticket routing and test policy
+### Ticket routing: public and automatic-detection test builds
 
 `ONLINE_TICKET_CHECK_BYPASS` in `main.s` emits one policy byte. Both routes
 remain in the same image:
 
-| Session mode | Policy byte | Ticket job / free-campaign query |
+The source defaults to the public policy `0`; set `1` only for personal tests
+that allow the missing-interface fallback.
+
+| Session mode / environment | Policy byte | Ticket job / free-campaign query |
 |---|---:|---|
-| Offline | `0` or `1` | Local results; no ticket network client or system shop job |
-| Online | `0` (default) | Native online checks and callbacks |
-| Online | `1` | Local results for emulator testing; other network operations remain native |
+| Offline, any environment | `0` or `1` | Local results; no ticket network client or system shop job |
+| Online, any environment | `0` (public default) | Native checks/callbacks; no fabricated missing-interface success |
+| Online, Azahar confirmed to lack the interface | `1` (test) | Automatically select local results; other network operations remain native |
+| Online, implemented interface, hardware or unknown environment | `1` | Native checks and callbacks |
+| Online, failed probe or ordinary ticket error | `1` | Native error handling, not local fallback |
 
 At the time of this ticket-routing commit, official Azahar does not implement
 `am:net`'s `GetRightsOnlyTicketData` (command `0x0821`; see the
 [interface registration](https://github.com/azahar-emu/azahar/blob/6280521bf26ef1393974cd8c898de29cf75f5752/src/core/hle/service/am/am_net.cpp#L115)).
-The two ticket configurations therefore remain available: `0` runs native checks;
-`1` bypasses native ticket queries and supplies local results for emulators
-missing this interface. The author's Azahar
+Two configurations remain available: `0` forbids fabricated online results and
+is the public default; `1` automatically selects local results only after confirming
+the missing interface in Azahar, for the author's tests. The author's Azahar
 [`pokebank` test branch](https://github.com/Wokann/azahar/tree/pokebank)
 implements the interface, which the author has verified in online testing.
 For that fork or real hardware, the value can remain fixed at `0`; no ticket
@@ -229,6 +235,24 @@ decision, state exit and destruction remain native. Only four calls are routed:
 | `0x00249774` | `TicketJob_Poll` | Report a completed job with valid entitlement |
 | `0x00249818` | `MoverCampaign_Request` | Complete as no free campaign and resume the native entitlement decision |
 | `0x00249CEC` | `TicketJob_Unbind` | No client was bound; still proceed with native destruction |
+
+The policy byte is at `0x00365428`. Initialization selects one backend per job,
+recorded at `0x00363FF8`; polling, campaign and unbinding reuse it without changing
+route mid-flight. Public policy `0` does not probe. Test policy `1` reuses the
+`GetSystemInfo(0x20000, 0)` Azahar ID `2` check, then opens `am:net` nonblockingly
+and issues a read-only query with zero title/ticket IDs and a four-byte buffer.
+Only successful transport, exact short-success header `0x08210040`, result `0`
+and successful handle closure identify the missing interface; see the verified
+[unimplemented-handler behavior](https://github.com/azahar-emu/azahar/blob/6280521bf26ef1393974cd8c898de29cf75f5752/src/core/hle/service/service.cpp#L155).
+Full replies, missing tickets, account/service errors and unknown responses stay native.
+
+**Test policy is not a guarantee of safe online use**. Unlike Bank, Mover does not
+copy the local ticket date into a mileage calculation. Its online Bankdata body
+is loaded from the server, and no path was identified that serializes local
+ticket dates or entitlement display fields into that body. Local results still
+change the client's entitlement/campaign decision; this is not proof of real
+server approval. Keep public builds at `0`, accepting native failures when the
+interface is missing instead of using fabricated online ticket results.
 
 The local job supplies separate console-current and 999-day expiry dates.
 Native getters calculate `999` remaining days, `23976` total hours and the
@@ -367,7 +391,7 @@ state object; the native state exit path performs cleanup.
 | `src/nds_fs.c` / `include/nds_fs.h` | UTF-16 directory enumeration and ranged file I/O |
 | `src/nds_sources.c` / `include/nds_sources.h` | Per-frame Gen 5 source discovery, native validation, ranking, and save-I/O dispatch |
 | `src/bankdata_redirect.c` | Local Bankdata loading, transfer-slot preservation, eligibility update, and crash-safe temporary write, commit, and rollback |
-| `src/local_ticket.c` | Local native-job/campaign results and console-calendar calculation |
+| `src/local_ticket.c` | Job-backend selection, Azahar missing-interface probe, local job/campaign results and console-calendar calculation |
 | `src/local_validation.c` | Read-only Gen 5 integrity/empty-slot classification and Gen 5/VC per-slot result isolation |
 | `src/offline_flow.c` | Independent network, disconnect, remote-check, no-transfer, and save-delay state updates |
 | `src/patch_paths.c` | Shared SD path constants |
@@ -472,7 +496,8 @@ handle. Hardware and unknown environments retain strict result checks; negative
 results and every other nonzero result stop startup. Handle creation and closing
 must succeed. Registers are restored before continuing the native constructor
 walker. Original segment bases, BSS variables, LayeredFS, and the version marker
-do not move; Offline/Online business dispatch and the ticket test byte are unchanged.
+do not move. Ticket test policy reuses environment detection but probes its own
+interface; permission compatibility does not imply ticket support or enable local online results.
 
 Unmodified Azahar can load this BPS without implementing SVC `0x70`; this path
 relies on its permissive instruction fetching and is not a successful permission

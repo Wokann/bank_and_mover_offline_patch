@@ -222,7 +222,7 @@ the middle, states 18 and 17 resolve the persisted state on a later use.
 | Turtle backend | Stock `data:/turtle` storage | Redirected to `sd:/3ds/Bank/sav.bin` | Redirected to the same `sav.bin` | Redirected to the same `sav.bin` |
 | state 5 | Real connection | Stock | Complete the session locally; no remote job | Stock |
 | state 8 | Server account summary | Stock | Classify existing/first-use from local `bankdata.bin/.bak` | Stock |
-| state 15 | Remote entitlement/campaign | Native by default; fixed test switch can enable a local bypass | Always supply required ticket fields locally; disable online campaigns | Use the same fixed test switch as Download Mode |
+| state 15 | Remote entitlement/campaign | Public policy `0` stays native; test policy `1` uses local results only for a confirmed missing Azahar interface | Always supply required ticket fields locally; disable online campaigns | Same policy as Download Mode |
 | state 9 | Server-side first creation | Stock creation and upload | Create the initial local `bankdata.bin` | Stock creation and upload |
 | state 11 | Select recovery path | Stock | Keep the test, but redirect result `9` to state 17 instead of state 18 | Stock |
 | state 18 | Current Turtle remote recovery | Stock | Never entered | Stock; challenge UI may append the first server candidate |
@@ -247,15 +247,36 @@ unbinding at `0x002B1994` are redirected. Wrappers occupy added pages after
 native BSS; HOME box-selection UI stays intact. Other bytes in
 `[0x002B0270, 0x002B1AD0)` and the
 native job implementation remain intact. Download and Unlock modes call native
-interfaces with `ONLINE_TICKET_CHECK_BYPASS=0`. Offline Mode, or online modes
-with `1`, supply console time and an expiry 999 days later. Purchase counts stay
+interfaces with `ONLINE_TICKET_CHECK_BYPASS=0`, including native failure when an
+interface is missing. Test policy `1` uses local results only for Azahar's verified
+unimplemented-handler reply; hardware, unknown environments, implemented
+interfaces and ordinary errors remain native. Offline Mode always supplies
+console time and an expiry 999 days later. Purchase counts stay
 `-1`, existing EC account fields are retained, and no free-campaign window is
 provided. Native getters and exit cleanup copy the resulting entitlement and
 date. Local unbinding does not access a nonexistent network client; native
 destruction still runs. No system eShop applet or loading-animation simulation
-is used. Both paths remain present, and only one byte at `0x003FC600` changes
-between builds. The switch does not alter other networking, transaction
-recovery, mileage calculations, or post-download exit branches.
+is used. Both paths remain present, and only the policy byte at `0x003FE480`
+changes between builds. Initialization records this job's backend at `0x003FAFF4`;
+polling and cleanup keep that selection. The policy does not alter other networking,
+transaction recovery, mileage calculations, or post-download exit branches.
+The subproject README documents the capability probe.
+
+Local results are not display-only: `0x002B1924` copies the job's current date
+at `+0xB8` to shared `+0x28`. First Bankdata initialization at `0x002AE8B0`
+reads that date; state 9 serializes the body and uploads it. Mileage at
+`0x002AD1BC` also reads the date and updates mileage/date fields; Unlock Mode
+can reach the native save path, whose `0x002B2320` serializer stages the body
+for upload. Download Mode with an existing bank skips mileage and normal saving,
+but not first creation.
+
+The server download callback at `0x002D11B0` replaces the Bankdata body and
+transaction descriptor, not shared ticket dates. Refreshing native tickets later
+does not undo earlier uploaded Bankdata changes. No direct serialization of the
+999-day expiry or entitlement display fields into that body was identified;
+purchase count `-1` skips the native stored-count/reward update. These findings
+do not establish server-side correction of client-uploaded values. Public policy
+stays `0`, and test policy is not a guarantee of safe online use.
 
 With no usable game data, `0x002AC958` branches to the existing failure substate
 at `0x002ACA90` after the stock message completes and its text is cleared.

@@ -352,7 +352,10 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
         "combinepatch_networkupdate",
         "combinepatch_initialremoterecordupdate",
         "combinepatch_ticketinitialize",
-        "combinepatch_ticketinitializelocal",
+        "localticket_initializeselected",
+        "localticket_backendstorage",
+        "srv_getservicehandle",
+        "codeexpansion_isazahar",
         "combinepatch_ticketpoll",
         "combinepatch_ticketpolllocal",
         "combinepatch_ticketunbind",
@@ -361,8 +364,8 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
         "ticketjob_initialize",
         "ticketjob_poll",
         "ticketjob_unbind",
-        "combinepatch_onlineticketbypass",
         "online_ticket_check_bypass",
+        "combinepatch_onlineticketfallback",
         "combinepatch_firstpresentdispatch",
         "combinepatch_bankdatasyncdispatch",
         "combinepatch_bankdatasyncturtlestate0",
@@ -543,7 +546,6 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
         "combinepatch_networkskipremotejobofficial",
         "combinepatch_networkupdate",
         "combinepatch_initialremoterecordupdate",
-        "combinepatch_onlineticketbypass",
         "combinepatch_firstpresentdispatch",
         "combinepatch_bankdatasyncdispatch",
         "combinepatch_bankdatasyncinitialize",
@@ -977,27 +979,49 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
     ):
         expect_word(image, address, ARM_NOP, name)
 
-    # All wrappers preserve r0-r2, lr and the native aligned stack. Initialize
-    # supplies the existing state's shared pointer in r1 only on the local path.
-    # 包装保留 r0-r2、lr 与原版栈对齐；本地初始化分支才把共享数据指针装入 r1。
+    # Initialization supplies job/shared/mode; the C selector keeps the
+    # native one-argument initialization ABI. Remaining interfaces use its flag.
+    # 初始化传入作业／共享视图／模式；C 选择器保持原版单参数初始化 ABI。
+    # 后续接口只读取该作业已经选定的后端。
     ticket_start = symbols["combinepatch_ticketinitialize"]
     ticket_end = symbols["combinepatch_ticketwrappersend"]
-    if not payload_end <= ticket_start < ticket_end == symbols["combinepatch_codeusedend"]:
+    if not payload_end <= ticket_start < ticket_end <= symbols["combinepatch_codeusedend"]:
         raise ValueError("ticket job wrappers exceed the added executable pages")
     policy = symbols["online_ticket_check_bypass"]
-    if policy not in (0, 1):
-        raise ValueError("ONLINE_TICKET_CHECK_BYPASS must be 0 or 1")
-    expect_bytes(image, symbols["combinepatch_onlineticketbypass"], bytes([policy]),
-                 "online entitlement test byte")
-    for operation in ("initialize", "poll", "unbind"):
+    policy_address = symbols["combinepatch_onlineticketfallback"]
+    if policy not in (0, 1) or policy_address != ticket_end or \
+            image[image_offset(policy_address)] != policy:
+        raise ValueError("ticket fallback policy must be one byte: 0 native, 1 auto-test")
+    backend = symbols["localticket_backendstorage"]
+    if backend != RUNTIME_STORAGE_START + 4:
+        raise ValueError("ticket backend flag overlaps native or mode storage")
+    if symbols["srv_getservicehandle"] != 0x0023514C:
+        raise ValueError("Bank SRV entry point does not match its native image")
+    selector = symbols["localticket_initializeselected"]
+    if not symbols["localticket_payloadbegin"] <= selector < symbols["localticket_payloadend"]:
+        raise ValueError("ticket selector is outside its module")
+    initialize = symbols["combinepatch_ticketinitialize"]
+    expect_word(image, initialize, 0xE5941028, "ticket shared-data argument")
+    expect_word(image, initialize + 8, 0xE5DC2000, "ticket mode argument")
+    expect_word(image, initialize + 16, 0xE5DC3000, "ticket fallback policy argument")
+    expect_branch(image, initialize + 20, selector, False, ARM_COND_AL,
+                  "ticket backend selector")
+    for offset, target in ((4, symbols["combinepatch_modestorage"]),
+                           (12, policy_address)):
+        address = initialize + offset
+        instruction = read_word(image, address)
+        if instruction & 0xFFFFF000 != 0xE59FC000:
+            raise ValueError("ticket initialization lacks its argument pointer")
+        literal = address + 8 + (instruction & 0xFFF)
+        if not ticket_start <= literal < ticket_end:
+            raise ValueError("ticket initialization literal exceeds its wrappers")
+        expect_word(image, literal, target, "ticket initialization argument pointer")
+    for operation in ("poll", "unbind"):
         wrapper = symbols[f"combinepatch_ticket{operation}"]
         local = symbols[f"combinepatch_ticket{operation}local"]
-        if local != wrapper + 36:
+        if local != wrapper + 20:
             raise ValueError(f"ticket {operation} wrapper layout changed")
-        for offset, target, name in (
-            (0, symbols["combinepatch_modestorage"], "ticket session-mode pointer"),
-            (16, symbols["combinepatch_onlineticketbypass"], "ticket test-byte pointer"),
-        ):
+        for offset, target, name in ((0, backend, "ticket selected-backend pointer"),):
             address = wrapper + offset
             word = read_word(image, address)
             if word & 0xFFFFF000 != 0xE59FC000:
@@ -1008,17 +1032,11 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
             expect_word(image, literal, target, name)
             expect_word(image, address + 4, 0xE5DCC000, f"{name} byte load")
             expect_word(image, address + 8, 0xE35C0000, f"{name} zero test")
-        expect_branch(image, wrapper + 12, local, False, ARM_COND_EQ,
-                      f"offline ticket {operation}")
-        expect_branch(image, wrapper + 28, local, False, ARM_COND_NE,
-                      f"test ticket {operation}")
-        expect_branch(image, wrapper + 32, symbols[f"ticketjob_{operation}"],
+        expect_branch(image, wrapper + 12, local, False, ARM_COND_NE,
+                      f"local ticket {operation}")
+        expect_branch(image, wrapper + 16, symbols[f"ticketjob_{operation}"],
                       False, ARM_COND_AL, f"native ticket {operation}")
-        if operation == "initialize":
-            expect_word(image, local, 0xE5941028, "local ticket shared-data load")
-            expect_branch(image, local + 4, symbols["localticket_initialize"],
-                          False, ARM_COND_AL, "local ticket initialization")
-        elif operation == "poll":
+        if operation == "poll":
             expect_branch(image, local, symbols["localticket_poll"],
                           False, ARM_COND_AL, "local ticket result")
         else:

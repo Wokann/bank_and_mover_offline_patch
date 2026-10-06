@@ -207,26 +207,31 @@ record. It preserves native state 15 ticket and online-gift checks by default,
 and its recovery state remains the stock state machine. The local offline
 `bankdata.bin` is neither loaded nor uploaded by the unlock display hook.
 
-## Ticket and online-gift checks: fixed test switch
+## Ticket and online-gift checks: public and test builds
 
 Change this value at the top of [`src/main.s`](src/main.s), then rebuild:
+
+The source defaults to the public policy `0`. Set `1` only for personal tests
+that allow the missing-interface fallback.
 
 ```asm
 .definelabel ONLINE_TICKET_CHECK_BYPASS, 0
 ```
 
-| Session mode | `0`: default native checks | `1`: emulator test bypass |
+| Session mode / environment | `0`: require native checks, public default | `1`: allow automatic missing-interface fallback for tests |
 | --- | --- | --- |
-| Offline | Supply a local 999-day entitlement at the state 15 job interfaces without requesting online campaign data | Same as left |
-| Download | Native state 15 ticket, campaign, and online-gift checks | Use the same local state 15 result as Offline Mode |
-| Unlock | Native state 15 ticket, campaign, and online-gift checks | Use the same local state 15 result as Offline Mode |
+| Offline, any environment | Local 999-day entitlement without online campaign queries | Same as left |
+| Download / Unlock, hardware or unknown environment | Native ticket, campaign and online-gift checks | Same as left |
+| Download / Unlock, Azahar with the interface implemented | Native checks | Same as left |
+| Download / Unlock, Azahar confirmed to lack the interface | Native error handling; never fabricate results | Automatically select local ticket results |
+| Download / Unlock, failed probe or ordinary ticket error | Native error handling | Native error handling; no automatic approval |
 
 At the time of this ticket-routing commit, official Azahar does not implement
 `am:net`'s `GetRightsOnlyTicketData` (command `0x0821`; see the
 [interface registration](https://github.com/azahar-emu/azahar/blob/6280521bf26ef1393974cd8c898de29cf75f5752/src/core/hle/service/am/am_net.cpp#L115)).
-The two ticket configurations therefore remain available: `0` runs native checks;
-`1` bypasses native ticket queries and supplies local results for emulators
-missing this interface. The author's Azahar
+Two configurations remain available: `0` forbids fabricated online results and
+is the public default; `1` automatically selects local results only after confirming
+the missing interface in Azahar, for the author's tests. The author's Azahar
 [`pokebank` test branch](https://github.com/Wokann/azahar/tree/pokebank)
 implements the interface, which the author has verified in online testing.
 For that fork or real hardware, the value can remain fixed at `0`; no ticket
@@ -239,11 +244,12 @@ It is therefore kept only in the personal test branch and will not be submitted
 to Azahar's official main branch.
 
 Both paths remain in the same code. This definition changes only the policy
-byte at `[0x003FC600, 0x003FC601)`. State 15 retains its original entry and
+byte at `[0x003FE480, 0x003FE481)`. State 15 retains its original entry and
 state transitions. Only three calls are redirected: job initialization at
 `0x002B0444`, result polling at `0x002B0464`, and unbinding at `0x002B1994`.
-With `0`, Download and Unlock modes call the native job interfaces. Offline
-Mode, or online modes with `1`, use local job results. Native allocation,
+The initialization wrapper passes job, shared data, session mode and policy to
+`LocalTicket_InitializeSelected`. Each job selects its backend once, recording it
+at `0x003FAFF4`; polling and unbinding reuse that result. Native allocation,
 construction, result checks, field copying, UI cleanup, and destruction remain
 in place. Local unbinding succeeds without a network call because no client
 was bound.
@@ -257,12 +263,30 @@ system eShop applet/loading-animation simulation. The completed job uses the
 same status as native verification with at least 15 entitlement days. Clock
 failure or an expiry beyond the native year range follows native error handling.
 
-This switch controls only state 15. It does not skip NNID login, other network
-requests, or server-side validation, and it does not change the post-download
-exit, unlock transaction handling, or existing state 12/13 mode dispatch. It is
-for emulator compatibility; hardware and emulators implementing this interface
-use `0`. Native check errors retain their original handling rather than being
-reported as successful networking.
+Test policy `1` reuses the loader's `GetSystemInfo(0x20000, 0)` check: successful
+result, low ID `2`, high word `0`. Only identified Azahar is probed. A nonblocking
+`am:net` session sends command `0x0821` with zero title/ticket IDs and a four-byte
+output buffer; it does not read a real ticket. Local results require successful
+transport, the exact short reply `0x08210040` with result `0`, and successful handle
+closure. This matches the verified revision's
+[unimplemented-handler reply](https://github.com/azahar-emu/azahar/blob/6280521bf26ef1393974cd8c898de29cf75f5752/src/core/hle/service/service.cpp#L155).
+Full replies, missing tickets, service/transport failures and unknown responses
+stay native. Public policy `0` does not probe and always uses native online tickets.
+
+The policy does not skip NNID, other requests or server checks, or change download
+exit, unlock transactions, mileage or box dispatch. **Test policy is not a guarantee
+of safe online use**. The 999-day expiry and displayed entitlement fields have no
+identified direct serialization path into Bankdata. However, the local current
+date is copied into shared data: first creation writes it into the new Bankdata
+before upload, and Unlock Mode's native mileage/save flow can upload the resulting
+mileage and date. Existing-bank Download Mode skips that mileage/save flow, but
+first creation still uploads.
+
+A server download replaces the Bankdata body, not the current session's ticket
+date. A later native ticket check also does not undo already uploaded Bankdata
+changes. Client-side analysis cannot guarantee that the server corrects those
+values. Keep public builds at `0`, accepting native errors when the interface is
+missing instead of using local ticket results for real cloud operations.
 
 ## Offline Mode: startup, recovery, and first use
 
@@ -413,7 +437,7 @@ Spanish, Korean, Simplified Chinese, and Traditional Chinese.
 | `src/fs_helpers.c` | Shared checked SD-filesystem implementation used by Bankdata and Turtle backends |
 | `src/offline_flow.c` | Local connection, disconnection, and save-display state updates |
 | `src/local_mileage.c` | Converts console time into the packed date consumed by the stock Poké Mile states; it does not replace the native point calculation |
-| `src/local_ticket.c` | Supplies local ticket results at the native entitlement state's job interfaces without implementing Poké Mile calculation |
+| `src/local_ticket.c` | Job-backend selection, Azahar missing-interface probe and local ticket results; no Poké Mile calculation |
 | `src/unlock_mode.c` | Selects and normalizes the first server-returned unlock candidate for the stock challenge-code UI |
 | `src/patch_paths.c` | Path constants placed in added pages |
 | `src/turtle_redirect.c` | Redirected Turtle-record backend placed in added pages |
@@ -470,11 +494,11 @@ bytes, while runtime mapping grows by only four pages, `0x4000` (16 KiB).
 | `[0x002A8404, 0x002A8760)` | Native state 14 eShop flow and companions | Original bytes preserved; subsequent transaction recovery is intact. |
 | `0x002B0444`, `0x002B0464`, `0x002B1994`, 4 bytes each | State 15 job initialization, polling and unbinding | Call added-page wrappers; all other state-15 bytes and native jobs stay intact. |
 | `[0x00313910, 0x00313A40)` | Original last text-page padding | `0x130` bytes reserved for Luma LayeredFS; untouched. |
-| `[0x00313A40, 0x00313B0C)` | Original last text-page padding | Startup assembly and `code_expansion.o`, `0xCC` bytes. |
-| `[0x00313B0C, 0x00313FC0)` | Original last text-page padding | Unused executable padding, `0x4B4` bytes. |
+| `[0x00313A40, 0x00313B1C)` | Original last text-page padding | Startup assembly and `code_expansion.o`, `0xDC` bytes. |
+| `[0x00313B1C, 0x00313FC0)` | Original last text-page padding | Unused executable padding, `0x4A4` bytes. |
 | `[0x00313FC0, 0x00314000)` | Original last text-page padding | Zero-padded 64-byte `offline_patch_v1.0.0` identifier. |
 | `[0x003ABACC, 0x003FA904)` | Native logical BSS | Explicit zeros; native variables and startup clearing retained. No payload. |
-| `[0x003FAFF0, 0x003FB000)` | Final 16 bytes of original RW mapping, after logical BSS | First four bytes hold session mode, capture flag, R-key history and title selection; twelve bytes reserved. |
+| `[0x003FAFF0, 0x003FB000)` | Final 16 bytes of original RW mapping, after logical BSS | First four bytes hold session mode, capture flag, R-key history and title selection; `+4` stores this ticket job's backend; eleven bytes reserved. |
 | `[0x003FB000, 0x003FC000)` | Added RW mapping | Zero-filled separator, not an unmapped guard page. |
 | `[0x003FC000, 0x003FF000)` | Three new pages after native BSS | All feature wrappers, C backends and paths; enabled for execution on hardware by the loader. |
 
@@ -483,22 +507,22 @@ but their bodies are no longer consumed. This only prepares space and native
 functions for a future Original Mode; that mode is not added here. Feature,
 language and Turtle hooks would still require mode-aware routing.
 
-Added-page placements total `0x2340` (9024 bytes), leaving `0xCC0` (3264 bytes):
+Added-page placements total `0x2484` (9348 bytes), leaving `0xB7C` (2940 bytes):
 
 | Content | Actual range | Size |
 | --- | --- | --- |
 | Text, save and language assembly wrappers | `[0x003FC000, 0x003FC338)` | `0x338` |
 | `patch_paths.o` | `[0x003FC338, 0x003FC3EB)` | `0xB3`, then one alignment byte |
-| Mode, title, connection wrappers and ticket switch | `[0x003FC3EC, 0x003FCAE0)` | `0x6F4` |
-| `turtle_redirect.o` | `[0x003FCAE0, 0x003FCF5C)` | `0x47C` |
-| `fs_helpers.o` | `[0x003FCF5C, 0x003FD504)` | `0x5A8` |
-| `bankdata_redirect.o` | `[0x003FD504, 0x003FDB60)` | `0x65C` |
-| `offline_flow.o` | `[0x003FDB60, 0x003FDC80)` | `0x120` |
-| `local_mileage.o` | `[0x003FDC80, 0x003FE0A0)` | `0x420` |
-| `local_ticket.o` | `[0x003FE0A0, 0x003FE268)` | `0x1C8` |
-| `unlock_mode.o` | `[0x003FE268, 0x003FE2B8)` | `0x50` |
-| Ticket assembly wrappers and literal pool | `[0x003FE2B8, 0x003FE340)` | `0x88` |
-| Unused added-page space | `[0x003FE340, 0x003FF000)` | `0xCC0` |
+| Mode, title and connection wrappers | `[0x003FC3EC, 0x003FCADC)` | `0x6F0` |
+| `turtle_redirect.o` | `[0x003FCADC, 0x003FCF58)` | `0x47C` |
+| `fs_helpers.o` | `[0x003FCF58, 0x003FD528)` | `0x5D0` |
+| `bankdata_redirect.o` | `[0x003FD528, 0x003FDB84)` | `0x65C` |
+| `offline_flow.o` | `[0x003FDB84, 0x003FDCA4)` | `0x120` |
+| `local_mileage.o` | `[0x003FDCA4, 0x003FE0C8)` | `0x424` |
+| `local_ticket.o` | `[0x003FE0C8, 0x003FE3D8)` | `0x310` |
+| `unlock_mode.o` | `[0x003FE3D8, 0x003FE428)` | `0x50` |
+| Ticket assembly wrappers, literal pool and policy byte | `[0x003FE428, 0x003FE484)` | `0x5C` |
+| Unused added-page space | `[0x003FE484, 0x003FF000)` | `0xB7C` |
 
 Native text's actual size stays fixed, preserving Luma LayeredFS placement.
 Its path still uses the rodata tail at `[0x00369370, 0x00369397)`, which this
@@ -528,8 +552,9 @@ Before the original constructor walker, the startup loader:
 Only necessary data/BSS fields and SVC capabilities change. The current input
 requires only `0x70` added. Other capabilities and the full header's signed
 descriptor copy remain intact; this is a CFW override, not a new retail
-signature. Expansion detection is independent of `ONLINE_TICKET_CHECK_BYPASS`;
-automatic ticket detection is not part of this change.
+signature. Ticket test policy reuses the same environment helper but separately
+checks the ticket reply. Permission compatibility does not imply ticket support
+or enable local online results. The probe adds no ExHeader service permissions.
 
 Public references: [Luma loader](https://github.com/LumaTeam/Luma3DS/blob/master/sysmodules/loader/source/loader.c),
 [Luma BPS loader](https://github.com/LumaTeam/Luma3DS/blob/master/sysmodules/loader/source/bps_patcher.cpp)

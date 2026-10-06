@@ -1,4 +1,6 @@
 #include "local_ticket.h"
+#include "code_expansion.h"
+#include "fs_helpers.h"
 #include "system_time.h"
 
 /* Local date input for the native entitlement job's result consumers. */
@@ -163,4 +165,54 @@ s32 LocalTicket_CampaignResult(MoverStateView *state)
     shared->freeCampaignActive=0;
     state->substate=MOVER_TICKET_SUBSTATE_CHECK_ENTITLEMENT;
     return 0;
+}
+/* Query only a nonexistent title/ticket. The exact short-success reply is
+   Azahar's unimplemented-handler signature, not a ticket or network error. */
+/* 只查询不存在的 title/ticket。精确的成功短响应是 Azahar 未实现接口的特征，
+   不是票据缺失或网络错误；临时会话关闭失败时也不启用本地替代。 */
+static int ticketInterfaceMissing(void)
+{
+    static const char serviceName[8]="am:net";
+    u32 handle=0,buffer=0;
+    volatile u32 *command;
+    s32 result;
+    int missing;
+    result=SRV_GetServiceHandle(&handle,serviceName,
+        TICKET_SERVICE_NAME_LENGTH,TICKET_SERVICE_NONBLOCKING);
+    if (result || !handle) return 0;
+    command=fsCommandBuffer();
+    command[0]=TICKET_RIGHTS_REQUEST;
+    command[1]=TICKET_PROBE_BUFFER_SIZE;
+    command[2]=0;
+    command[3]=0;
+    command[4]=0;
+    command[5]=0;
+    command[6]=(TICKET_PROBE_BUFFER_SIZE<<4)|TICKET_MAPPED_BUFFER_WRITE;
+    command[7]=(u32)&buffer;
+    result=fsSync(handle);
+    missing=!result && command[0]==TICKET_RIGHTS_UNIMPLEMENTED_REPLY &&
+        command[1]==0;
+    result=fsCloseHandle(handle);
+    return !result && missing;
+}
+
+/* Select once per constructed job so poll, campaign and cleanup keep one backend.
+   Public online builds stay native; tests may detect a missing Azahar interface.
+   Hardware, unknown environments and normal ticket errors never use fallback. */
+/* 每个已构造作业仅选择一次，轮询、活动与清理不会中途切换后端。
+   公开版联网始终使用原版；测试版可识别 Azahar 缺失接口。
+   实机、未知环境及正常票务错误均不启用本地替代。 */
+__attribute__((used,noinline,section(".text.offline.03_ticket")))
+int LocalTicket_InitializeSelected(MoverTicketJobView *job,
+    MoverTicketSharedView *shared,u32 mode,u32 allowEmulatorFallback)
+{
+    int local=mode==TICKET_MODE_OFFLINE;
+    *LocalTicket_BackendStorage=TICKET_BACKEND_NATIVE;
+    if (!local && allowEmulatorFallback==TICKET_ALLOW_EMULATOR_FALLBACK &&
+        CodeExpansion_IsAzahar()) {
+        local=ticketInterfaceMissing();
+    }
+    if (!local) return TicketJob_Initialize(job);
+    *LocalTicket_BackendStorage=TICKET_BACKEND_LOCAL;
+    return LocalTicket_Initialize(job,shared);
 }
