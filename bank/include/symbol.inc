@@ -43,6 +43,10 @@
 .definelabel BankFile_GetSerializedSize,        0x002CB864
 .definelabel BankFile_SerializeBody,            0x002CB870
 .definelabel BankFile_DeriveFlowMetadata,       0x001D5EC0
+.definelabel BankSlot_GetCurrentDate,           0x001D3BF4
+.definelabel BankSlot_WriteDateCall,            0x001D887C
+.definelabel BankSlot_ClearDateCall,            0x001D96E4
+.definelabel BankSlots_MoveDateCall,            0x002B9DC4
 
 ; -----------------------------------------------------------------------------
 ; Main business states

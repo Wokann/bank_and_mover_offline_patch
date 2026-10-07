@@ -240,6 +240,35 @@ Header fields include a 64-bit identity-bound value at `+0x000000`, ten fixed UT
 
 The current-format load and serialize methods perform fixed-size copies. No client-side bankdata checksum, MAC, compression, or decryption routine was identified in this object layer. Server-side upload rules remain separate.
 
+### Slot movement and update time
+
+The 3000 64-bit timestamps at `0x0B5658` are independent of Poké Mile balances,
+reward anchors and ticket expiry. Native code obtains a packed date and converts
+it to seconds since `2000-01-01` with `0x001F2BD4`. The object's eight-byte header
+makes the corresponding runtime field offset `0x0B5660`.
+
+| Native operation | Date call | Timestamp behavior |
+| --- | --- | --- |
+| `0x001D86E0`: write a Bank slot | `0x001D887C` | Give the newly registered slot the current time; Transfer Box/game deposits can use this path |
+| `0x001D95C8`: clear a Bank slot | `0x001D96E4` | Update the cleared slot; withdrawals and replacement operations can also use this path |
+| `0x002B9C94`: move a group of Bank slots | `0x002B9DC4` | Stamp cleared source slots and preserve the original records' timestamps at the destination |
+| `0x002BA148`: exchange individual Bank slots | No new date query | Exchange Pokémon, format tags, source software IDs and existing timestamps together |
+
+The first three paths call `0x001D3BF4` with the network context at root-object
+offset `+0x138`. It checks the date-output pointer but not the context pointer;
+the subsequent `0x0022E3E0` requires a valid network object and mutex. Offline
+Mode creates neither, so it cannot use this query. This explains a failing
+Transfer Box deposit alongside a working single-slot exchange within Bank.
+
+Only these three `BL` sites are redirected to `CombinePatch_SelectBankSlotDate`.
+Offline Mode reuses the current console date from `LocalMileage_GetCurrentDate`;
+other modes pass the original arguments unchanged to `0x001D3BF4`. The local
+date has no 999-day adjustment. A null output or unavailable date returns
+failure, leaving each native caller's existing failure branch intact. All other
+slot-write, clear, group-move, timestamp-conversion and single-slot-exchange
+instructions remain native. Shared network-context and mutex functions are not
+replaced.
+
 ## Save and upload
 
 ```text

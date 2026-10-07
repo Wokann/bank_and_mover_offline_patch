@@ -1,8 +1,8 @@
 #include "local_mileage.h"
 #include "system_time.h"
 
-/* Console-clock conversion for the stock local Poké Mile states. */
-/* 为原版本地宝可里程状态转换主机时间。 */
+/* Packed console date shared by local miles, tickets and Bank-slot updates. */
+/* 本地里程、票据和银行槽更新时间共用的主机日期转换。 */
 static u64 systemTick(void)
 {
     register u32 low __asm__("r0");
@@ -73,7 +73,9 @@ int LocalMileage_GetCurrentDate(u32 packed[2])
 {
     static const u8 monthDays[12]={31,28,31,30,31,30,31,31,30,31,30,31};
     u64 remainder,cycles; u64 days; u32 year=1900,month=1,day,hour,minute,second,span;
-    u64 current=currentSystemTimeMs();
+    u64 current;
+    if (!packed) return 0;
+    current=currentSystemTimeMs();
     days=divideU64(current,86400000ull,&remainder);
     /* Skip whole Gregorian 400-year cycles so malformed timestamps can never
        turn the year conversion into an unbounded loop. */

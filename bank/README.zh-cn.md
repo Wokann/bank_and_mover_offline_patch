@@ -492,14 +492,14 @@ L + A + START。未按组合键时仍显示原版不匹配提示；确认该提�
 | `src/code_expansion.c` | 与 Mover 同架构的实机／Azahar 共用加载器 |
 | `src/fs_helpers.c` | Bankdata 与 Turtle 后端共用的带检查 SD 文件系统实现 |
 | `src/offline_flow.c` | 本地连接、断开连接与保存提示状态更新 |
-| `src/local_mileage.c` | 把主机时间转换成原版宝可里程状态读取的日期格式；不替代原版点数计算 |
+| `src/local_mileage.c` | 为本地里程、票据和银行槽更新时间转换主机日期；不替代原版点数计算 |
 | `src/local_ticket.c` | 作业后端选择、Azahar 缺接口探测与本地票务结果；不实现宝可里程计算 |
 | `src/unlock_mode.c` | 为原版挑战码界面选择并归一化服务器返回的第一个解锁候选值 |
 | `src/patch_paths.c` | 放入新增页的路径常量 |
 | `src/turtle_redirect.c` | 放入新增页的 Turtle 记录重定向后端 |
 | `include/bankdata_redirect.h` | 已确认的 Bankdata 序列化布局、原版 Bank 局部视图、重定向常量与原版入口 |
 | `include/fs_helpers.h` | 共用的文件系统类型、SDK 入口与带检查的 SD 辅助函数声明 |
-| `include/local_mileage.h` | 本地里程日期输入声明 |
+| `include/local_mileage.h` | 本地里程、票据和银行槽共用的日期输入声明 |
 | `include/local_ticket.h` | 票据作业与共享数据视图、使用权常量和本地作业接口 |
 | `include/offline_flow.h` | 本地流程状态使用的原版计时器入口 |
 | `include/code_expansion.h` | 扩容加载器接口及 SVC 常量 |
@@ -548,6 +548,7 @@ ExHeader 的 `.data` 改为 `0x95` 页、大小 `0x95000`，BSS 大小为 `0`；
 | `0x002A8760`、`0x002A93F4`，各 4 字节 | 原 state 18／17 更新函数的入口压栈指令 | 跳转到新增页按模式分派，再重放原压栈和完整原函数体；仅解锁模式追加提示确认后的重选／退出分支。 |
 | `0x002A5860`、`0x002A588C`，各 4 字节 | 原 state 18 结果判断及 state 23 成功分支 | 解锁模式允许确认不匹配后重建 state 10，并记录官方强制回滚已成功；原流程控制器、构造及清理函数不变。 |
 | `0x002B0444`、`0x002B0464`、`0x002B1994`，各 4 字节 | state 15 作业启动、轮询和解除绑定调用点 | 调用新增页中的包装；其他 state 15 字节和原票据作业不变。 |
+| `0x001D887C`、`0x001D96E4`、`0x002B9DC4`，各 4 字节 | 银行槽写入、清空、批量移动的日期调用点 | 离线使用主机当前日期，其他模式保留原版联网日期查询；槽位处理函数体不回收。 |
 | `0x002B1B98`、`0x002B1BDC`，各 4 字节 | 标题退出的 UI 根对象读取及完成返回 | 等待原版公共提示视图清理，再销毁标题视图并重载所选记录与语言；原清理函数体保留。 |
 | `[0x00313910, 0x00313A40)` | 原 `.text` 末页填充 | 为 Luma LayeredFS 避让 `0x130` 字节，不写入。 |
 | `[0x00313A40, 0x00313B1C)` | 原 `.text` 末页填充 | 启动汇编和 `code_expansion.o`，合计 `0xDC` 字节。 |
@@ -562,22 +563,22 @@ ExHeader 的 `.data` 改为 `0x95` 页、大小 `0x95000`，BSS 大小为 `0`；
 原版模式恢复这些原生路径；标题、功能、语言和 Turtle hook 按模式分派，不替换原存档
 底层实现。
 
-新增页内的实际落点如下，合计 `0x2AD8`（10968 字节），剩余 `0x528`（1320 字节）：
+新增页内的实际落点如下，合计 `0x2B94`（11156 字节），剩余 `0x46C`（1132 字节）：
 
 | 内容 | 实际范围 | 占用 |
 | --- | --- | --- |
 | 文本、保存和语言汇编包装 | `[0x003FC000, 0x003FC414)` | `0x414` |
 | `patch_paths.o` | `[0x003FC414, 0x003FC4C7)` | `0xB3`，随后 1 字节对齐 |
-| 模式、标题、连接和解锁分支包装 | `[0x003FC4C8, 0x003FCE84)` | `0x9BC` |
-| `turtle_redirect.o` | `[0x003FCE84, 0x003FD3C8)` | `0x544` |
-| `fs_helpers.o` | `[0x003FD3C8, 0x003FD998)` | `0x5D0` |
-| `bankdata_redirect.o` | `[0x003FD998, 0x003FE070)` | `0x6D8` |
-| `offline_flow.o` | `[0x003FE070, 0x003FE190)` | `0x120` |
-| `local_mileage.o` | `[0x003FE190, 0x003FE5B0)` | `0x420` |
-| `local_ticket.o` | `[0x003FE5B0, 0x003FE954)` | `0x3A4` |
-| `unlock_mode.o` | `[0x003FE954, 0x003FEB10)` | `0x1BC` |
-| 票据汇编包装、字面量池与策略字节 | `[0x003FEB10, 0x003FEB6C)` | `0x5C` |
-| 未使用新增页空间 | `[0x003FEB6C, 0x003FF000)` | `0x494` |
+| 模式、标题、连接、解锁和槽日期分支包装 | `[0x003FC4C8, 0x003FCEA0)` | `0x9D8` |
+| `turtle_redirect.o` | `[0x003FCEA0, 0x003FD3E4)` | `0x544` |
+| `fs_helpers.o` | `[0x003FD3E4, 0x003FD9B4)` | `0x5D0` |
+| `bankdata_redirect.o` | `[0x003FD9B4, 0x003FE08C)` | `0x6D8` |
+| `offline_flow.o` | `[0x003FE08C, 0x003FE1AC)` | `0x120` |
+| `local_mileage.o` | `[0x003FE1AC, 0x003FE5D8)` | `0x42C` |
+| `local_ticket.o` | `[0x003FE5D8, 0x003FE97C)` | `0x3A4` |
+| `unlock_mode.o` | `[0x003FE97C, 0x003FEB38)` | `0x1BC` |
+| 票据汇编包装、字面量池与策略字节 | `[0x003FEB38, 0x003FEB94)` | `0x5C` |
+| 未使用新增页空间 | `[0x003FEB94, 0x003FF000)` | `0x46C` |
 
 原 `.text` 实际大小不变，Luma LayeredFS 落点不随荷载扩容移动。其路径仍使用
 `.rodata` 尾部 `[0x00369370, 0x00369397)`，本补丁不占用。更换 Luma 时需重新核对

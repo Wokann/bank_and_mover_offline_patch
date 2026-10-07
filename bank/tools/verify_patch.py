@@ -452,6 +452,11 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
         "offlinepatch_savedisplaydelayupdate",
         "offlinepatch_createinitial",
         "bankdataredirect_capturedownloaded",
+        "combinepatch_selectbankslotdate",
+        "bankslot_getcurrentdate",
+        "bankslot_writedatecall",
+        "bankslot_cleardatecall",
+        "bankslots_movedatecall",
         "offlinepatch_stage",
         "offlinepatch_commit",
         "offlinepatch_rollback",
@@ -503,6 +508,43 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
         raise ValueError(f"missing armips symbols: {', '.join(missing)}")
 
     verify_expansion(base_image, image, symbols, base_exheader, exheader)
+
+    # Replace only the three slot-date calls. Native slot data, metadata,
+    # timestamp conversion, network clock and mutex helpers remain unchanged.
+    # 仅替换三处槽日期调用；保留槽数据、元数据、时间戳转换及联网时钟与锁函数。
+    slot_date = symbols["combinepatch_selectbankslotdate"]
+    date_calls = (
+        (0x001D86E0, 0x001D88CC, "bankslot_writedatecall"),
+        (0x001D95C8, 0x001D9730, "bankslot_cleardatecall"),
+        (0x002B9C94, 0x002BA124, "bankslots_movedatecall"),
+    )
+    for start, end, name in date_calls:
+        call = symbols[name]
+        expect_branch(base_image, call, symbols["bankslot_getcurrentdate"],
+                      True, ARM_COND_AL, f"native {name}")
+        expect_branch(image, call, slot_date, True, ARM_COND_AL, name)
+        offset, limit = image_offset(start), image_offset(end)
+        body = bytearray(image[offset:limit])
+        position = image_offset(call) - offset
+        body[position:position + 4] = base_image[
+            image_offset(call):image_offset(call) + 4]
+        if body != base_image[offset:limit]:
+            raise ValueError(f"{name}: slot operation changed outside its date call")
+    for start, end in ((0x001D3BF4, 0x001D3D24), (0x002295E4, 0x002296B4),
+                       (0x0022E3E0, 0x0022E4E4), (0x002BA148, 0x002BA30C)):
+        first, last = image_offset(start), image_offset(end)
+        if image[first:last] != base_image[first:last]:
+            raise ValueError(f"native date/context/slot-swap body changed at {start:08X}")
+    expect_word(image, slot_date, 0xE59FC010, "slot-date mode-pointer load")
+    expect_word(image, slot_date + 4, 0xE5DCC000, "slot-date session-mode load")
+    expect_word(image, slot_date + 8, 0xE35C0000, "slot-date Offline-only test")
+    expect_branch(image, slot_date + 12, symbols["bankslot_getcurrentdate"],
+                  False, ARM_COND_NE, "native slot date in other modes")
+    expect_word(image, slot_date + 16, 0xE1A00001, "local slot-date output argument")
+    expect_branch(image, slot_date + 20, symbols["localmileage_getcurrentdate"],
+                  False, ARM_COND_AL, "shared console date for Offline slots")
+    expect_word(image, slot_date + 24, symbols["combinepatch_modestorage"],
+                "slot-date session-mode pointer")
 
     # Keep the marker at a stable address and reserve the complete zero-padded
     # block for future compatibility metadata.
@@ -566,6 +608,7 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
         raise ValueError("imported local-file payload objects are not contiguous or ordered")
 
     business_wrapper_symbols = (
+        "combinepatch_selectbankslotdate",
         "combinepatch_networkavailability",
         "combinepatch_titlemodetextinitialize",
         "combinepatch_titlescreenupdate",

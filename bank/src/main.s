@@ -255,6 +255,16 @@
 .org BankSaveState_Initialize + 0x28
     bl CombinePatch_SelectSaveMessage
 
+// Bank insertion, clearing and group moves request a new slot timestamp.
+// Only Offline Mode replaces the native network-clock dependency.
+// 银行槽写入、清空及批量移动需要新的槽位时间戳；仅离线模式替换原版联网时钟依赖。
+.org BankSlot_WriteDateCall
+    bl CombinePatch_SelectBankSlotDate
+.org BankSlot_ClearDateCall
+    bl CombinePatch_SelectBankSlotDate
+.org BankSlots_MoveDateCall
+    bl CombinePatch_SelectBankSlotDate
+
 // Redirect only the Turtle record's storage backend. The stock wrappers still
 // validate the object, set the loaded flag and map backend errors.
 // 仅重定向 Turtle 记录的存储后端。原版包装函数仍负责对象校验、loaded 标志和
@@ -918,6 +928,18 @@ CombinePatch_SelectNoGameDownloadButton:
     msr cpsr_f,r3
     mov r3,r12
     bx lr
+    .pool
+
+// Keep the native connection argument and date result outside Offline Mode.
+// Offline shares the console-date conversion already used by local tickets.
+// 非离线模式保留原版连接参数和日期结果；离线复用本地票据使用的主机日期转换。
+CombinePatch_SelectBankSlotDate:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeOffline
+    bne BankSlot_GetCurrentDate
+    mov r0,r1
+    b LocalMileage_GetCurrentDate
     .pool
 
 // Connection availability reads only the session mode latched as the title

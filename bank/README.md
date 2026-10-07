@@ -588,14 +588,14 @@ Spanish, Korean, Simplified Chinese, and Traditional Chinese.
 | `src/code_expansion.c` | Unified hardware/Azahar loader using the same architecture as Mover |
 | `src/fs_helpers.c` | Shared checked SD-filesystem implementation used by Bankdata and Turtle backends |
 | `src/offline_flow.c` | Local connection, disconnection, and save-display state updates |
-| `src/local_mileage.c` | Converts console time into the packed date consumed by the stock Poké Mile states; it does not replace the native point calculation |
+| `src/local_mileage.c` | Converts console dates shared by local miles, tickets and Bank-slot timestamps; it does not replace the native point calculation |
 | `src/local_ticket.c` | Job-backend selection, Azahar missing-interface probe and local ticket results; no Poké Mile calculation |
 | `src/unlock_mode.c` | Selects and normalizes the first server-returned unlock candidate for the stock challenge-code UI |
 | `src/patch_paths.c` | Path constants placed in added pages |
 | `src/turtle_redirect.c` | Redirected Turtle-record backend placed in added pages |
 | `include/bankdata_redirect.h` | Confirmed serialized Bankdata layout, partial native Bank views, redirection constants, and stock entry points |
 | `include/fs_helpers.h` | Shared filesystem types, SDK entry points, and checked SD-helper declarations |
-| `include/local_mileage.h` | Local mileage-date input declaration |
+| `include/local_mileage.h` | Date input shared by local miles, tickets and Bank slots |
 | `include/local_ticket.h` | Ticket-job and shared-data views, entitlement constants, and local job interfaces |
 | `include/offline_flow.h` | Stock timer entry points used by local flow states |
 | `include/code_expansion.h` | Expansion loader interface and SVC constants |
@@ -647,6 +647,7 @@ bytes, while runtime mapping grows by only four pages, `0x4000` (16 KiB).
 | `0x002A8760`, `0x002A93F4`, 4 bytes each | Native state 18/17 update prologues | Branch to added-page mode dispatch, then replay the original push and complete native body; only Unlock Mode adds acknowledgment-driven retry/exit branches. |
 | `0x002A5860`, `0x002A588C`, 4 bytes each | Native state-18 result test and state-23 success branch | Unlock Mode reconstructs state 10 after confirmed mismatch and latches successful official forced rollback; native controller, construction and cleanup remain intact. |
 | `0x002B0444`, `0x002B0464`, `0x002B1994`, 4 bytes each | State 15 job initialization, polling and unbinding | Call added-page wrappers; all other state-15 bytes and native jobs stay intact. |
+| `0x001D887C`, `0x001D96E4`, `0x002B9DC4`, 4 bytes each | Date calls in Bank-slot writes, clears and group moves | Offline uses the current console date; other modes retain the native network-clock query. Slot-operation bodies are not reclaimed. |
 | `0x002B1B98`, `0x002B1BDC`, 4 bytes each | Title-exit UI-root load and completion return | Wait for native shared-prompt release before native title destruction, then reload the selected record and language; cleanup bodies remain intact. |
 | `[0x00313910, 0x00313A40)` | Original last text-page padding | `0x130` bytes reserved for Luma LayeredFS; untouched. |
 | `[0x00313A40, 0x00313B1C)` | Original last text-page padding | Startup assembly and `code_expansion.o`, `0xDC` bytes. |
@@ -662,22 +663,22 @@ eShop entries without consuming their function bodies. Original Mode restores
 their native routes. Title, feature, language and Turtle hooks select the
 appropriate behavior without replacing the native storage implementation.
 
-Added-page placements total `0x2AD8` (10968 bytes), leaving `0x528` (1320 bytes):
+Added-page placements total `0x2B94` (11156 bytes), leaving `0x46C` (1132 bytes):
 
 | Content | Actual range | Size |
 | --- | --- | --- |
 | Text, save and language assembly wrappers | `[0x003FC000, 0x003FC414)` | `0x414` |
 | `patch_paths.o` | `[0x003FC414, 0x003FC4C7)` | `0xB3`, then one alignment byte |
-| Mode, title, connection and unlock branch wrappers | `[0x003FC4C8, 0x003FCE84)` | `0x9BC` |
-| `turtle_redirect.o` | `[0x003FCE84, 0x003FD3C8)` | `0x544` |
-| `fs_helpers.o` | `[0x003FD3C8, 0x003FD998)` | `0x5D0` |
-| `bankdata_redirect.o` | `[0x003FD998, 0x003FE070)` | `0x6D8` |
-| `offline_flow.o` | `[0x003FE070, 0x003FE190)` | `0x120` |
-| `local_mileage.o` | `[0x003FE190, 0x003FE5B0)` | `0x420` |
-| `local_ticket.o` | `[0x003FE5B0, 0x003FE954)` | `0x3A4` |
-| `unlock_mode.o` | `[0x003FE954, 0x003FEB10)` | `0x1BC` |
-| Ticket assembly wrappers, literal pool and policy byte | `[0x003FEB10, 0x003FEB6C)` | `0x5C` |
-| Unused added-page space | `[0x003FEB6C, 0x003FF000)` | `0x494` |
+| Mode, title, connection, unlock and slot-date branch wrappers | `[0x003FC4C8, 0x003FCEA0)` | `0x9D8` |
+| `turtle_redirect.o` | `[0x003FCEA0, 0x003FD3E4)` | `0x544` |
+| `fs_helpers.o` | `[0x003FD3E4, 0x003FD9B4)` | `0x5D0` |
+| `bankdata_redirect.o` | `[0x003FD9B4, 0x003FE08C)` | `0x6D8` |
+| `offline_flow.o` | `[0x003FE08C, 0x003FE1AC)` | `0x120` |
+| `local_mileage.o` | `[0x003FE1AC, 0x003FE5D8)` | `0x42C` |
+| `local_ticket.o` | `[0x003FE5D8, 0x003FE97C)` | `0x3A4` |
+| `unlock_mode.o` | `[0x003FE97C, 0x003FEB38)` | `0x1BC` |
+| Ticket assembly wrappers, literal pool and policy byte | `[0x003FEB38, 0x003FEB94)` | `0x5C` |
+| Unused added-page space | `[0x003FEB94, 0x003FF000)` | `0x46C` |
 
 Native text's actual size stays fixed, preserving Luma LayeredFS placement.
 Its path still uses the rodata tail at `[0x00369370, 0x00369397)`, which this
