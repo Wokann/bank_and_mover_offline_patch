@@ -108,6 +108,7 @@
 .definelabel MoverMemory_Copy,                     0x001E6F8C
 .definelabel MoverSourceList_UpdateVtableSlot,       0x002E6620
 .definelabel MoverSourceSelection_IdCompare,         0x00244870
+.definelabel MoverSourceList_GameTitleCall,          0x0019B240
 .definelabel MoverVcSource_IncrementCount,           0x0024149C
 .definelabel MoverNds_ReadSave,                      0x0021A7E0
 .definelabel MoverNds_ReadGameCode,                  0x0021AA0C

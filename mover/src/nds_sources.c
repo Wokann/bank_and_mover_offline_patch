@@ -107,6 +107,27 @@ static int languageRank(u8 language)
     return -1;
 }
 
+/* Only the Gen 5 title changes; trainer details and VC titles stay native. */
+/* 只更改第五世代游戏名，训练家信息与 VC 游戏名仍走原版流程。 */
+u32 NdsSources_TitleMessage(const MoverSourceListStateView *state,u32 originalMessage)
+{
+    const NdsScannerContext *context=*NDS_SCANNER_CONTEXT_SLOT;
+    const NdsSourceWinner *winner;
+    u32 sourceId;
+    int rank;
+    if (!context || state->cursor>=state->sourceCount ||
+        state->cursor>=NDS_SOURCE_LIST_CAPACITY) return originalMessage;
+    sourceId=state->sourceIds[state->cursor];
+    if (sourceId<1 || sourceId>NDS_GAME_COUNT) return originalMessage;
+    winner=&context->winners[sourceId-1];
+    if (!winner->valid || winner->sourceId!=sourceId ||
+        (winner->gameCode&0xFFFFu)!=0x5249u ||
+        (u8)(winner->gameCode>>16)!=(u8)"BAED"[sourceId-1]) return originalMessage;
+    rank=languageRank((u8)(winner->gameCode>>24));
+    if (rank<0) return originalMessage;
+    return NDS_GAME_TITLE_MESSAGE_BASE+(u32)rank*NDS_GAME_COUNT+sourceId-1;
+}
+
 static int gameIndex(const u8 header[NDS_ROM_HEADER_READ_SIZE])
 {
     if (header[0x0C]!='I' || header[0x0D]!='R' || languageRank(header[0x0F])<0)
@@ -152,6 +173,9 @@ static void captureDisplay(void *sourceContext,u8 display[NDS_DISPLAY_RECORD_SIZ
 static void capturePhysicalSources(NdsScannerContext *context,MoverSourceListStateView *state)
 {
     u32 item;
+    u32 gameCode=0;
+    if (state->sourceCount && NdsSources_OriginalReadGameCode(&gameCode)!=0)
+        gameCode=0;
     for (item=0;item<state->sourceCount && item<NDS_GAME_COUNT;item++) {
         u32 sourceId=state->sourceIds[item];
         if (sourceId>=1 && sourceId<=NDS_GAME_COUNT) {
@@ -159,6 +183,7 @@ static void capturePhysicalSources(NdsScannerContext *context,MoverSourceListSta
             winner->valid=1;
             winner->kind=NDS_WINNER_CARD;
             winner->sourceId=(u8)sourceId;
+            winner->gameCode=gameCode;
             MoverMemory_Copy(winner->display,
                 state->listUi+0x90+item*NDS_DISPLAY_RECORD_SIZE,NDS_DISPLAY_RECORD_SIZE);
         }

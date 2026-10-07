@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Append mode-specific messages for the combined Poke Mover patch.
+"""Append mode-specific messages and ROM-language Gen 5 titles.
 
-为 Poke Mover 合并补丁追加按模式选择的文本。
+为 Poke Mover 合并补丁追加按模式选择的文本及按 ROM 语言显示的第五世代游戏名。
 """
 
 from __future__ import annotations
@@ -15,6 +15,12 @@ from tools import message_archive as message_codec
 ARCHIVES = ("0/0/4", "0/0/5", "0/0/6", "0/0/7", "0/0/8", "0/0/9",
             "0/1/0", "0/1/1", "0/1/2", "0/1/3")
 MESSAGE_FILE_INDEX = 23
+GAME_TITLE_FILE_INDEX = 24
+GAME_TITLE_MESSAGE_BASE = 54
+# Same order as languageRank() in nds_sources.c: J / O / F / I / D / S / K.
+# 与 nds_sources.c 中 languageRank() 的 J / O / F / I / D / S / K 顺序一致。
+GAME_TITLE_ARCHIVES = ("0/0/5", "0/0/6", "0/0/7", "0/0/8", "0/0/9",
+                       "0/1/0", "0/1/1")
 TITLE_HOME_LINE = 39
 TITLE_OFFLINE_LINE = 67
 TITLE_ONLINE_LINE = 68
@@ -121,12 +127,24 @@ TITLE_ONLINE = {
 }
 
 
+def read_game_titles(source_romfs: Path) -> tuple[tuple[list[int], int], ...]:
+    titles: list[tuple[list[int], int]] = []
+    for archive in GAME_TITLE_ARCHIVES:
+        entries = message_codec.read_garc((source_romfs / "a" / Path(archive)).read_bytes())[2]
+        lines = message_codec.read_message_values(entries[GAME_TITLE_FILE_INDEX].files[0])
+        if len(lines) != GAME_TITLE_MESSAGE_BASE:
+            raise ValueError(f"unexpected stock game-title count for {archive}: {len(lines)}")
+        titles.extend(lines[4:8])
+    return tuple(titles)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source-romfs", required=True, type=Path)
     parser.add_argument("--output-romfs", required=True, type=Path)
     args = parser.parse_args()
 
+    game_titles = read_game_titles(args.source_romfs)
     for archive in ARCHIVES:
         source = args.source_romfs / "a" / Path(archive)
         destination = args.output_romfs / "a" / Path(archive)
@@ -162,10 +180,23 @@ def main() -> None:
                 (DISCONNECT_MESSAGES[archive], flags(STOCK_DISCONNECT_LINE)),
             ),
         )
-        rebuilt = message_codec.write_garc(version, alignment, entries)
-        rebuilt_lines = message_codec.read_message_lines(
-            message_codec.read_garc(rebuilt)[2][MESSAGE_FILE_INDEX].files[0]
+        title_entry = entries[GAME_TITLE_FILE_INDEX]
+        original_titles = message_codec.read_message_values(title_entry.files[0])
+        if len(original_titles) != GAME_TITLE_MESSAGE_BASE:
+            raise ValueError(f"unexpected stock game-title count for {archive}: {len(original_titles)}")
+        title_entry.files[0] = message_codec.patch_message_file(
+            title_entry.files[0], {}, appended_value_lines=game_titles,
         )
+        rebuilt = message_codec.write_garc(version, alignment, entries)
+        rebuilt_entries = message_codec.read_garc(rebuilt)[2]
+        rebuilt_lines = message_codec.read_message_lines(
+            rebuilt_entries[MESSAGE_FILE_INDEX].files[0]
+        )
+        rebuilt_titles = message_codec.read_message_values(
+            rebuilt_entries[GAME_TITLE_FILE_INDEX].files[0]
+        )
+        if rebuilt_titles != original_titles + list(game_titles):
+            raise ValueError(f"game-title verification failed for {archive}")
         expected = {
             TITLE_HOME_LINE: original_lines[TITLE_HOME_LINE],
             TITLE_OFFLINE_LINE: offline_title,

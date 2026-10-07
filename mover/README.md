@@ -83,10 +83,11 @@ interfaces, hardware and unknown environments remain native. This does not
 prove server-side approval or exclude downstream effects on cloud operations.
 NNID, remote Pokemon checks, downloading and remote saving remain native.
 
-Stock message entries remain unchanged. The LayeredFS archive only appends two
-title variants and four offline connection/save messages; runtime hooks select
-those entries only in Offline Mode. All ten shipped languages are rebuilt and
-validated.
+Stock message entries remain unchanged. LayeredFS appends two title-screen
+mode variants, four offline connection/save messages, and 28 Gen 5 game names
+copied from the original seven game-language resources. Connection/save
+overrides apply only in Offline Mode; ROM-language game names apply in both
+modes. All ten shipped UI languages are rebuilt and validated.
 
 ## Offline prerequisites and local file
 
@@ -151,6 +152,15 @@ unchanged. Selecting a digital source pins its UTF-16 save path; the actual
 transfer reopens it and runs native validation again. A later I/O failure
 follows the current mode's native error or rollback route instead of silently
 changing to another copy mid-transaction.
+
+Gen 5 game names follow the selected cartridge or ROM's game-code language,
+not the Mover UI language: `J` Japanese, `O` English, `F` French, `I` Italian,
+`D` German, `S` Spanish, or `K` Korean. The physical cartridge's game code is
+read after native validation; SD sources retain the code read during scanning.
+All four bundled body-text fonts contain the characters used by these original
+names. The UI language, trainer name/ID, source priority, and native VC title
+selection remain unchanged. If the game code cannot be read or recognized,
+the original UI-language title is retained.
 
 The Bank connection, validation, and save state diagram below applies only to
 Offline Mode. Online Mode performs the same source selection, then continues
@@ -395,13 +405,13 @@ state object; the native state exit path performs cleanup.
 | `src/code_expansion.c` / `include/code_expansion.h` | Identify Azahar, obtain a real process handle, and enable execution only on the added pages |
 | `src/fs_helpers.c` / `include/fs_helpers.h` | Shared checked SD operations; TLS/SVC primitives remain ARM |
 | `src/nds_fs.c` / `include/nds_fs.h` | UTF-16 directory enumeration and ranged file I/O |
-| `src/nds_sources.c` / `include/nds_sources.h` | Per-frame Gen 5 source discovery, native validation, ranking, and save-I/O dispatch |
+| `src/nds_sources.c` / `include/nds_sources.h` | Per-frame Gen 5 source discovery, native validation, ranking, ROM-language titles, and save-I/O dispatch |
 | `src/bankdata_redirect.c` | Local Bankdata loading, transfer-slot preservation, eligibility update, and crash-safe temporary write, commit, and rollback |
 | `src/local_ticket.c` | Job-backend selection, Azahar missing-interface probe, local job/campaign results and console-calendar calculation |
 | `src/local_validation.c` | Read-only Gen 5 integrity/empty-slot classification and Gen 5/VC per-slot result isolation |
 | `src/offline_flow.c` | Independent network, disconnect, remote-check, no-transfer, and save-delay state updates |
 | `src/patch_paths.c` | Shared SD path constants |
-| `src/patch_messages.py` | Appends and validates title/offline text in all ten language archives |
+| `src/patch_messages.py` | Appends and validates mode/offline text and original ROM-language game names in all ten UI-language archives |
 | `tools/message_archive.py` | Self-contained GARC and encrypted message-file codec |
 | `tools/verify_patch.py` | Verifies the base hash, code regions, preserved constructors, hooks, native replay, BPS reconstruction/CRCs, and resources |
 | `tools/prepare_expanded_code.py` | Materialize BSS at its original addresses, extend data pages, authorize required SVCs, and generate the matching ExHeader |

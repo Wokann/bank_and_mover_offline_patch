@@ -97,6 +97,8 @@
     .word NdsSources_ListUpdate + 1
 .org MoverSourceSelection_IdCompare
     bl CombinePatch_SelectNdsSource
+.org MoverSourceList_GameTitleCall
+    bl CombinePatch_SelectNdsGameTitle
 .org MoverVcSource_IncrementCount
     bl CombinePatch_VcSourceAdded
 .org MoverNds_ReadSave
@@ -487,6 +489,20 @@ CombinePatch_SelectNdsSource:
     pop {r1-r3,lr}
     cmp r0,#5
     bx lr
+
+// The native caller keeps the source-list state in r4. Replace only r3's
+// title message ID, then tail-call the stock pane/font formatting function.
+// 原调用点将来源列表状态保存在 r4。仅替换 r3 中的游戏名消息编号，再尾调用原版
+// 文本框／字体格式化函数。
+CombinePatch_SelectNdsGameTitle:
+    push {r0-r2,lr}
+    mov r0,r4
+    mov r1,r3
+    ldr r12,=NdsSources_TitleMessage + 1
+    blx r12
+    mov r3,r0
+    pop {r0-r2,lr}
+    b MoverUi_SetMessageLine
 
 // The stock 40-entry array assumes at most one Gen 5 cartridge plus 39 VC
 // sources. Shared SD discovery can contribute four Gen 5 entries, so end the

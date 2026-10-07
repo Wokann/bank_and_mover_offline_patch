@@ -50,12 +50,7 @@ def _text_values(text: str) -> list[int]:
     return values
 
 
-def patch_message_file(
-    data: bytes,
-    replacements: dict[int, str],
-    appended_lines: tuple[tuple[str, int], ...] = (),
-    appended_value_lines: tuple[tuple[list[int], int], ...] = (),
-) -> bytes:
+def read_message_values(data: bytes) -> list[tuple[list[int], int]]:
     if len(data) < 0x18 or u16(data, 0) != 1 or u32(data, 12) != 0x10:
         raise ValueError("unsupported message-file header")
     line_count = u16(data, 2)
@@ -70,10 +65,21 @@ def patch_message_file(
         if len(encrypted) != length * 2:
             raise ValueError(f"message line {index} extends past the file")
         values = _decrypt_line(encrypted, line_key)
-        if index in replacements:
-            values = _text_values(replacements[index])
         lines.append((values, flags))
         line_key = (line_key + 0x2983) & 0xFFFF
+    return lines
+
+
+def patch_message_file(
+    data: bytes,
+    replacements: dict[int, str],
+    appended_lines: tuple[tuple[str, int], ...] = (),
+    appended_value_lines: tuple[tuple[list[int], int], ...] = (),
+) -> bytes:
+    lines = read_message_values(data)
+    section_offset = u32(data, 12)
+    for index, text in replacements.items():
+        lines[index] = (_text_values(text), lines[index][1])
     lines.extend((_text_values(text), flags) for text, flags in appended_lines)
     lines.extend((list(values), flags) for values, flags in appended_value_lines)
     section = bytearray(4 + len(lines) * 8)
@@ -94,20 +100,12 @@ def patch_message_file(
 
 
 def read_message_lines(data: bytes) -> list[str]:
-    line_count = u16(data, 2)
-    section_offset = u32(data, 12)
     lines: list[str] = []
-    line_key = 0x7C89
-    for index in range(line_count):
-        entry_offset = section_offset + 4 + index * 8
-        text_offset, length, _flags = struct.unpack_from("<IHH", data, entry_offset)
-        start = section_offset + text_offset
-        values = _decrypt_line(data[start : start + length * 2], line_key)
+    for values, _flags in read_message_values(data):
         if 0 in values:
             values = values[: values.index(0)]
         encoded = struct.pack(f"<{len(values)}H", *values) if values else b""
         lines.append(encoded.decode("utf-16le"))
-        line_key = (line_key + 0x2983) & 0xFFFF
     return lines
 
 

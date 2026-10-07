@@ -260,6 +260,7 @@ def main() -> None:
         "offlinepatch_rollback", "offlinepatch_preparegen5validation",
         "offlinepatch_preparegen12validation",
         "ndssources_listupdate", "ndssources_selectlistid",
+        "ndssources_titlemessage", "combinepatch_selectndsgametitle",
         "ndssources_readsave", "ndssources_readgamecode", "ndssources_writesave",
         "ndssources_originalreadsave", "ndssources_originalreadgamecode",
         "ndssources_originalwritesave", "combinepatch_selectndssource",
@@ -407,6 +408,7 @@ def main() -> None:
         0x0024A428: 0x13A0000D,
         0x0024A6F0: 0xE3A01009,
         0x00244870: 0xE3500005,
+        0x0019B240: 0xEB000472,
         0x0024149C: 0xE1C605B8,
         0x0021A7E0: 0xE92D4008,
         0x0021AA0C: 0xE92D40F0,
@@ -449,6 +451,7 @@ def main() -> None:
         0x0024A428: ("combinepatch_afterrollback", False, 0x1),
         0x0024A6F0: ("combinepatch_selectsavemessage", True, 0xE),
         0x00244870: ("combinepatch_selectndssource", True, 0xE),
+        0x0019B240: ("combinepatch_selectndsgametitle", True, 0xE),
         0x0024149C: ("combinepatch_vcsourceadded", True, 0xE),
         0x0021A7E0: ("combinepatch_ndsreadsaveentry", False, 0xE),
         0x0021AA0C: ("combinepatch_ndsreadgamecodeentry", False, 0xE),
@@ -683,10 +686,13 @@ def main() -> None:
         if (target, link, condition) != (continuation, False, 0xE):
             raise ValueError(f"incorrect stock continuation in {name}")
 
-    # Preserve discovery, the asynchronous worker, save validation, and card
-    # I/O bodies. Only the three entry instructions are redirected.
-    # 保留原版来源发现、异步作业、存档校验及卡带 I/O 函数体；只转接三个入口指令。
+    # Preserve source discovery, save/card-I/O bodies, trainer display, and
+    # the native title table outside the checked I/O and game-title hooks.
+    # 除已核对的卡带 I/O 及游戏名钩子外，保留来源发现、存档／卡带读写函数体、
+    # 训练家显示与原版游戏名表。
     for start, end in ((0x0019A94C, 0x0019AF04),
+                       (0x0019B1F0, 0x0019B240), (0x0019B244, 0x0019B2E8),
+                       (0x002B47E0, 0x002B488C),
                        (0x0021A7E4, 0x0021AA0C), (0x0021AA10, 0x0021AB50),
                        (0x0021AB54, 0x0021ADCC), (0x00243510, 0x00243AC0),
                        (0x00244D2C, 0x002450F4)):
@@ -694,6 +700,7 @@ def main() -> None:
             raise ValueError(f"native source/save implementation changed: {start:08X}-{end:08X}")
 
     messages = load_helper(Path(__file__).resolve().parents[1] / "src" / "patch_messages.py")
+    game_titles = messages.read_game_titles(args.source_romfs)
     for archive in messages.ARCHIVES:
         source_entries = messages.message_codec.read_garc(
             (args.source_romfs / "a" / Path(archive)).read_bytes()
@@ -701,16 +708,37 @@ def main() -> None:
         output_entries = messages.message_codec.read_garc(
             (args.output_romfs / "a" / Path(archive)).read_bytes()
         )[2]
-        source_lines = messages.message_codec.read_message_lines(
+        source_lines = messages.message_codec.read_message_values(
             source_entries[messages.MESSAGE_FILE_INDEX].files[0]
         )
-        output_lines = messages.message_codec.read_message_lines(
+        output_lines = messages.message_codec.read_message_values(
             output_entries[messages.MESSAGE_FILE_INDEX].files[0]
         )
         if output_lines[:len(source_lines)] != source_lines:
             raise ValueError(f"stock messages changed in {archive}")
         if len(output_lines) != messages.DISCONNECT_LINE + 1:
             raise ValueError(f"unexpected appended line count in {archive}")
+        source_titles = messages.message_codec.read_message_values(
+            source_entries[messages.GAME_TITLE_FILE_INDEX].files[0]
+        )
+        output_titles = messages.message_codec.read_message_values(
+            output_entries[messages.GAME_TITLE_FILE_INDEX].files[0]
+        )
+        if len(source_titles) != messages.GAME_TITLE_MESSAGE_BASE or \
+                output_titles != source_titles + list(game_titles):
+            raise ValueError(f"ROM-language game titles differ from stock resources in {archive}")
+        if len(source_entries) != len(output_entries):
+            raise ValueError(f"archive entry count changed in {archive}")
+        for index, (source_entry, output_entry) in enumerate(zip(source_entries, output_entries)):
+            if source_entry.flags != output_entry.flags or \
+                    source_entry.files.keys() != output_entry.files.keys():
+                raise ValueError(f"archive entry layout changed in {archive}, entry {index}")
+            for subindex, source_file in source_entry.files.items():
+                if subindex == 0 and index in (messages.MESSAGE_FILE_INDEX,
+                                               messages.GAME_TITLE_FILE_INDEX):
+                    continue
+                if output_entry.files[subindex] != source_file:
+                    raise ValueError(f"unrelated resource changed in {archive}, entry {index}")
 
     print("combined Mover patch verification passed")
 

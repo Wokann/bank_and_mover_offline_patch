@@ -10,6 +10,7 @@ enum NdsSourceConstant {
     NDS_DISPLAY_RECORD_SIZE = 0x24,
     NDS_PATH_CAPACITY = 0x120,
     NDS_ROM_HEADER_READ_SIZE = 0x10,
+    NDS_GAME_TITLE_MESSAGE_BASE = 54,
     NDS_BACKEND_CARD = 0,
     NDS_BACKEND_SD = 1
 };
@@ -115,6 +116,7 @@ s32 NdsSources_OriginalWriteSave(u32 device,u32 offset,const void *data,u32 size
 
 u32 NdsSources_ListUpdate(MoverSourceListStateView *state,u32 arg1,u32 arg2,s32 arg3);
 u32 NdsSources_SelectListId(u32 sourceId);
+u32 NdsSources_TitleMessage(const MoverSourceListStateView *state,u32 originalMessage);
 s32 NdsSources_ReadSave(u32 device,u32 offset,void *data,u32 size);
 s32 NdsSources_ReadGameCode(u32 *gameCode);
 s32 NdsSources_WriteSave(u32 device,u32 offset,const void *data,u32 size);

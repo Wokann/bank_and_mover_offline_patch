@@ -52,7 +52,7 @@ byte for byte. No native ticket-job or free-campaign function is reclaimed.
 | Payload area | Modules | Used end / remaining space |
 |---|---|---|
 | Text tail `0x0028D2E0–0x0028DFC0`: mapped executable padding | Startup trampoline and automatic-environment `code_expansion.o` | `0x0028D3C0` / `0xC00` bytes |
-| Added pages `0x00365000–0x00367000`: extended data, executable after startup | All mode wrappers, native trampolines, and feature objects | `0x00366E16` / `0x1EA` bytes |
+| Added pages `0x00365000–0x00367000`: extended data, executable after startup | All mode wrappers, native trampolines, and feature objects | `0x00366ED6` / `0x12A` bytes |
 
 The startup hook redirects only the call at `0x00100010` to the small loader.
 It preserves `r0–r12/LR`, duplicates the current-process pseudo-handle with SVC
@@ -365,6 +365,36 @@ A physical cartridge in either mode uses exact trampolines that replay the
 original prologues and continue through the untouched function bodies. Mode
 differences begin only in the later Bank, network, legality-service, and
 transaction states.
+
+### Gen 5 game names follow the source language
+
+The native display routine `0x0019B1F0` maps source IDs `1–4` to message IDs
+`4–7` in message file `24` of the current UI-language archive. Consequently a
+Gen 5 game's title originally follows the UI language. VC IDs already select
+language-specific entries from the native 43-element table at `0x002B47E0`.
+
+Only the `BL MoverUi_SetMessageLine` at `0x0019B240` is redirected. Its wrapper
+uses the source-list state retained in `r4`, replaces the title ID in `r3`,
+restores `r0–r2/LR`, and tail-calls the original text-pane function. Font choice,
+width adjustment, the subsequent trainer-name/ID calls, and the original title
+table remain untouched.
+
+`NdsSources_TitleMessage` uses the winning source's game code, not a filename or
+the currently active I/O backend. SD winners already retain it; valid physical
+cartridges additionally read it through `NdsSources_OriginalReadGameCode` after
+native discovery. Failure to read or recognize the code falls back to the stock
+message without changing source availability. Lookup never allocates a scanner
+context and does not read mode storage.
+
+The build copies the four original Gen 5 titles from each `J/O/F/I/D/S/K`
+language archive into message file `24` of every UI archive, retaining their
+UTF-16 values and flags. Existing IDs `0–53` stay unchanged; new IDs `54–81`
+are `54 + languageRank * 4 + sourceId - 1`. The seven source archives are
+`a/0/0/5` through `a/0/0/9`, then `a/0/1/0` and `a/0/1/1`. All four body-text
+CFNT resources in `a/0/2/3` contain every character required by these 28 names;
+the numeric-only fonts are not game-title fonts and are not modified. No global
+UI-language switch or new font resource is needed. Both modes use this title
+selection, while VC titles and discovery/validation rules remain native.
 
 ## Network states
 
