@@ -51,13 +51,15 @@ s32 openArchive(u64 *archive)
     return result;
 }
 
-void closeArchive(u64 archive)
+s32 closeArchive(u64 archive)
 {
     volatile u32 *c=fsCommandBuffer();
+    s32 result;
     c[0]=FSUSER_CMD_CLOSE_ARCHIVE;
     c[1]=(u32)archive;
     c[2]=(u32)(archive>>32);
-    (void)fsSync(*FSUSER_HandleSlot);
+    result=fsSync(*FSUSER_HandleSlot);
+    return result?result:(s32)c[1];
 }
 
 s32 pathCommand(u32 command,u64 archive,const char *path,u32 pathSize)

@@ -24,10 +24,6 @@ s32 openDirectoryUtf16(const u16 *path,u32 pathSize,u64 *archive,u32 *handle)
     result=fsSync(*FSUSER_HandleSlot);
     if (!result) result=(s32)c[1];
     if (!result) *handle=c[3];
-    if (result) {
-        closeArchive(*archive);
-        *archive=0;
-    }
     return result;
 }
 

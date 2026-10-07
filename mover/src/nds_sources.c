@@ -23,24 +23,28 @@ static NdsScannerContext *scannerContext(void)
     return context;
 }
 
-static void closeScanDirectory(NdsScannerContext *context)
+static s32 closeScanDirectory(NdsScannerContext *context)
 {
+    s32 result=0,closeResult;
     if (context->directoryHandle) {
-        (void)closeDirectory(context->directoryHandle);
+        result=closeDirectory(context->directoryHandle);
         context->directoryHandle=0;
     }
     if (context->directoryArchive) {
-        closeArchive(context->directoryArchive);
+        closeResult=closeArchive(context->directoryArchive);
         context->directoryArchive=0;
+        if (!result) result=closeResult;
     }
+    return result;
 }
 
-static void resetScanner(NdsScannerContext *context)
+static s32 resetScanner(NdsScannerContext *context)
 {
-    closeScanDirectory(context);
+    s32 result=closeScanDirectory(context);
     MoverMemory_Clear(context,sizeof(*context));
     context->phase=NDS_SCAN_PHYSICAL;
     context->backend=NDS_BACKEND_CARD;
+    return result;
 }
 
 static u32 utf16Length(const u16 *text,u32 capacity)
@@ -191,9 +195,22 @@ static void capturePhysicalSources(NdsScannerContext *context,MoverSourceListSta
     state->sourceCount=0;
 }
 
+static void abortDirectoryScan(NdsScannerContext *context,MoverSourceListStateView *state)
+{
+    (void)closeScanDirectory(context);
+    context->backend=NDS_BACKEND_CARD;
+    context->phase=NDS_SCAN_PASSTHROUGH;
+    state->sourceCount=0;
+    state->state=6;
+}
+
 static void emitNdsSources(NdsScannerContext *context,MoverSourceListStateView *state)
 {
     u32 index;
+    if (closeScanDirectory(context)) {
+        abortDirectoryScan(context,state);
+        return;
+    }
     state->sourceCount=0;
     for (index=0;index<NDS_GAME_COUNT;index++) {
         NdsSourceWinner *winner=&context->winners[index];
@@ -204,19 +221,9 @@ static void emitNdsSources(NdsScannerContext *context,MoverSourceListStateView *
         MoverMemory_Copy(state->listUi+0x90+item*NDS_DISPLAY_RECORD_SIZE,
             winner->display,NDS_DISPLAY_RECORD_SIZE);
     }
-    closeScanDirectory(context);
     context->backend=NDS_BACKEND_CARD;
     context->phase=NDS_SCAN_PASSTHROUGH;
     state->state=3;
-}
-
-static void abortDirectoryScan(NdsScannerContext *context,MoverSourceListStateView *state)
-{
-    closeScanDirectory(context);
-    context->backend=NDS_BACKEND_CARD;
-    context->phase=NDS_SCAN_PASSTHROUGH;
-    state->sourceCount=0;
-    state->state=6;
 }
 
 static void beginDirectoryScan(NdsScannerContext *context,MoverSourceListStateView *state)
@@ -324,8 +331,13 @@ u32 NdsSources_ListUpdate(MoverSourceListStateView *state,u32 arg1,u32 arg2,s32 
     context=scannerContext();
     if (!context) return MoverSourceList_Update(state,arg1,arg2,arg3);
     if (state->state==0) {
-        resetScanner(context);
-        return MoverSourceList_Update(state,arg1,arg2,arg3);
+        s32 closeResult=resetScanner(context);
+        result=MoverSourceList_Update(state,arg1,arg2,arg3);
+        if (closeResult) {
+            abortDirectoryScan(context,state);
+            return 0;
+        }
+        return result;
     }
     if (context->phase==NDS_SCAN_PHYSICAL) {
         result=MoverSourceList_Update(state,arg1,arg2,arg3);

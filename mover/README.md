@@ -156,11 +156,12 @@ Only one valid source is retained for each game:
    source: a valid cartridge or a valid `J` copy. Otherwise it reaches the end
    of the directory.
 
-A missing directory means that no SD digital source is present and the native
-flow continues. If directory enumeration IPC fails after opening the directory,
-the current uncommitted scan is discarded and the native no-usable-software
-error route is used; the failure is not mistaken for a normal end of directory
-and no partial list is shown. Custom directory and save-validation phases still
+A missing directory continues the native flow without SD digital sources only
+after its archive closes successfully. Enumeration, directory-close, or
+archive-close failures discard the uncommitted scan and use the native
+no-usable-software error route. The list is published only after successful
+cleanup; failed cleanup of old handles also prevents a new scan. Custom
+directory and save-validation phases still
 run the native loading-view update once per frame. File and directory close
 still attempt kernel-handle release after a failed service-close request and
 return the first error, preventing handle leaks while scanning many candidates.

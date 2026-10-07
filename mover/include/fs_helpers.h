@@ -65,7 +65,7 @@ s32 fsCloseHandle(u32 handle) __attribute__((target("arm"),long_call,noinline));
 s32 closeFile(u32 handle);
 
 s32 openArchive(u64 *archive);
-void closeArchive(u64 archive);
+s32 closeArchive(u64 archive);
 s32 pathCommand(u32 command,u64 archive,const char *path,u32 pathSize);
 s32 renamePath(u64 archive,const char *from,u32 fromSize,const char *to,u32 toSize);
 s32 openFile(const char *path,u32 pathSize,u32 flags,u32 *handle);
