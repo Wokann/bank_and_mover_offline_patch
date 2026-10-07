@@ -366,7 +366,7 @@ It is therefore kept only in the personal test branch and will not be submitted
 to Azahar's official main branch.
 
 Both paths remain in the same code. This definition changes only the policy
-byte at `[0x003FEAD4, 0x003FEAD5)`. State 15 retains its original entry and
+byte at `[0x003FEB68, 0x003FEB69)`. State 15 retains its original entry and
 state transitions. Only three calls are redirected: job initialization at
 `0x002B0444`, result polling at `0x002B0464`, and unbinding at `0x002B1994`.
 The initialization wrapper passes job, shared data, session mode and policy to
@@ -380,8 +380,12 @@ Local results contain the current console date and an expiry exactly 999 days
 later. Native getters calculate remaining days, hours, and validity. The
 current date itself is not advanced and remains the local mileage reference.
 Purchase counts stay `-1` (unknown), so no ticket-purchase reward is invented.
-Existing EC account fields are preserved; there is no free-campaign window or
-system eShop applet/loading-animation simulation. The completed job uses the
+Existing EC account fields are preserved. The free-campaign window reuses the
+same current/expiry dates in the native decimal timestamp format; state 15
+calculates the free flag and remaining time, so the menu uses its native free-use
+text. This window is rebuilt from console time on each local initialization,
+not from fixed server campaign dates. No system eShop applet/loading animation
+is simulated. The completed job uses the
 same status as native verification with at least 15 entitlement days. Clock
 failure or an expiry beyond the native year range follows native error handling.
 
@@ -670,10 +674,10 @@ Added-page placements total `0x2AD8` (10968 bytes), leaving `0x528` (1320 bytes)
 | `bankdata_redirect.o` | `[0x003FD998, 0x003FE070)` | `0x6D8` |
 | `offline_flow.o` | `[0x003FE070, 0x003FE190)` | `0x120` |
 | `local_mileage.o` | `[0x003FE190, 0x003FE5B0)` | `0x420` |
-| `local_ticket.o` | `[0x003FE5B0, 0x003FE8C0)` | `0x310` |
-| `unlock_mode.o` | `[0x003FE8C0, 0x003FEA7C)` | `0x1BC` |
-| Ticket assembly wrappers, literal pool and policy byte | `[0x003FEA7C, 0x003FEAD8)` | `0x5C` |
-| Unused added-page space | `[0x003FEAD8, 0x003FF000)` | `0x528` |
+| `local_ticket.o` | `[0x003FE5B0, 0x003FE954)` | `0x3A4` |
+| `unlock_mode.o` | `[0x003FE954, 0x003FEB10)` | `0x1BC` |
+| Ticket assembly wrappers, literal pool and policy byte | `[0x003FEB10, 0x003FEB6C)` | `0x5C` |
+| Unused added-page space | `[0x003FEB6C, 0x003FF000)` | `0x494` |
 
 Native text's actual size stays fixed, preserving Luma LayeredFS placement.
 Its path still uses the rodata tail at `[0x00369370, 0x00369397)`, which this

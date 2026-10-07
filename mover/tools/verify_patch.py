@@ -252,6 +252,7 @@ def main() -> None:
         "combinepatch_modestorage", "combinepatch_ticketwrappersend",
         "localticket_initialize", "localticket_poll", "localticket_campaignresult",
         "localticket_initializeselected", "localticket_backendstorage",
+        "moverticketstate_campaigncallback", "crc16_calculate",
         "srv_getservicehandle", "codeexpansion_isazahar",
         "combinepatch_eligibilityupdate", "combinepatch_getpokemonupdate",
         "combinepatch_saveskipremotejob",
@@ -497,9 +498,12 @@ def main() -> None:
     if patched[state_start - IMAGE_BASE:state_end - IMAGE_BASE] != expected_state:
         raise ValueError("native ticket state/callback/cleanup changed outside its interfaces")
     for start, end in ((0x0023D3C0, 0x0023E910), (0x0023BC50, 0x0023BF24),
-                       (0x00199720, 0x0019983C)):
+                       (0x00199720, 0x0019983C), (0x0019BD88, 0x0019BE68)):
         if patched[start - IMAGE_BASE:end - IMAGE_BASE] != base[start - IMAGE_BASE:end - IMAGE_BASE]:
             raise ValueError(f"native ticket implementation changed: {start:08X}-{end:08X}")
+    if sym["moverticketstate_campaigncallback"] != 0x0024991C or \
+            sym["crc16_calculate"] != 0x0019BD88:
+        raise ValueError("local campaign callback/CRC addresses differ from Mover")
 
     wrapper_start = sym["combinepatch_ticketinitialize"]
     wrapper_end = sym["combinepatch_ticketwrappersend"]

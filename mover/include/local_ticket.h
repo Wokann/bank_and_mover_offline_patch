@@ -1,7 +1,6 @@
 #ifndef MOVER_OFFLINE_PATCH_LOCAL_TICKET_H
 #define MOVER_OFFLINE_PATCH_LOCAL_TICKET_H
 
-#include "mover_state.h"
 #include "patch_types.h"
 
 /* Fields filled by the native ticket state after its job reports success. */
@@ -37,11 +36,50 @@ typedef struct MoverTicketJobView {
     u32 currentDate[2];
 } MoverTicketJobView;
 
+/* Native ticket-state and campaign callback inputs, independent of other
+   state classes that reuse the same offsets. */
+/* 原版票务状态及活动回调输入，不与复用相同偏移的其他状态类混用。 */
+typedef struct MoverTicketStateView {
+    u8 reserved00[0x10];
+    u32 substate;
+    u8 reserved14[0x14];
+    MoverTicketSharedView *sharedData;
+    u8 reserved2C[0x14];
+    MoverTicketJobView *job;
+    u32 campaignRequestId;
+} MoverTicketStateView;
+
+typedef struct MoverCampaignDate {
+    u8 year[2];
+    u8 month;
+    u8 day;
+    u8 hour;
+    u8 minute;
+    u8 second;
+} MoverCampaignDate;
+
+typedef struct MoverCampaignRecord {
+    u32 reserved00;
+    MoverCampaignDate start;
+    MoverCampaignDate end;
+    u8 checksum[2];
+} MoverCampaignRecord;
+
+typedef struct MoverCampaignSourceView {
+    u8 reserved00[0x14];
+    u32 requestId;
+} MoverCampaignSourceView;
+
 typedef s32 (*SRV_GetServiceHandleFn)(u32 *,const char *,s32,u32);
 typedef int (*TicketJob_InitializeFn)(MoverTicketJobView *);
+typedef u32 (*Crc16_CalculateFn)(const void *,u32,u32);
+typedef s32 (*MoverTicketState_CampaignCallbackFn)(MoverTicketStateView *,
+    const MoverCampaignSourceView *,u32,const MoverCampaignRecord *);
 
 #define SRV_GetServiceHandle ((SRV_GetServiceHandleFn)0x001E596Cu)
 #define TicketJob_Initialize ((TicketJob_InitializeFn)0x0023D3C0u)
+#define Crc16_Calculate ((Crc16_CalculateFn)0x0019BD88u)
+#define MoverTicketState_CampaignCallback ((MoverTicketState_CampaignCallbackFn)0x0024991Cu)
 #define LocalTicket_BackendStorage ((volatile u8 *)0x00363FF8u)
 
 enum TicketProbeConstant {
@@ -63,13 +101,13 @@ enum MoverTicketConstant {
     MOVER_TICKET_JOB_VERIFIED = 10,
     MOVER_TICKET_MIN_YEAR = 1900,
     MOVER_TICKET_MAX_YEAR = 9999,
-    MOVER_TICKET_SUBSTATE_CHECK_ENTITLEMENT = 3
+    MOVER_TICKET_CAMPAIGN_CRC_SEED = 0xFFFF
 };
 
 int LocalTicket_Initialize(MoverTicketJobView *job,MoverTicketSharedView *shared);
 int LocalTicket_InitializeSelected(MoverTicketJobView *job,
     MoverTicketSharedView *shared,u32 mode,u32 allowEmulatorFallback);
 int LocalTicket_Poll(MoverTicketJobView *job,u32 *result,u32 minimumDays);
-s32 LocalTicket_CampaignResult(MoverStateView *state);
+s32 LocalTicket_CampaignResult(MoverTicketStateView *state);
 
 #endif

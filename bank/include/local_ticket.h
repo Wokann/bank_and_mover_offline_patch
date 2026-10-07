@@ -17,6 +17,7 @@ typedef struct BankTicketSharedView {
     u8 entitlementValid;
     u8 reserved45[0x0A];
     u8 freeCampaignActive;
+    /* Decimal YYYYMMDDhhmmss bounds / 十进制 YYYYMMDDhhmmss 活动边界。 */
     u32 freeCampaignStart[2];
     u32 freeCampaignEnd[2];
 } BankTicketSharedView;

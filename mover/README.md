@@ -235,7 +235,7 @@ decision, state exit and destruction remain native. Only four calls are routed:
 |---|---|---|
 | `0x00249754` | `TicketJob_Initialize` | Initialize local dates and job result fields |
 | `0x00249774` | `TicketJob_Poll` | Report a completed job with valid entitlement |
-| `0x00249818` | `MoverCampaign_Request` | Complete as no free campaign and resume the native entitlement decision |
+| `0x00249818` | `MoverCampaign_Request` | Deliver the local current-to-expiry window to the native campaign callback |
 | `0x00249CEC` | `TicketJob_Unbind` | No client was bound; still proceed with native destruction |
 
 The policy byte is at `0x00365428`. Initialization selects one backend per job,
@@ -259,7 +259,11 @@ interface is missing instead of using fabricated online ticket results.
 The local job supplies separate console-current and 999-day expiry dates.
 Native getters calculate `999` remaining days, `23976` total hours and the
 validity flag. Existing account fields are preserved; purchase counts remain
-unknown (`-1`), without inventing purchases or campaign rewards. An out-of-range
+unknown (`-1`), without inventing purchases or purchase rewards. The local
+campaign result passes this same window, with a matching request ID and valid
+CRC, to the unchanged native callback. It computes remaining time and sets the
+free/valid flags; the patch does not assign those outputs. Each local initialization rebuilds
+the window from console time, not fixed server campaign dates. An out-of-range
 date or failed job allocation uses the native error exit instead of success.
 See [Ticket state and local results](docs/code-analysis.md#ticket-state-and-local-results)
 for the field and branch comparison.

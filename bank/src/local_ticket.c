@@ -33,6 +33,23 @@ static int setExpiryDate(BankTicketJobView *job)
     return 1;
 }
 
+/* Campaign bounds use decimal YYYYMMDDhhmmss, unlike the job's packed dates.
+   Reuse the current/expiry pair; the native state computes free entitlement. */
+/* 活动边界使用十进制 YYYYMMDDhhmmss，而非作业的位打包日期。
+   复用当前时间与到期日，由原版状态计算免费使用权。 */
+static void setCampaignDate(u32 output[2],const u32 input[2])
+{
+    u32 date=input[0];
+    u64 value=(date>>26)|(input[1]<<6);
+    value=value*100u+((date>>22)&0x0Fu);
+    value=value*100u+((date>>17)&0x1Fu);
+    value=value*100u+((date>>12)&0x1Fu);
+    value=value*100u+((date>>6)&0x3Fu);
+    value=value*100u+(date&0x3Fu);
+    output[0]=(u32)value;
+    output[1]=(u32)(value>>32);
+}
+
 __attribute__((used,noinline,section(".text.offline")))
 int LocalTicket_Initialize(BankTicketJobView *job,BankTicketSharedView *shared)
 {
@@ -54,10 +71,8 @@ int LocalTicket_Initialize(BankTicketJobView *job,BankTicketSharedView *shared)
     }
     if (!LocalMileage_GetCurrentDate(job->currentDate) || !setExpiryDate(job)) return 0;
     shared->freeCampaignActive=0;
-    shared->freeCampaignStart[0]=0;
-    shared->freeCampaignStart[1]=0;
-    shared->freeCampaignEnd[0]=0;
-    shared->freeCampaignEnd[1]=0;
+    setCampaignDate(shared->freeCampaignStart,job->currentDate);
+    setCampaignDate(shared->freeCampaignEnd,job->expiryDate);
     return 1;
 }
 

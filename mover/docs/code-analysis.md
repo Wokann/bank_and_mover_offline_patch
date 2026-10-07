@@ -52,7 +52,7 @@ byte for byte. No native ticket-job or free-campaign function is reclaimed.
 | Payload area | Modules | Used end / remaining space |
 |---|---|---|
 | Text tail `0x0028D2E0–0x0028DFC0`: mapped executable padding | Startup trampoline and automatic-environment `code_expansion.o` | `0x0028D3C0` / `0xC00` bytes |
-| Added pages `0x00365000–0x00367000`: extended data, executable after startup | All mode wrappers, native trampolines, and feature objects | `0x00366D26` / `0x2DA` bytes |
+| Added pages `0x00365000–0x00367000`: extended data, executable after startup | All mode wrappers, native trampolines, and feature objects | `0x00366E16` / `0x1EA` bytes |
 
 The startup hook redirects only the call at `0x00100010` to the small loader.
 It preserves `r0–r12/LR`, duplicates the current-process pseudo-handle with SVC
@@ -227,7 +227,7 @@ Only these interfaces are routed:
 |---|---|---|---|
 | `0x00249754` | `0x0023D3C0` initialization | Populate local job fields; return `0` on failure | Original call and arguments |
 | `0x00249774` | `0x0023E230` polling | Report completion and successful result | Original call and arguments |
-| `0x00249818` | `0x0023BE4C` free-campaign request | No campaign; set substate `3` | Original request and asynchronous callback |
+| `0x00249818` | `0x0023BE4C` free-campaign request | Deliver the local window through the original campaign callback | Original request and asynchronous callback |
 | `0x00249CEC` | `0x0023E63C` unbind | No client was bound; proceed with destruction | Original unbind |
 
 Initialization keeps the job in `r0`, loads shared state `+0x28` into `r1`,
@@ -243,8 +243,8 @@ address, stack alignment and callee-saved registers are preserved.
 | `0` | Update UI and wait for the next stage | Unchanged |
 | `1` | Wait for UI, allocate/construct the `0x158`-byte job, initialize its client | Keep waiting, allocation and construction; replace client initialization only |
 | `2` | Poll; on success compute entitlement, copy account/purchase values, set validity and register the campaign callback | Same result consumer and registration; replace polling and campaign request only |
-| `6` | Wait for the campaign callback, which advances to `3` | Local campaign completion directly advances to `3`, without fabricating a callback packet |
-| `3` | Check expiry/campaign; available advances to `7`, unavailable to `4` | Same decision; valid local dates and no campaign advance to `7` |
+| `6` | Wait for the campaign callback, which advances to `3` | A local window record invokes the same callback synchronously, advancing to `3` |
+| `3` | Check expiry/campaign; available advances to `7`, unavailable to `4` | Same decision; valid local dates and the free flag advance to `7` |
 | `4/5` | Show unavailable message and wait for confirmation, then error exit | Retained, not forcibly approved |
 | `7` | Set completion phase `3` and finish | Unchanged |
 | `8` | Set error phase `2` and finish | Out-of-range local dates or failed allocation also use this route |
@@ -266,7 +266,17 @@ Local values populate the native job, not the shared entitlement outputs:
 Native getters `0x001DB83C` and `0x0023DFA8` consume current/expiry dates and
 calculate `999` days and `23976` total hours. The native state writes shared
 `+0x3C/+0x40`, and its original validity decision sets `+0x44 = 1`. Annual
-purchase count remains `-1`; the free-campaign flag at `+0x335` is `0`.
+purchase count remains `-1`. Local campaign completion encodes the same
+current-to-expiry window in the native 20-byte record: four reserved bytes,
+two seven-byte calendar dates, and a two-byte CRC. It reuses native CRC
+`0x0019BD88` with seed `0xFFFF` and a callback source whose request ID matches
+state `+0x44`, then calls unchanged callback `0x0024991C`. The callback retains
+request-ID, length, CRC and inclusive date-window validation; it calculates
+remaining days/hours and sets shared valid `+0x44` and free `+0x335` to `1`.
+No request is sent and no output flag or remaining-time field is manually assigned.
+This is the same current-to-`999`-days-later window supplied by Bank, using the
+representation required by each native consumer. Each local initialization
+rebuilds it from console time without using fixed server campaign dates.
 This does not calculate Poke Miles or change Bankdata transactions or Pokemon
 validation.
 

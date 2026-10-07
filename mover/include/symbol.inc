@@ -83,6 +83,8 @@
 .definelabel SRV_GetServiceHandle,               0x001E596C
 .definelabel LocalTicket_BackendStorage,         OfflinePatch_RuntimeStorageStart + 8
 .definelabel MoverCampaign_Request,              0x0023BE4C
+.definelabel MoverTicketState_CampaignCallback,  0x0024991C
+.definelabel Crc16_Calculate,                    0x0019BD88
 .definelabel MoverRemoteCheckState_Update,      0x00248814
 .definelabel MoverTransferEligibilityState_Update, 0x00248C68
 .definelabel MoverNoTransferState_Update,         0x00248360

@@ -155,16 +155,42 @@ int LocalTicket_Poll(MoverTicketJobView *job,u32 *result,u32 minimumDays)
     return 1;
 }
 
-__attribute__((used,noinline,section(".text.offline.03_ticket")))
-s32 LocalTicket_CampaignResult(MoverStateView *state)
+/* Encode the same current-to-expiry window that Bank supplies to its state.
+   Mover's native callback accepts calendar bytes and verifies their CRC. */
+/* 编码与 Bank 相同的当前时间至到期日窗口。
+   Mover 原版回调接收日期字节并校验 CRC。 */
+static void setCampaignDate(MoverCampaignDate *output,const u32 input[2])
 {
-    MoverTicketSharedView *shared=(MoverTicketSharedView *)state->sharedData;
-    /* Complete only the campaign query as "no campaign". The state retains
-       its native entitlement decision, callback registration and cleanup. */
-    /* 只把活动查询完成为“无活动”；状态仍沿用原版使用权判断、回调注册与清理。 */
-    shared->freeCampaignActive=0;
-    state->substate=MOVER_TICKET_SUBSTATE_CHECK_ENTITLEMENT;
-    return 0;
+    u32 date=input[0];
+    u32 year=(date>>26)|(input[1]<<6);
+    output->year[0]=(u8)year;
+    output->year[1]=(u8)(year>>8);
+    output->month=(u8)((date>>22)&0x0Fu);
+    output->day=(u8)((date>>17)&0x1Fu);
+    output->hour=(u8)((date>>12)&0x1Fu);
+    output->minute=(u8)((date>>6)&0x3Fu);
+    output->second=(u8)(date&0x3Fu);
+}
+
+__attribute__((used,noinline,section(".text.offline.03_ticket")))
+s32 LocalTicket_CampaignResult(MoverTicketStateView *state)
+{
+    MoverCampaignRecord campaign;
+    MoverCampaignSourceView source;
+    u32 checksum;
+    campaign.reserved00=0;
+    setCampaignDate(&campaign.start,state->job->currentDate);
+    setCampaignDate(&campaign.end,state->job->expiryDate);
+    checksum=Crc16_Calculate(&campaign,sizeof(campaign)-sizeof(campaign.checksum),
+        MOVER_TICKET_CAMPAIGN_CRC_SEED);
+    campaign.checksum[0]=(u8)checksum;
+    campaign.checksum[1]=(u8)(checksum>>8);
+    source.requestId=state->campaignRequestId;
+    /* Deliver only a local result. The native callback validates the window,
+       computes remaining time, sets free/valid flags and resumes the state. */
+    /* 仅交付本地结果，不发送请求；由原版回调验证窗口、计算剩余时间、
+       设置免费及有效标志并推进状态，不手动覆盖这些输出。 */
+    return MoverTicketState_CampaignCallback(state,&source,sizeof(campaign),&campaign);
 }
 /* Query only a nonexistent title/ticket. The exact short-success reply is
    Azahar's unimplemented-handler signature, not a ticket or network error. */
