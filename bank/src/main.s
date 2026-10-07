@@ -31,7 +31,10 @@
 .definelabel CombinePatch_ModeCount, 4
 .definelabel CombinePatch_KeyR, 0x100
 .definelabel CombinePatch_SessionModeOffset, 0
-.definelabel CombinePatch_DownloadCapturedOffset, 1
+.definelabel CombinePatch_DownloadCaptureStatusOffset, 1
+.definelabel DOWNLOAD_CAPTURE_NONE, 0
+.definelabel DOWNLOAD_CAPTURE_COMPLETE, 1
+.definelabel DOWNLOAD_CAPTURE_FAILED, 2
 .definelabel CombinePatch_TitleRPreviousOffset, 2
 .definelabel CombinePatch_TitleSelectedModeOffset, 3
 .definelabel CombinePatch_InitialLanguagePendingOffset, 5
@@ -50,14 +53,16 @@
 .definelabel CombinePatch_OfflineMenuGreeting, 0x1B
 .definelabel CombinePatch_DownloadMenuGreeting, 0x1C
 .definelabel CombinePatch_UnlockMenuGreeting, 0x1D
-.definelabel CombinePatch_DownloadGameSelectionPrompt, 0x6C
-.definelabel CombinePatch_TitleModeUnlockMessage, 0x6D
-.definelabel CombinePatch_UnlockUseBankMessage, 0x6E
-.definelabel CombinePatch_UnlockGameSelectionPrompt, 0x6F
-.definelabel CombinePatch_UnlockChallengePrompt, 0x70
-.definelabel CombinePatch_NoGameBlockedMessage, 0x71
-.definelabel CombinePatch_SupportReferencePrompt, 0x72
-.definelabel CombinePatch_TitleModeOriginalMessage, 0x73
+.definelabel CombinePatch_TitleModeUnlockMessage, 0x6C
+.definelabel CombinePatch_UnlockUseBankMessage, 0x6D
+.definelabel CombinePatch_UnlockGameSelectionPrompt, 0x6E
+.definelabel CombinePatch_UnlockChallengePrompt, 0x6F
+.definelabel CombinePatch_NoGameBlockedMessage, 0x70
+.definelabel CombinePatch_SupportReferencePrompt, 0x71
+.definelabel CombinePatch_TitleModeOriginalMessage, 0x72
+.definelabel CombinePatch_DownloadNoGameMessage, 0x73
+.definelabel CombinePatch_DownloadFailedMessage, 0x74
+.definelabel CombinePatch_DownloadStartMessage, 0x75
 
 .open INPUT_CODE, OUTPUT_CODE, 0x00100000
 
@@ -153,17 +158,23 @@
     beq CombinePatch_RewardResult
 .org BankFlow_SelectNextState + 0x170
     beq CombinePatch_HomeResult
+.org BankFlow_SelectNextState + 0x15C
+    beq CombinePatch_SelectUseBankState
+.org BankFlow_SelectNextState + 0x3A0
+    beq CombinePatch_HomeCleanupResult
 .org InitialGameCheck_NoGameChoiceSetup
     b CombinePatch_NoGameChoice
 .org InitialGameCheck_NoGameMessageLoad
     bl CombinePatch_SelectNoGameMessage
+.org InitialGameCheck_NoGameChoiceSetup + 4
+    bl CombinePatch_SelectNoGameDownloadButton
 .org BankFlow_SelectNextState + 0x34C
     beq CombinePatch_Result21
 
-// Download mode ends the first ordinary-Bank use without reward, box, or save
-// UI. Offline mode restores the native local points calculation and reward UI.
-// 下载模式会在首次普通 Bank 使用后跳过奖励、盒子和保存 UI；离线模式恢复原版
-// 本地里程计算与领取界面。
+// Download Mode must not enter reward, box, or save UI if these results are
+// reached. Other modes retain their existing receipt and continuation rules.
+// 下载模式即使到达这些结果也不进入领取、盒子或保存界面；其他模式保留各自的
+// 领取与后续分支规则。
 .org BankFlow_SelectNextState + 0x260
     beq CombinePatch_Result5
 .org BankFlow_SelectNextState + 0x270
@@ -200,10 +211,10 @@
 .org BankMenuUi_FirstLabelCall + 0xA8
     bl CombinePatch_SelectHomeMenuTextR5
 
-// Capture only an ordinary-Bank successful server download while explicit
-// download mode is active. The original callback resumes unchanged.
-// 仅在明确的下载模式且普通 Bank 下载成功时保存服务器数据，随后不改变原版回调。
-.org BankRemote_DownloadSuccessCallback + 0x14
+// Capture only after the native current/legacy body loader has completed.
+// All modes retain the callback's metadata and completion processing.
+// 原版当前／旧格式数据装载完成后才捕获；所有模式保留回调的元数据和完成处理。
+.org BankRemote_DownloadSuccessCallback + 0x98
     bl CombinePatch_DownloadCaptureTrampoline
 
 .org ReturnToTitleState_Update + 0x168
@@ -286,17 +297,12 @@ CombinePatch_ShowModeGreeting:
     b BankUi_ShowMessageLine
     .pool
 
-// Select the static upper-screen guide message in the game-selection state,
-// then let its original display call run unchanged. Download and Unlock modes
-// use dedicated guidance; Offline mode keeps stock message 3.
-// 在游戏选择状态中选择上屏静态说明文本，随后让原版显示调用保持不变。下载模式与
-// 解锁模式使用各自的说明；离线模式保留原消息 3。
+// Unlock Mode supplies combination-button guidance in game selection.
+// Other modes retain stock message 3 and the original display call.
+// 解锁模式在游戏选择中提供组合键说明；其他模式保留原消息 3 和原显示调用。
 CombinePatch_SelectGameSelectionMessage:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12,#CombinePatch_SessionModeOffset]
-    cmp r12,#CombinePatch_ModeDownload
-    moveq r1,#CombinePatch_DownloadGameSelectionPrompt
-    bxeq lr
     cmp r12,#CombinePatch_ModeUnlock
     moveq r1,#CombinePatch_UnlockGameSelectionPrompt
     movne r1,#3
@@ -450,10 +456,12 @@ CombinePatch_SelectDisconnectMessage:
     cmp r3,#CombinePatch_ModeDownload
     movne r1,#0x0D
     bxne lr
-    ldrb r2,[r2,#CombinePatch_DownloadCapturedOffset]
-    cmp r2,#0
-    moveq r1,#0x0D
-    movne r1,#CombinePatch_DownloadSuccessMessage
+    ldrb r2,[r2,#CombinePatch_DownloadCaptureStatusOffset]
+    mov r1,#0x0D
+    cmp r2,#DOWNLOAD_CAPTURE_COMPLETE
+    moveq r1,#CombinePatch_DownloadSuccessMessage
+    cmp r2,#DOWNLOAD_CAPTURE_FAILED
+    moveq r1,#CombinePatch_DownloadFailedMessage
     bx lr
 
 // Persist the patch's language-menu selection to the active backend. Native
@@ -626,7 +634,7 @@ CombinePatch_TitleModeTextInitialize:
     ldr r12,=CombinePatch_ModeStorage
     mov r1,#CombinePatch_ModeOffline
     strb r1,[r12,#CombinePatch_SessionModeOffset]
-    strb r1,[r12,#CombinePatch_DownloadCapturedOffset]
+    strb r1,[r12,#CombinePatch_DownloadCaptureStatusOffset]
     strb r1,[r12,#CombinePatch_TitleRPreviousOffset]
     strb r1,[r12,#CombinePatch_InitialLanguagePendingOffset]
     ldrb r3,[r12,#CombinePatch_TitleSelectedModeOffset]
@@ -869,6 +877,9 @@ CombinePatch_SelectNoGameMessage:
     ldrb r12,[r12,#CombinePatch_SessionModeOffset]
     cmp r12,#CombinePatch_ModeOriginal
     moveq r2,r3
+    bxeq lr
+    cmp r12,#CombinePatch_ModeDownload
+    moveq r2,#CombinePatch_DownloadNoGameMessage
     movne r2,#CombinePatch_NoGameBlockedMessage
     bx lr
     .pool
@@ -877,9 +888,27 @@ CombinePatch_NoGameChoice:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12,#CombinePatch_SessionModeOffset]
     cmp r12,#CombinePatch_ModeOriginal
+    beq @@choice
+    cmp r12,#CombinePatch_ModeDownload
     bne InitialGameCheck_FailureTransition
+@@choice:
     ldr r5,[r4,#0x40]
     b InitialGameCheck_NoGameChoiceSetup + 4
+    .pool
+
+// Replace only the Download confirmation label; retain the native HOME label
+// in other modes, the cancel label, and the caller's flags and arguments.
+// 只替换下载确认按钮；其他模式保留原版 HOME 标签，取消标签及调用者标志和参数不变。
+CombinePatch_SelectNoGameDownloadButton:
+    mrs r3,cpsr
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeDownload
+    moveq r12,#CombinePatch_DownloadStartMessage
+    movne r12,#0x59
+    msr cpsr_f,r3
+    mov r3,r12
+    bx lr
     .pool
 
 // Connection availability reads only the session mode latched as the title
@@ -888,8 +917,8 @@ CombinePatch_NoGameChoice:
 CombinePatch_NetworkAvailability:
     push {r1-r3,lr}
     ldr r2,=CombinePatch_ModeStorage
-    mov r3,#0
-    strb r3,[r2,#CombinePatch_DownloadCapturedOffset]
+    mov r3,#DOWNLOAD_CAPTURE_NONE
+    strb r3,[r2,#CombinePatch_DownloadCaptureStatusOffset]
     ldrb r1,[r2,#CombinePatch_SessionModeOffset]
     cmp r1,#CombinePatch_ModeOffline
     moveq r0,#1
@@ -969,13 +998,11 @@ CombinePatch_BankDataSyncDispatch:
     b BankDataSyncState_Update + 4
     .pool
 
-// Hook before the native conditional branch, matching the proven Step 1
-// download patch. Ordinary Bank uses the download message only in download
-// mode; offline mode uses its local-data message. Preserve the initializer's
-// remaining UI setup and return at +0x2C.
-// 在原版条件分支前挂钩，与已验证的第一步下载补丁保持一致。普通 Bank 仅在下载
-// 模式使用下载文本；离线模式使用本地数据文本。保留初始化器其余 UI 设置并从
-// +0x2C 返回。
+// Download Mode uses its SD destination message on the complete-file route.
+// Preserve the native waiting UI and initializer continuation; the other
+// modes retain their existing message selection.
+// 下载模式在完整文件路线显示 SD 下载位置；保留原版等待界面和初始化器后续流程，
+// 其他模式维持各自原有的文本选择。
 CombinePatch_BankDataSyncInitialize:
     mov r3,r1
     ldr r12,=CombinePatch_ModeStorage
@@ -986,9 +1013,7 @@ CombinePatch_BankDataSyncInitialize:
     beq @@native
     cmp r12,#CombinePatch_ModeDownload
     bne @@offline
-    cmp r3,#0
-    moveq r1,#CombinePatch_DownloadProgressMessage
-    movne r1,#0x0E
+    mov r1,#CombinePatch_DownloadProgressMessage
     b @@show
 @@offline:
     mov r1,#CombinePatch_OfflineBankConnectMessage
@@ -1143,6 +1168,7 @@ CombinePatch_BankCreateSuccess:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12]
     cmp r12,#CombinePatch_ModeOriginal
+    cmpne r12,#CombinePatch_ModeDownload
     moveq r0,#7
     movne r0,#8
     b BankCreateState_Update + 0x238
@@ -1157,11 +1183,9 @@ CombinePatch_SelectPostSelectionState:
     pop {r4,pc}
     .pool
 
-// After an ordinary Bank download, offline mode keeps the native local mileage
-// state. Download mode has already captured the complete Bank file and follows
-// the stock no-save return state without entering mileage or the Bank Box.
-// 普通 Bank 下载完成后，离线模式保留原版本地里程状态；下载模式已经捕获完整
-// Bank 文件，直接进入原版“不保存并返回”状态，不进入里程或 Bank 盒子。
+// Preserve the receipt entry outside Download Mode. Its fallback route must
+// still leave without entering mileage or Bank Box.
+// 下载模式之外保留领取入口；下载模式的备用分支仍须不经里程或盒子直接结束。
 CombinePatch_RewardResult:
     ldr r1,=CombinePatch_ModeStorage
     ldrb r1,[r1,#CombinePatch_SessionModeOffset]
@@ -1177,6 +1201,30 @@ CombinePatch_HomeResult:
     cmp r12,#CombinePatch_ModeOriginal
     beq BankFlow_SelectNextState + 0x1F8
     b CombinePatch_RedirectHomeToLanguage
+    .pool
+
+// The first Download menu item uses the native game-independent downloader.
+// Its state-28 object keeps the native flag that skips selected-game writes.
+// 下载选单第一项使用原版不依赖游戏的下载器；state 28 对象保留跳过所选游戏写入的
+// 原版标志。
+CombinePatch_SelectUseBankState:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeDownload
+    moveq r0,#28
+    pop {r4,pc}
+    .pool
+
+// State 29 finishes its native remote cleanup and UI teardown before Download
+// Mode disconnects. Original Mode continues to the HOME transfer controller.
+// state 29 完成原版远端收尾和界面清理后，下载模式断网；原版模式仍进入 HOME
+// 传送控制器。
+CombinePatch_HomeCleanupResult:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeDownload
+    moveq r0,#20
+    pop {r4,pc}
     .pool
 
 CombinePatch_Result21:
@@ -1364,11 +1412,9 @@ CombinePatch_MenuSelectionDisabled:
     mov r0,#0
     pop {r4-r6,pc}
 
-// Preserve all callback inputs and flags, stage the complete returned object,
-// then atomically commit it. A failed local capture never changes the stock
-// callback result.
-// 保留所有回调输入和标志，暂存完整返回对象后原子提交。本地捕获失败不改变原版
-// 回调结果。
+// Save the natively loaded current-format object before its per-session flags
+// are adjusted. Replay the displaced comparison for the native continuation.
+// 原版对象装载为当前格式后、会话标志调整前保存；重放覆盖的比较指令再继续原回调。
 CombinePatch_DownloadCaptureTrampoline:
     push {r0-r3,r12,lr}
     sub sp,sp,#8
@@ -1380,29 +1426,24 @@ CombinePatch_DownloadCaptureTrampoline:
     bne @@restore
     ldrb r0,[r4,#0x41]
     cmp r0,#0
-    bne @@restore
-    mov r0,#0
-    mov r1,r7
-    ldr r2,=BANK_FILE_SIZE
-    mov r3,#0
-    bl OfflinePatch_Stage
-    cmp r0,#0
     beq @@restore
-    mov r0,#0
-    mov r1,#0
-    mov r2,#0
-    bl OfflinePatch_Commit
+    ldr r0,=CombinePatch_ModeStorage
+    mov r1,#DOWNLOAD_CAPTURE_FAILED
+    strb r1,[r0,#CombinePatch_DownloadCaptureStatusOffset]
+    ldr r0,[r4,#8]
+    ldr r0,[r0,#0xCC]
+    bl BankdataRedirect_CaptureDownloaded
     cmp r0,#0
     beq @@restore
     ldr r1,=CombinePatch_ModeStorage
-    mov r0,#1
-    strb r0,[r1,#1]
+    mov r0,#DOWNLOAD_CAPTURE_COMPLETE
+    strb r0,[r1,#CombinePatch_DownloadCaptureStatusOffset]
 @@restore:
     ldr r12,[sp]
     msr cpsr_f,r12
     add sp,sp,#8
     pop {r0-r3,r12,lr}
-    ldr r8,=0x000BB528
+    cmp r6,#0
     bx lr
     .pool
 

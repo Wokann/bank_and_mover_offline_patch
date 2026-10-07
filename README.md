@@ -20,7 +20,7 @@ The patches never upload offline changes to the official server. An upload patch
 - Press the physical **R** button on the title screen to switch modes. Pressing **A**, **START**, or the lower screen latches the displayed mode for that session.
 - Bank Offline Mode can invoke the stock first-use initializer to create a new local Bank when no usable file exists.
 - Bank validates the primary file, attempts recovery from `bankdata.bak`, and protects saves with `bankdata.tmp`, complete-write checks, and a previous-generation backup.
-- Bank Download Mode retains the official account, game-detection, and server-download flow. It commits the data locally and returns to the title screen without entering the boxes or uploading data.
+- Bank Download Mode retrieves the complete server Bank without selecting a game, with a direct-download prompt when no usable game save exists. New accounts first follow official Bank creation; the download returns to the title without entering boxes or uploading offline changes.
 - Bank Unlock Mode preserves the stock online transaction-recovery flow and exposes one server-returned unlock candidate on the official challenge-code screen.
 - Bank Original Mode restores the official menus, messages, HOME/eShop operations, ticket checks, and normal online Bank flow. After confirming the mode, only Offline uses `sav.bin`; Download, Unlock, and Original use the stock save.
 - Poke Mover Offline Mode retains stock game reading, filtering, conversion, Transport Box checks, and source-game saving while replacing server Bank I/O with local transactions.
@@ -58,7 +58,7 @@ Poke Mover:   00040000000C9C00
 
 On a fresh launch, the title screen defaults to **Offline Mode**. Press **R** to cycle through **Download Mode**, **Unlock Mode**, **Original Mode**, and back to Offline Mode. Returning to the title retains the mode just used; restarting the application resets it to Offline. This choice is not written to a save.
 
-If the official server already contains your Bank, first enter Download Mode, choose “Download Bank data locally,” complete the stock account checks, and select any available game. After the completion message returns to the title screen, switch back to Offline Mode and use the normal Bank interface to manage boxes and save locally.
+If the official server already contains your Bank, first enter Download Mode, complete the stock account checks, and choose “Download Bank data locally”; no game selection is needed. Without a usable game save, accept the direct-download prompt. A missing server Bank is created through the official first-use flow before downloading. After the completion message returns to the title screen, switch back to Offline Mode and use the normal Bank interface to manage boxes and save locally.
 
 Download Mode overwrites the current local Bank, so back it up first. If no server copy needs to be preserved, Offline Mode may be used directly; when neither a valid primary nor backup exists, the patch invokes the stock first-use initializer to create a local Bank.
 
@@ -66,7 +66,7 @@ Unlock Mode is intended only for the stock save-mismatch lock. Enter its first m
 
 Original Mode uses the complete official Bank menus and online flow, including HOME, support-code, and Mover/eShop entries. It does not load or capture the local `bankdata.bin`.
 
-Startup/title handling still previews the redirected record. Once a mode is confirmed, its record is reloaded: Offline uses `SD:/3ds/Bank/sav.bin`; the other modes use the stock `data:/turtle`. Each record supplies its own language and transaction state. Missing or invalid stock records follow native language selection and initialization, without importing SD data or mirroring native saves back to SD. The first three modes continue to block the no-game HOME shortcut; Original retains the official prompt.
+Startup/title handling still previews the redirected record. Once a mode is confirmed, its record is reloaded: Offline uses `SD:/3ds/Bank/sav.bin`; the other modes use the stock `data:/turtle`. Each record supplies its own language and transaction state. Missing or invalid stock records follow native language selection and initialization, without importing SD data or mirroring native saves back to SD. The first three modes never enter HOME transfer operations without a game: Download offers direct downloading, Offline/Unlock warn and return, and Original retains the official HOME question.
 
 > **Privacy:** `bankdata.bin` downloaded in Download Mode may contain private account-related identifiers, player and Trainer information, and timestamps. The `sav.bin` copied from the original internal save for local offline use may also contain personal or account-related information. Do not upload either file publicly or share it casually.
 

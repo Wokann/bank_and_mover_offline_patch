@@ -50,6 +50,45 @@ DOWNLOAD_MENU_MESSAGES = {
     "0/1/3": "下載銀行資料到本機",
 }
 
+DOWNLOAD_NO_GAME_MESSAGES = {
+    "0/0/4": "つかえる ゲームの セーブデータが\nありません。サーバーから\nぎんこうデータを ダウンロードしますか？",
+    "0/0/5": "利用できるゲームのセーブデータがありません。\nサーバーの銀行データをダウンロードしますか？",
+    "0/0/6": "No usable game save was found.\nDownload Bank data from the server?",
+    "0/0/7": "Aucune sauvegarde de jeu utilisable.\nTélécharger les données de Banque\ndepuis le serveur ?",
+    "0/0/8": "Nessun salvataggio di gioco utilizzabile.\nScaricare i dati della Banca\ndal server?",
+    "0/0/9": "Kein nutzbarer Spielstand gefunden.\nBankdaten vom Server herunterladen?",
+    "0/1/0": "No hay ninguna partida utilizable.\n¿Descargar los datos del Banco\ndesde el servidor?",
+    "0/1/1": "사용 가능한 게임 저장 데이터가 없습니다.\n서버에서 뱅크 데이터를\n다운로드하시겠습니까?",
+    "0/1/2": "未找到可用的游戏存档。\n是否直接下载服务器银行数据？",
+    "0/1/3": "未找到可用的遊戲存檔。\n是否直接下載伺服器銀行資料？",
+}
+
+DOWNLOAD_START_MESSAGES = {
+    "0/0/4": "ダウンロードする",
+    "0/0/5": "ダウンロード開始",
+    "0/0/6": "Start Download",
+    "0/0/7": "Télécharger",
+    "0/0/8": "Avvia download",
+    "0/0/9": "Download starten",
+    "0/1/0": "Iniciar descarga",
+    "0/1/1": "다운로드 시작",
+    "0/1/2": "开始下载",
+    "0/1/3": "開始下載",
+}
+
+DOWNLOAD_FAILED_MESSAGES = {
+    "0/0/4": "SDカードに ぎんこうデータを\nほぞん できませんでした。\nせつぞくを きっています……",
+    "0/0/5": "SDカードに銀行データを\n保存できませんでした。\nインターネットの接続を切っています……",
+    "0/0/6": "Could not save Bank data to the SD card.\nDisconnecting from the Internet...",
+    "0/0/7": "Échec de la sauvegarde sur carte SD.\nDéconnexion d’Internet…",
+    "0/0/8": "Impossibile salvare i dati\nsulla scheda SD.\nDisconnessione da Internet...",
+    "0/0/9": "Bankdaten konnten nicht auf der\nSD-Karte gespeichert werden.\nInternetverbindung wird getrennt...",
+    "0/1/0": "No se pudieron guardar los datos en la SD.\nDesconectando de Internet…",
+    "0/1/1": "SD 카드에 뱅크 데이터를\n저장하지 못했습니다.\n인터넷 연결을 종료하는 중입니다…",
+    "0/1/2": "未能将银行数据保存到本地 SD 卡。\n正在断开互联网……",
+    "0/1/3": "未能將銀行資料儲存至本機 SD 卡。\n正在斷開網際網路……",
+}
+
 UNLOCK_MENU_MESSAGES = {
     "0/0/4": "つよく アンロックする",
     "0/0/5": "強制アンロックモードへ",
@@ -151,14 +190,16 @@ TITLE_MODE_OFFLINE_LINE = 104
 TITLE_MODE_DOWNLOAD_LINE = 105
 DISABLED_LINE = 106
 LANGUAGE_MENU_LINE = 107
-DOWNLOAD_GAME_SELECTION_LINE = 108
-TITLE_MODE_UNLOCK_LINE = 109
-UNLOCK_USE_BANK_LINE = 110
-UNLOCK_GAME_SELECTION_LINE = 111
-UNLOCK_CHALLENGE_LINE = 112
-NO_GAME_BLOCKED_LINE = 113
-UNLOCK_SUPPORT_REFERENCE_LINE = 114
-TITLE_MODE_ORIGINAL_LINE = 115
+TITLE_MODE_UNLOCK_LINE = 108
+UNLOCK_USE_BANK_LINE = 109
+UNLOCK_GAME_SELECTION_LINE = 110
+UNLOCK_CHALLENGE_LINE = 111
+NO_GAME_BLOCKED_LINE = 112
+UNLOCK_SUPPORT_REFERENCE_LINE = 113
+TITLE_MODE_ORIGINAL_LINE = 114
+DOWNLOAD_NO_GAME_LINE = 115
+DOWNLOAD_FAILED_LINE = 116
+DOWNLOAD_START_LINE = 117
 TITLE_TEXT_BUFFER_LENGTH = 54
 
 DISABLED_MESSAGES = {
@@ -329,19 +370,6 @@ DOWNLOAD_SUCCESS_MESSAGES = {
     "0/1/3": "已將銀行資料下載到本機 SD 卡。\n正在返回標題畫面……",
 }
 
-DOWNLOAD_GAME_SELECTION_MESSAGES = {
-    "0/0/4": "どのゲームソフトでも\nかんぜんな ぎんこうデータを\nSDカードに ダウンロードできます。",
-    "0/0/5": "どのゲームソフトを選んでも\n完全な銀行データを本体に\nダウンロードできます。",
-    "0/0/6": "Select any game software to download\nthe complete Bank data to local storage.",
-    "0/0/7": "Sélectionnez n’importe quel jeu pour\ntélécharger toutes les données de Banque\nen local.",
-    "0/0/8": "Seleziona un gioco qualsiasi per\nscaricare localmente tutti i dati\ndella Banca.",
-    "0/0/9": "Wähle ein beliebiges Spiel, um\nalle Bankdaten lokal herunterzuladen.",
-    "0/1/0": "Elige cualquier juego para descargar\nlocalmente todos los datos del Banco.",
-    "0/1/1": "어떤 게임 소프트웨어를 선택해도\n전체 뱅크 데이터를 로컬에\n다운로드할 수 있습니다.",
-    "0/1/2": "选择任意游戏软件，\n均可将完整银行数据下载到本地。",
-    "0/1/3": "選擇任意遊戲軟體，\n均可將完整銀行資料下載到本機。",
-}
-
 UNLOCK_GAME_SELECTION_MESSAGES = {
     "0/0/4": f"ゲームをえらんで ボタンをおすとき、\n{L_BUTTON} + {A_BUTTON} + STARTを おしつづけて\nアンロックモードに はいります。",
     "0/0/5": f"ゲームを選んでボタンを押すとき、\n{L_BUTTON} + {A_BUTTON} + STARTを押し続けて\nアンロックモードに入ります。",
@@ -496,9 +524,11 @@ def verify_kana_archive_messages() -> None:
         DOWNLOAD_SUCCESS_MESSAGES[archive],
         DOWNLOAD_PROGRESS_MESSAGES[archive],
         DOWNLOAD_MENU_MESSAGES[archive],
+        DOWNLOAD_NO_GAME_MESSAGES[archive],
+        DOWNLOAD_START_MESSAGES[archive],
+        DOWNLOAD_FAILED_MESSAGES[archive],
         UNLOCK_MENU_MESSAGES[archive],
         LANGUAGE_MENU_MESSAGES[archive],
-        DOWNLOAD_GAME_SELECTION_MESSAGES[archive],
         UNLOCK_MENU_GREETINGS[archive],
         UNLOCK_GAME_SELECTION_MESSAGES[archive],
         UNLOCK_SUPPORT_REFERENCE_LABELS[archive],
@@ -547,6 +577,9 @@ def main() -> None:
         )
         no_game_flags = message_codec.u16(
             original, section_offset + 4 + NO_GAME_RECORD_LINE * 8 + 6
+        )
+        download_start_flags = message_codec.u16(
+            original, section_offset + 4 + 0x59 * 8 + 6
         )
         internet_flags = message_codec.u16(
             original, section_offset + 4 + INTERNET_CONNECTION_LINE * 8 + 6
@@ -631,7 +664,6 @@ def main() -> None:
                 (title_mode_download, title_mode_flags),
                 (DISABLED_MESSAGES[archive], use_bank_flags),
                 (LANGUAGE_MENU_MESSAGES[archive], use_bank_flags),
-                (DOWNLOAD_GAME_SELECTION_MESSAGES[archive], game_selection_flags),
                 (title_mode_unlock, title_mode_flags),
                 (UNLOCK_MENU_MESSAGES[archive], use_bank_flags),
                 (UNLOCK_GAME_SELECTION_MESSAGES[archive], game_selection_flags),
@@ -641,6 +673,9 @@ def main() -> None:
                 (no_game_prompt, no_game_flags),
                 (unlock_support_reference, unlock_challenge_flags),
                 (finish_message_values(text_code_units(title_mode_original)), title_mode_flags),
+                (finish_message_values(text_code_units(DOWNLOAD_NO_GAME_MESSAGES[archive])), no_game_flags),
+                (finish_message_values(text_code_units(DOWNLOAD_FAILED_MESSAGES[archive])), disconnect_flags),
+                (finish_message_values(text_code_units(DOWNLOAD_START_MESSAGES[archive])), download_start_flags),
             ),
         )
         greeting_entry = entries[MENU_MESSAGE_FILE_INDEX]
@@ -696,6 +731,9 @@ def main() -> None:
             DOWNLOAD_PROGRESS_LINE: DOWNLOAD_PROGRESS_MESSAGES[archive],
             DOWNLOAD_SUCCESS_LINE: DOWNLOAD_SUCCESS_MESSAGES[archive],
             DOWNLOAD_USE_BANK_LINE: DOWNLOAD_MENU_MESSAGES[archive],
+            DOWNLOAD_NO_GAME_LINE: DOWNLOAD_NO_GAME_MESSAGES[archive],
+            DOWNLOAD_FAILED_LINE: DOWNLOAD_FAILED_MESSAGES[archive],
+            DOWNLOAD_START_LINE: DOWNLOAD_START_MESSAGES[archive],
             OFFLINE_INITIAL_CONNECT_LINE: OFFLINE_INITIAL_CONNECT_MESSAGES[archive],
             OFFLINE_BANK_CONNECTION_LINE: OFFLINE_BANK_CONNECTION_MESSAGES[archive],
             OFFLINE_SAVE_LINE: OFFLINE_SAVE_MESSAGES[archive],
@@ -704,7 +742,6 @@ def main() -> None:
             TITLE_MODE_DOWNLOAD_LINE: title_mode_download,
             DISABLED_LINE: DISABLED_MESSAGES[archive],
             LANGUAGE_MENU_LINE: LANGUAGE_MENU_MESSAGES[archive],
-            DOWNLOAD_GAME_SELECTION_LINE: DOWNLOAD_GAME_SELECTION_MESSAGES[archive],
             TITLE_MODE_UNLOCK_LINE: title_mode_unlock,
             TITLE_MODE_ORIGINAL_LINE: title_mode_original,
             UNLOCK_USE_BANK_LINE: UNLOCK_MENU_MESSAGES[archive],

@@ -218,28 +218,84 @@ the middle, states 18 and 17 resolve the persisted state on a later use.
 
 | Node | Stock | Download Mode | Offline Mode | Unlock Mode |
 |---|---|---|---|---|
-| state 3 without usable game data | Ask whether to move directly to HOME after the warning | Keep the missing-data/Pokédex warning, then return to the title | Same as Download Mode | Same as Download Mode |
+| state 3 without usable game data | Ask whether to move directly to HOME after the warning | Ask to download the server Bank directly; confirmation uses the native direct-entry connection path | Keep the two missing-data/Pokédex warning pages and return after confirmation | Same as Offline Mode |
+| state 4 first entry | Result `12 → 10`, select a game | Result `12 → 28`, no game selection | Stock entry | Stock entry |
 | Turtle backend | Stock `data:/turtle` storage | Stock backend after mode confirmation | Redirected to `sd:/3ds/Bank/sav.bin` | Stock backend after mode confirmation |
 | state 5 | Real connection | Stock | Complete the session locally; no remote job | Stock |
 | state 8 | Server account summary | Stock | Classify existing/first-use from local `bankdata.bin/.bak` | Stock |
 | state 15 | Remote entitlement/campaign | Public policy `0` stays native; test policy `1` uses local results only for a confirmed missing Azahar interface | Always supply required ticket fields locally; disable online campaigns | Same policy as Download Mode |
-| state 9 | Server-side first creation | Stock creation and upload | Create the initial local `bankdata.bin` | Stock creation and upload |
-| state 11 | Select recovery path | Stock | Keep the test, but redirect result `9` to state 17 instead of state 18 | Stock |
-| state 18 | Current Turtle remote recovery | Stock | Never entered | Stock; challenge UI may append the first server candidate |
-| state 17 | Selected-game remote recovery | Stock | Keep stock UI timing without remote commit/rollback | Stock |
-| state 16 | Download complete file | Stock download plus local capture | Load the complete object from `bankdata.bin` | Stock download; no local capture |
+| state 9 | Server-side first creation | Stock creation, upload and asynchronous success wait in substate 7 | Create the initial local `bankdata.bin` | Stock creation and upload |
+| state 11 | Select recovery path | Not entered | Keep the test, but redirect result `9` to state 17 instead of state 18 | Stock |
+| state 18 | Current Turtle remote recovery | Not entered | Never entered | Stock; challenge UI may append the first server candidate |
+| state 17 | Selected-game remote recovery | Not entered | Keep stock UI timing without remote commit/rollback | Stock |
+| state 16 | Download complete file | Not entered | Load the complete object from `bankdata.bin` | Stock download; no local capture |
+| state 28 | Game-independent complete download | Keep native `+0x41=1`; capture the loaded current-format record in its success callback | Not normally entered | Not normally entered |
+| state 29 | Pre-HOME remote release and UI cleanup | Keep native job and destruction; success enters state 20 instead of state 27 | Not normally entered | Not normally entered |
 | state 12/13 | Local mileage plus online gifts | Skipped after download | Keep local mileage; skip only online-gift lookup | Stock |
 | state 25 | Normal Bank Box | Not entered after capture | Stock Bank Box | Stock Bank Box |
 | state 7 | Remote stage, game save, commit/rollback | Normally not reached; stock if reached | Local file stage, commit, and rollback | Stock |
-| state 19/20 | Remote release and disconnect | Stock no-save exit after capture | Local cleanup and title return | Stock |
+| state 19/20 | Remote release and disconnect | Disconnect in state 20 after state 29 completes release | Local cleanup and title return | Stock |
 
-Download Mode is not a full stock mode. It retains real networking, first-use
-creation, transaction recovery, and complete-file download. State 15 preserves
-native ticket and online-gift checks by default; a successful capture takes the stock
-no-save exit. HOME, support-code, and Mover/eShop menu operations are also
-disabled or redirected by the patch. Download and Unlock reload the stock
-Turtle record after title-mode confirmation; server transaction descriptors
-are saved through the native backend, not to `sav.bin`.
+Download Mode retains real networking, first-use creation, and native ticket
+and online-gift checks. It uses the stock HOME complete-file downloader without
+entering HOME operations. No game is selected, and selected-game states
+11/18/17/16 are not entered. Native `+0x41=1` finishes from the complete response
+without updating selected-game metadata or game/Turtle transaction records.
+State 29 still releases remote work and destroys its UI, then disconnects:
+
+```text
+Usable game: state 4 first entry --result 12--> 28 → 29 → 20 → 2
+No game: state 3 confirmation --result 23--> 5 → 8 → 15 → 9 → 28 → 29 → 20 → 2
+```
+
+State 9 initializes and uploads only if the server has no Bank. Substate 7 must
+wait for the native success callback before requesting the complete server file.
+Upload failure retains native error cleanup; the pre-upload memory object is
+not treated as a downloaded file. Existing appended messages `0x61/0x62` provide
+download progress and local completion; `0x74` reports local capture failure.
+HOME, support-code and Mover/eShop menu
+entries stay disabled or redirected. Download and Unlock reload stock Turtle
+after title confirmation; other retained native initialization/save operations
+use the stock backend, not `sav.bin`.
+
+### Download confirmation, response and local installation
+
+1. State 3 checks usable games. Without one, Download shows the appended question
+   `0x73`, with **Start Download** (appended label `0x75`) and stock **Cancel**.
+   Original Mode retains the HOME transfer labels. Cancellation returns via
+   result 3. Confirmation sets native `+0x44=1`
+   and enters substate `0x12`, the Turtle check, rather than connecting immediately.
+   Native load/initialization and its success wait must finish before result 23.
+2. Account, ticket and first-use states run natively. An existing server Bank
+   skips creation; a missing Bank is initialized and uploaded, with substate 7
+   waiting for the real upload callback. Local file availability does not choose
+   the server's existing/first-use branch.
+3. With a usable game, state 4 result 12 enters state 28. Without one, the native
+   direct flag sends state 9 result 4 there. No selected-game recovery is needed.
+4. The full-response callback `0x002D11B0` first loads via
+   `SizedObject_LoadBody` or `BankFile_LoadLegacyBody`. The legacy branch copies
+   `0xACA48` bytes into an initialized object and changes its version to 2.
+   The capture hook at `0x002D1248` runs after either load and before native
+   preservation of prior session flags.
+5. The C capture helper accepts the loaded object's normal vtable, version 2
+   and 100 boxes. Zero Pokemon remains valid. It writes exactly `0xBB518` bytes
+   from object `+8` through the existing checked temp-write and rotation helpers.
+6. Session byte `0x003FAFF1` is independent of the native state object's response
+   flag: 0 means no capture attempt, 2 is set before an attempt, and 1 is set only
+   after both write and installation succeed. Failure does not change the native
+   response-success flag or suppress its metadata updates.
+7. State 28's native direct flag avoids selected-game metadata/save phases;
+   state 29 retains its remote release, callbacks, delay, sound and UI destruction.
+   Download changes only successful routing to state 20 instead of HOME state 27.
+   Local capture failure also reaches cleanup with the new failure message.
+
+Empty existing Banks are downloaded, without invoking state 27's empty-Bank
+warning. First-use empty Banks are downloaded only after official creation
+succeeds. Request failures retain native error handling; they do not create a
+fake empty file. A failed state-29 release retains the native error even if the
+local copy was already installed. See the subproject README's case tables for
+SD errors and interruption/retry behavior. These are client-code checks, not
+an end-to-end test of first creation or server rejection.
 
 Original Mode follows the Stock column, including native first-creation UI
 timing, all menu functions, original messages, and the no-game HOME question.
@@ -276,7 +332,7 @@ console time and an expiry 999 days later. Purchase counts stay
 provided. Native getters and exit cleanup copy the resulting entitlement and
 date. Local unbinding does not access a nonexistent network client; native
 destruction still runs. No system eShop applet or loading-animation simulation
-is used. Both paths remain present, and only the policy byte at `0x003FE828`
+is used. Both paths remain present, and only the policy byte at `0x003FE8E8`
 changes between builds. Initialization records this job's backend at `0x003FAFF4`;
 polling and cleanup keep that selection. The policy does not alter other networking,
 transaction recovery, mileage calculations, or post-download exit branches.
@@ -298,14 +354,19 @@ purchase count `-1` skips the native stored-count/reward update. These findings
 do not establish server-side correction of client-uploaded values. Public policy
 stays `0`, and test policy is not a guarantee of safe online use.
 
-With no usable game data, `0x002AC958` branches to the existing failure substate
+With no usable game data in Offline/Unlock, `0x002AC958` branches to the existing failure substate
 at `0x002ACA90` after the stock message completes and its text is cleared.
 Result `3` returns through `state 3 → 20 → 2` without creating HOME choices,
 setting the HOME direct-entry flag, or starting a network session. All ten
 language archives retain the first two stock warning pages and both page-break /
 input-wait tags. The second page must be confirmed before returning to the
 title; only the final HOME question is removed. The feature-menu HOME entry
-still redirects to language selection.
+still redirects to language selection in the first three modes. Download uses
+the appended direct-download question `0x73` with native confirm/cancel callbacks.
+Confirmation first completes the native Turtle check/initialization, then uses
+result `23` and the direct-entry flag for account checks, first creation, and
+state 28 download. Cancellation follows native failure/title
+return. Original Mode retains the complete HOME question.
 
 Unlock Mode follows the stock state 11/18/17 transaction-recovery branches. At
 the stock state-18 challenge screen, the server response already owns a vector

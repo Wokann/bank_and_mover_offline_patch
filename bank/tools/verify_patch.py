@@ -343,6 +343,7 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
         "combinepatch_turtleformatpoll",
         "combinepatch_nogamechoice",
         "combinepatch_selectnogamemessage",
+        "combinepatch_selectnogamedownloadbutton",
         "turtleredirect_preparesession",
         "combinepatch_networkskipremotejob",
         "combinepatch_networkskipremotejobofficial",
@@ -398,6 +399,8 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
         "combinepatch_selectpostselectionstate",
         "combinepatch_rewardresult",
         "combinepatch_homeresult",
+        "combinepatch_selectusebankstate",
+        "combinepatch_homecleanupresult",
         "combinepatch_result21",
         "combinepatch_result5",
         "combinepatch_result6or12",
@@ -436,6 +439,7 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
         "offlinepatch_loadbankdata",
         "offlinepatch_savedisplaydelayupdate",
         "offlinepatch_createinitial",
+        "bankdataredirect_capturedownloaded",
         "offlinepatch_stage",
         "offlinepatch_commit",
         "offlinepatch_rollback",
@@ -577,6 +581,8 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
         "combinepatch_selectpostselectionstate",
         "combinepatch_rewardresult",
         "combinepatch_homeresult",
+        "combinepatch_selectusebankstate",
+        "combinepatch_homecleanupresult",
         "combinepatch_result21",
         "combinepatch_result5",
         "combinepatch_result6or12",
@@ -616,6 +622,7 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
         "combinepatch_showunlockprompt",
         "combinepatch_selectusebankmenutext",
         "combinepatch_selectdisconnectmessage",
+        "combinepatch_selectnogamedownloadbutton",
         "combinepatch_disconnectwithlanguagesave",
         "combinepatch_bankdatasyncentry",
         "combinepatch_pathdatabegin",
@@ -647,6 +654,7 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
         "offlinepatch_loadbankdata",
         "offlinepatch_savedisplaydelayupdate",
         "offlinepatch_createinitial",
+        "bankdataredirect_capturedownloaded",
         "offlinepatch_stage",
         "offlinepatch_commit",
         "offlinepatch_rollback",
@@ -713,15 +721,18 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
         (0x002AE864, "combinepatch_bankcreatesuccess", False, ARM_COND_NE, "first-use success"),
         (0x002A57C8, "combinepatch_rewardresult", False, ARM_COND_EQ, "mode-specific reward result"),
         (0x002A56F0, "combinepatch_homeresult", False, ARM_COND_EQ, "HOME redirect"),
+        (0x002A56DC, "combinepatch_selectusebankstate", False, ARM_COND_EQ, "first menu item download route"),
+        (0x002A5920, "combinepatch_homecleanupresult", False, ARM_COND_EQ, "download exit after native HOME cleanup"),
         (0x002AC958, "combinepatch_nogamechoice", False, ARM_COND_AL, "mode-specific no-game HOME entry"),
         (0x002AC79C, "combinepatch_selectnogamemessage", True, ARM_COND_AL, "mode-specific no-game prompt"),
+        (0x002AC95C, "combinepatch_selectnogamedownloadbutton", True, ARM_COND_AL, "Download confirmation button label"),
         (0x002A58CC, "combinepatch_result21", False, ARM_COND_EQ, "language result"),
         (0x002A57E0, "combinepatch_result5", False, ARM_COND_EQ, "no-save result"),
         (0x002A57F0, "combinepatch_result6or12", False, ARM_COND_EQ, "result six or twelve"),
         (0x002A6C8C, "combinepatch_menuselectioncallback", False, ARM_COND_AL, "feature-menu callback"),
         (0x002A6824, "combinepatch_showmodegreeting", True, ARM_COND_AL, "first menu greeting"),
         (0x002A6978, "combinepatch_showmodegreeting", True, ARM_COND_AL, "return menu greeting"),
-        (0x002ADD0C, "combinepatch_selectgameselectionmessage", True, ARM_COND_AL, "mode-specific game-selection prompt"),
+        (0x002ADD0C, "combinepatch_selectgameselectionmessage", True, ARM_COND_AL, "Unlock game-selection prompt"),
         (0x002AD92C, "combinepatch_showunlockprompt", True, ARM_COND_AL, "official unlock-code prompt"),
         (0x001D6308, "combinepatch_selectusebankmenutext", True, ARM_COND_AL, "first menu label"),
         (0x001D6310, "combinepatch_selectsupportmenutext", True, ARM_COND_AL, "support menu label"),
@@ -729,7 +740,7 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
         (0x001D6320, "combinepatch_selecthomemenutextr6", True, ARM_COND_AL, "installed HOME menu label"),
         (0x001D63A8, "combinepatch_selectdownloadmovermenutext", True, ARM_COND_AL, "download Mover menu label"),
         (0x001D63B0, "combinepatch_selecthomemenutextr5", True, ARM_COND_AL, "download HOME menu label"),
-        (0x002D11C4, "combinepatch_downloadcapturetrampoline", True, ARM_COND_AL, "ordinary Bank download callback"),
+        (0x002D1248, "combinepatch_downloadcapturetrampoline", True, ARM_COND_AL, "capture after native current/legacy loading"),
         (0x002ABD8C, "combinepatch_selectdisconnectmessage", True, ARM_COND_AL, "disconnect message"),
         (0x002B1D7C, "combinepatch_savebegin", False, ARM_COND_AL, "save begin"),
         (0x002B1DFC, "combinepatch_savedisplaywait", False, ARM_COND_AL, "save display wait"),
@@ -809,11 +820,77 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
         expect_word(image, address, read_word(base_image, address), "stock title lifecycle")
     expect_word(base_image, 0x002AC958, 0xE5945040, "native no-game choice view")
     no_game = symbols["combinepatch_nogamechoice"]
-    expect_branch(image, no_game + 12, symbols["initialgamecheck_failuretransition"],
-                  False, ARM_COND_NE, "first three modes block HOME after confirmation")
-    expect_word(image, no_game + 16, 0xE5945040, "Original no-game choice view")
-    expect_branch(image, no_game + 20, 0x002AC95C, False, ARM_COND_AL,
-                  "Original no-game HOME continuation")
+    expect_branch(image, no_game + 12, no_game + 24, False, ARM_COND_EQ,
+                  "Original no-game HOME choice")
+    expect_word(image, no_game + 16, 0xE35C0001, "Download no-game choice check")
+    expect_branch(image, no_game + 20, symbols["initialgamecheck_failuretransition"],
+                  False, ARM_COND_NE, "Offline and Unlock block HOME after confirmation")
+    expect_word(image, no_game + 24, 0xE5945040, "native no-game choice view")
+    expect_branch(image, no_game + 28, 0x002AC95C, False, ARM_COND_AL,
+                  "Download and Original no-game choice continuation")
+    no_game_message = symbols["combinepatch_selectnogamemessage"]
+    expect_word(image, no_game_message + 16, 0x012FFF1E, "Original no-game message return")
+    expect_word(image, no_game_message + 20, 0xE35C0001, "Download no-game prompt mode")
+    expect_word(image, no_game_message + 24, 0x03A02073, "Download no-game prompt ID")
+    expect_word(image, no_game_message + 28, 0x13A02070, "blocked no-game prompt ID")
+    game_selection = symbols["combinepatch_selectgameselectionmessage"]
+    expect_word(image, game_selection + 8, 0xE35C0002, "Unlock-only game-selection guidance")
+    expect_word(image, game_selection + 12, 0x03A0106E, "Unlock game-selection prompt ID")
+    expect_word(image, game_selection + 16, 0x13A01003, "native game-selection prompt in other modes")
+    expect_word(base_image, 0x002AC95C, 0xE3A03059, "native HOME confirmation label")
+    download_button = symbols["combinepatch_selectnogamedownloadbutton"]
+    for offset, word, description in (
+        (0, 0xE10F3000, "save caller flags"),
+        (8, 0xE5DCC000, "read session mode"),
+        (12, 0xE35C0001, "check Download Mode"),
+        (16, 0x03A0C075, "Download confirmation label"),
+        (20, 0x13A0C059, "native HOME confirmation in other modes"),
+        (24, 0xE128F003, "restore caller flags"),
+        (28, 0xE1A0300C, "return selected label in r3"),
+        (32, 0xE12FFF1E, "return to native button setup"),
+    ):
+        expect_word(image, download_button + offset, word, description)
+    if image[image_offset(0x002AC960):image_offset(0x002AC9B4)] != \
+            base_image[image_offset(0x002AC960):image_offset(0x002AC9B4)]:
+        raise ValueError("native cancel label or no-game button setup changed")
+    for name, result in (("combinepatch_selectusebankstate", 28),
+                         ("combinepatch_homecleanupresult", 20)):
+        wrapper = symbols[name]
+        expect_word(image, wrapper + 4, 0xE5DCC000, "download route session mode")
+        expect_word(image, wrapper + 8, 0xE35C0001, "download route mode check")
+        expect_word(image, wrapper + 12, 0x03A00000 | result, "download route state")
+        expect_word(image, wrapper + 16, 0xE8BD8010, "download route native return")
+    capture = symbols["combinepatch_downloadcapturetrampoline"]
+    expect_word(image, 0x002D11C4, read_word(base_image, 0x002D11C4),
+                "native download callback metadata-offset literal load")
+    expect_word(base_image, 0x002D1248, 0xE3560000, "native post-load flag comparison")
+    expect_word(image, capture + 32, 0xE5D40041, "capture complete-file route flag")
+    capture_return, link, condition = decode_arm_branch(image, capture + 28)
+    if link or condition != ARM_COND_NE:
+        raise ValueError("download capture must reject other session modes")
+    expect_branch(image, capture + 40, capture_return, False, ARM_COND_EQ,
+                  "download capture excludes ordinary game-dependent route")
+    expect_word(image, capture + 48, 0xE3A01002, "capture failure status")
+    expect_word(image, capture + 52, 0xE5C01001, "capture status before SD write")
+    expect_word(image, capture + 56, 0xE5940008, "capture download flow")
+    expect_word(image, capture + 60, 0xE59000CC, "capture natively loaded bank object")
+    expect_branch(image, capture + 64, symbols["bankdataredirect_capturedownloaded"],
+                  True, ARM_COND_AL, "capture current-format object")
+    expect_word(image, capture + 80, 0xE3A00001, "capture success status")
+    expect_word(image, capture + 84, 0xE5C10001, "capture success after checked SD commit")
+    expect_word(image, capture_return + 16, 0xE3560000, "replay native post-load flag comparison")
+    callback_start, callback_end = image_offset(0x002D11B0), image_offset(0x002D1318)
+    callback = bytearray(image[callback_start:callback_end])
+    hook_offset = image_offset(0x002D1248) - callback_start
+    callback[hook_offset:hook_offset + 4] = base_image[
+        image_offset(0x002D1248):image_offset(0x002D124C)
+    ]
+    if callback != base_image[callback_start:callback_end]:
+        raise ValueError("native download loading, metadata or completion processing changed")
+    for start, end in ((0x002D1084, 0x002D10FC), (0x002AFE94, 0x002B0074)):
+        if image[image_offset(start):image_offset(end)] != \
+                base_image[image_offset(start):image_offset(end)]:
+            raise ValueError("native first-create callbacks or HOME cleanup changed")
 
     # Native transaction recovery remains intact alongside the restored HOME states.
     # 原版事务恢复入口与已恢复的 HOME 状态均保持原状。
@@ -969,12 +1046,14 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
     expect_word(base_image, 0x002B2548, 0xE3A01008, "base save message")
     expect_word(
         image,
-        symbols["combinepatch_bankcreatesuccess"] + 12,
+        symbols["combinepatch_bankcreatesuccess"] + 16,
         0x03A00007,
-        "Original first-use success state",
+        "Download and Original wait for native first-use callback",
     )
-    expect_word(image, symbols["combinepatch_bankcreatesuccess"] + 16,
-                0x13A00008, "first three modes first-use success state")
+    expect_word(image, symbols["combinepatch_bankcreatesuccess"] + 12,
+                0x135C0001, "Download first-use callback wait check")
+    expect_word(image, symbols["combinepatch_bankcreatesuccess"] + 20,
+                0x13A00008, "Offline and Unlock first-use completion state")
 
     expect_branch(
         image,
@@ -1193,6 +1272,9 @@ def verify_messages(source_romfs: Path, output_romfs: Path) -> None:
             module.DOWNLOAD_PROGRESS_LINE: module.DOWNLOAD_PROGRESS_MESSAGES[archive],
             module.DOWNLOAD_SUCCESS_LINE: module.DOWNLOAD_SUCCESS_MESSAGES[archive],
             module.DOWNLOAD_USE_BANK_LINE: module.DOWNLOAD_MENU_MESSAGES[archive],
+            module.DOWNLOAD_NO_GAME_LINE: module.DOWNLOAD_NO_GAME_MESSAGES[archive],
+            module.DOWNLOAD_FAILED_LINE: module.DOWNLOAD_FAILED_MESSAGES[archive],
+            module.DOWNLOAD_START_LINE: module.DOWNLOAD_START_MESSAGES[archive],
             module.OFFLINE_INITIAL_CONNECT_LINE: module.OFFLINE_INITIAL_CONNECT_MESSAGES[archive],
             module.OFFLINE_BANK_CONNECTION_LINE: module.OFFLINE_BANK_CONNECTION_MESSAGES[archive],
             module.OFFLINE_SAVE_LINE: module.OFFLINE_SAVE_MESSAGES[archive],
@@ -1203,7 +1285,6 @@ def verify_messages(source_romfs: Path, output_romfs: Path) -> None:
             module.TITLE_MODE_ORIGINAL_LINE: expected_title_mode_original,
             module.DISABLED_LINE: module.DISABLED_MESSAGES[archive],
             module.LANGUAGE_MENU_LINE: module.LANGUAGE_MENU_MESSAGES[archive],
-            module.DOWNLOAD_GAME_SELECTION_LINE: module.DOWNLOAD_GAME_SELECTION_MESSAGES[archive],
             module.UNLOCK_USE_BANK_LINE: module.UNLOCK_MENU_MESSAGES[archive],
             module.UNLOCK_GAME_SELECTION_LINE: module.UNLOCK_GAME_SELECTION_MESSAGES[archive],
         }

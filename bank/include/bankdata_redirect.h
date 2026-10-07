@@ -172,6 +172,7 @@ typedef u32 (*BankFile_DeriveFlowMetadataFn)(void *);
 int OfflinePatch_InitialRemoteRecordUpdate(BankStateView *state);
 int OfflinePatch_LoadBankData(BankStateView *state);
 int OfflinePatch_CreateInitial(void *remote,const void *data,u32 size);
+int BankdataRedirect_CaptureDownloaded(BankRuntimeObjectView *object);
 int OfflinePatch_Stage(void *remote,const void *data,u32 size,void *transaction);
 int OfflinePatch_Commit(void *remote,void *transaction,u32 zero);
 int OfflinePatch_Rollback(void *remote,void *transaction,u32 zero);

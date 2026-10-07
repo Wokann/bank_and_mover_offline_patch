@@ -46,9 +46,9 @@ Title screen (default: Offline)
 Recommended first use:
 
 1. Back up the SD card and any existing `sd:/3ds/Bank/` files.
-2. Select Download Mode, enter the first feature-menu item, select any
-   compatible game, and let the official service return the complete Bank
-   object.
+2. Select Download Mode and enter the first feature-menu item to retrieve the
+   complete Bank object without selecting a game. If no usable game save is
+   found, accept the direct server-download prompt.
 3. Wait for the download-complete message and the return to the title screen.
 4. Confirm that `sd:/3ds/Bank/bankdata.bin` exists, then use Offline Mode for
    normal Bank sessions.
@@ -146,21 +146,35 @@ never switch to the other backend.
 
 ## Download Mode
 
-Download Mode retains the stock startup, account initialization, first-user
-server record creation, game detection, game selection, transaction recovery,
-network connection, Bank-data request, and disconnect jobs.
+Download Mode retains stock startup, account queries, first-user server record
+creation, ticket checks, complete-file requests, and disconnect jobs. It uses
+the game-independent HOME downloader without entering the HOME transfer UI.
+After title-mode confirmation, language and native initialization use the stock
+Turtle save, not `sav.bin`; no source game is selected or saved. Common title
+preview/migration still uses the SD record as described above.
 
 ```text
-Feature menu: Download Bank Data
+Confirm title mode → state 3 game check
+        ├── no usable game: ask to download directly
+        │       └── No ─► stock cleanup → title
+        └── usable game / Yes
+                ▼
+Stock Turtle check/load; initialize and save the stock record if required
         │
         ▼
-Stock game detection and game selection
+States 5 → 8 → 15 → 9: create and upload a missing server Bank, then wait for success
+        │
+        ├── usable game ─► state 4: select Download Bank Data
+        └── no game and download accepted ─► continue directly
         │
         ▼
-Stock server connection and complete Bank download
+State 28: stock complete Bank download without game selection
         │
         ▼
-Ordinary-Bank remote-success callback receives 0xBB518 bytes
+Native success callback loads current data or expands a legacy body
+        │
+        ▼
+Capture the loaded 0xBB518-byte record before session-flag adjustments
         │
         ▼
 Write and flush bankdata.tmp; verify size and actual bytes written
@@ -176,25 +190,81 @@ Rotate old bin to bak; rename tmp to bin
 Skip mileage, Box, and save UI
         │
         ▼
-Stock no-save transaction release and disconnect
+State 29: stock remote release and UI teardown → state 20: disconnect
         │
         ▼
-Download-complete message; return to title
+Local-save success / failure message; return to title
 ```
 
-The capture occurs only after the complete object has been returned; network
-chunks are not written incrementally. A second mode check at the success
-callback permits local writing only for ordinary Bank mode. Other internal
-routes cannot overwrite `bankdata.bin`.
+The capture occurs only after the complete object has been loaded; network
+chunks are not written incrementally. At `0x002D1248`, both native body loaders
+have returned, but the callback has not yet adjusted session flags. The native
+legacy loader accepts `0xACA48` bytes and expands them into the current record;
+the patch copies the loaded `0xBB518` bytes rather than reading a current-sized
+block from a shorter response. A second mode check permits local writing only
+for the state-28 route in Download Mode. Other routes cannot overwrite
+`bankdata.bin`.
 
-The game-selection prompt explains that any selectable game can be used to
-obtain the complete Bank data. After a successful local commit, the flow
-bypasses local mileage, Bank Box, and save screens and uses the stock no-save
-exit. If local capture fails, the patch does not falsify the official callback
+Download Mode does not enter game selection, local mileage, Bank Box, or save
+screens. Without a usable game save it asks for confirmation; declining follows
+stock cleanup, while accepting first completes native Turtle check/initialization,
+then connection and first-use checks.
+A missing local file does not recreate an existing server Bank. If the server
+Bank is missing, the official creation callback must succeed before requesting
+the complete server file; the pre-upload local buffer is not used as a download.
+If local capture fails, the patch does not falsify the official callback
 result or silently mark the capture successful.
 
-Download Mode writes transaction records and language changes to the stock save,
-not `sav.bin`. It preserves the native state 15 entitlement, ticket, campaign, and
+The existing download-to-SD path message (`0x61`) is reused. A successful temp
+write and file rotation select the existing completion message (`0x62`); a failed
+capture selects the new local-SD-save failure message (`0x74`). Before a successful
+response/capture attempt, disconnect retains its native text. State 29 retains
+its remote request, asynchronous wait, and UI teardown, then proceeds directly
+to disconnect instead of state 27's HOME transfer controller. This cleanup still
+sends a server request.
+
+### Startup and server-data cases
+
+Turtle initialization, first server Bank creation, and local file installation
+are separate stages. The server account query—not the presence of local
+`bankdata.bin`—decides whether state 9 creates a Bank.
+
+| Usable game save | Server Bank | Download route |
+| --- | --- | --- |
+| Present | Exists, populated | Native startup → menu first item → state 28 download. |
+| Present | Exists, empty | Same route; capture the complete empty record without entering HOME's empty-Bank warning. |
+| Absent | Exists, populated | Accept the direct-download question → Turtle checks → native connection → state 28. |
+| Absent | Exists, empty | Same direct route; zero Pokemon does not suppress capture. |
+| Either | Missing | Native first-use instructions and initialization → upload → wait for the real success callback → state 28. With a usable game, the feature menu remains between creation and download. |
+| Absent | Either, user selects Cancel | Native cleanup/title return before connecting; no server creation or download. |
+
+The no-game Download question uses **Start Download** and the stock **Cancel**
+button. Original Mode retains the stock HOME transfer confirmation labels.
+
+With a valid stock Turtle, state 3 loads it and retains native language/save
+handling. Missing or invalid records use the original initialization confirmation,
+format, initialization and save chain; declining or a native save failure follows
+the stock error/return path. Accepting the no-game question sets the native direct
+flag but does not bypass this chain. An existing SD `sav.bin` is not substituted
+for a missing stock record after Download Mode is confirmed.
+
+### Failure and interruption cases
+
+| Stage | Behavior |
+| --- | --- |
+| Turtle initialization, account/ticket check, or network request fails | Keep native messages and error cleanup; do not report a completed local download. Public ticket policy remains `0`. |
+| Initial server upload cannot start or its callback fails | Keep the native failure branch; do not export the pre-upload initialization buffer. |
+| Full download fails or the server does not provide a successful body | Keep native failure handling; do not manufacture an empty Bank or a successful local result. |
+| Loaded object header is unusable, or temp write/size/flush/close checks fail | Record local capture failure, keep the native callback result, and continue native cleanup. A partial `.tmp` may remain; it is not promoted just because it exists. |
+| Backup deletion or renaming fails | Report local failure. The existing rotation helper stops or attempts to restore the old `.bin`; recovery is not guaranteed if the SD card remains unusable. |
+| State 29 release fails after the SD copy succeeded | The file was saved, but the native remote error is still reported. Local completion is not a claim that a server transaction was unlocked. |
+| Software/power stops during download or rotation | No completed message is shown. A later download queries the server again; it does not upload the local file or treat a leftover temp as a completed download. Offline recovery retains its existing `.bin/.bak` rules. |
+
+All completed-download paths skip mileage, Box, normal saving, and HOME transfer.
+Initial stock Turtle saving and first server Bank upload are still allowed.
+Server rejection or transaction locking is not forcibly bypassed by this route.
+
+Download Mode preserves the native state 15 entitlement, ticket, campaign, and
 online-gift checks by default, including their waits, messages, and error
 handling. The one-byte switch below enables a local bypass for emulator tests;
 it does not change the post-download mileage, Box, and save-screen skip.
@@ -273,7 +343,7 @@ It is therefore kept only in the personal test branch and will not be submitted
 to Azahar's official main branch.
 
 Both paths remain in the same code. This definition changes only the policy
-byte at `[0x003FE828, 0x003FE829)`. State 15 retains its original entry and
+byte at `[0x003FE8E8, 0x003FE8E9)`. State 15 retains its original entry and
 state transitions. Only three calls are redirected: job initialization at
 `0x002B0444`, result polling at `0x002B0464`, and unbinding at `0x002B1994`.
 The initialization wrapper passes job, shared data, session mode and policy to
@@ -467,9 +537,11 @@ stock record and then use the native disconnect job. A blank
 disconnect entry prevents a newly selected font from rendering stale text in
 the previous language.
 
-The first three modes also block the no-game HOME shortcut. Only the two
-original warning pages are shown, retaining both button-confirmation waits
-before returning to the title. The complete original message and challenge-code
+The first three modes also block no-game entry to HOME transfer operations.
+Offline/Unlock show the two original warning pages, retaining both confirmation
+waits before returning to the title. Download instead asks to retrieve the server
+Bank directly, then downloads and disconnects without game selection.
+The complete original message and challenge-code
 prompt are preserved for Original Mode; custom variants are appended instead
 of overwriting original message entries.
 
@@ -552,7 +624,7 @@ bytes, while runtime mapping grows by only four pages, `0x4000` (16 KiB).
 | `[0x00313B1C, 0x00313FC0)` | Original last text-page padding | Unused executable padding, `0x4A4` bytes. |
 | `[0x00313FC0, 0x00314000)` | Original last text-page padding | Zero-padded 64-byte `offline_patch_v1.0.0` identifier. |
 | `[0x003ABACC, 0x003FA904)` | Native logical BSS | Explicit zeros; native variables and startup clearing retained. No payload. |
-| `[0x003FAFF0, 0x003FB000)` | Final 16 bytes of original RW mapping, after logical BSS | First four bytes hold session mode, capture flag, R-key history and title selection; `+4` stores this ticket job's backend, `+5` records pending first-language selection; ten bytes reserved. |
+| `[0x003FAFF0, 0x003FB000)` | Final 16 bytes of original RW mapping, after logical BSS | First four bytes hold session mode, capture status (`0` not attempted, `1` saved, `2` failed), R-key history and title selection; `+4` stores this ticket job's backend, `+5` records pending first-language selection; ten bytes reserved. |
 | `[0x003FB000, 0x003FC000)` | Added RW mapping | Zero-filled separator, not an unmapped guard page. |
 | `[0x003FC000, 0x003FF000)` | Three new pages after native BSS | All feature wrappers, C backends and paths; enabled for execution on hardware by the loader. |
 
@@ -561,22 +633,22 @@ eShop entries without consuming their function bodies. Original Mode restores
 their native routes. Title, feature, language and Turtle hooks select the
 appropriate behavior without replacing the native storage implementation.
 
-Added-page placements total `0x282C` (10284 bytes), leaving `0x7D4` (2004 bytes):
+Added-page placements total `0x28EC` (10476 bytes), leaving `0x714` (1812 bytes):
 
 | Content | Actual range | Size |
 | --- | --- | --- |
-| Text, save and language assembly wrappers | `[0x003FC000, 0x003FC418)` | `0x418` |
-| `patch_paths.o` | `[0x003FC418, 0x003FC4CB)` | `0xB3`, then one alignment byte |
-| Mode, title and connection wrappers | `[0x003FC4CC, 0x003FCDBC)` | `0x8F0` |
-| `turtle_redirect.o` | `[0x003FCDBC, 0x003FD300)` | `0x544` |
-| `fs_helpers.o` | `[0x003FD300, 0x003FD8D0)` | `0x5D0` |
-| `bankdata_redirect.o` | `[0x003FD8D0, 0x003FDF2C)` | `0x65C` |
-| `offline_flow.o` | `[0x003FDF2C, 0x003FE04C)` | `0x120` |
-| `local_mileage.o` | `[0x003FE04C, 0x003FE470)` | `0x424` |
-| `local_ticket.o` | `[0x003FE470, 0x003FE780)` | `0x310` |
-| `unlock_mode.o` | `[0x003FE780, 0x003FE7D0)` | `0x50` |
-| Ticket assembly wrappers, literal pool and policy byte | `[0x003FE7D0, 0x003FE82C)` | `0x5C` |
-| Unused added-page space | `[0x003FE82C, 0x003FF000)` | `0x7D4` |
+| Text, save and language assembly wrappers | `[0x003FC000, 0x003FC414)` | `0x414` |
+| `patch_paths.o` | `[0x003FC414, 0x003FC4C7)` | `0xB3`, then one alignment byte |
+| Mode, title and connection wrappers | `[0x003FC4C8, 0x003FCE04)` | `0x93C` |
+| `turtle_redirect.o` | `[0x003FCE04, 0x003FD348)` | `0x544` |
+| `fs_helpers.o` | `[0x003FD348, 0x003FD918)` | `0x5D0` |
+| `bankdata_redirect.o` | `[0x003FD918, 0x003FDFF0)` | `0x6D8` |
+| `offline_flow.o` | `[0x003FDFF0, 0x003FE110)` | `0x120` |
+| `local_mileage.o` | `[0x003FE110, 0x003FE530)` | `0x420` |
+| `local_ticket.o` | `[0x003FE530, 0x003FE840)` | `0x310` |
+| `unlock_mode.o` | `[0x003FE840, 0x003FE890)` | `0x50` |
+| Ticket assembly wrappers, literal pool and policy byte | `[0x003FE890, 0x003FE8EC)` | `0x5C` |
+| Unused added-page space | `[0x003FE8EC, 0x003FF000)` | `0x714` |
 
 Native text's actual size stays fixed, preserving Luma LayeredFS placement.
 Its path still uses the rodata tail at `[0x00369370, 0x00369397)`, which this

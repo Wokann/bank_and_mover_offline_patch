@@ -211,6 +211,18 @@ int OfflinePatch_CreateInitial(void *remote,const void *data,u32 size)
 }
 
 __attribute__((used,noinline,section(".text.offline")))
+int BankdataRedirect_CaptureDownloaded(BankRuntimeObjectView *object)
+{
+    /* Native loading has already expanded any legacy body to the current
+       record. Empty banks are valid; no Pokemon-count test belongs here. */
+    /* 原版装载已将旧格式扩展为当前记录。空银行同样有效，此处不按宝可梦数量过滤。 */
+    if (!object || object->vtable!=BankFile_Vtable ||
+        !validHeader(object->record.header.formatVersion,object->record.header.boxCount))
+        return 0;
+    return writeTemporary(&object->record) && commitTemporary();
+}
+
+__attribute__((used,noinline,section(".text.offline")))
 int OfflinePatch_Stage(void *remote,const void *data,u32 size,void *transaction)
 {
     (void)remote; (void)transaction; return size==BANK_FILE_SIZE && writeTemporary(data);
