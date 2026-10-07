@@ -362,6 +362,13 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
         "unlockmode_payloadbegin",
         "unlockmode_payloadend",
         "unlockmode_trygetfirstcandidatecode",
+        "unlockmode_postselectionupdate",
+        "unlockmode_recoveryupdate",
+        "unlockmode_recoverystorage",
+        "bankui_showmessageline",
+        "ui_setpanevisible",
+        "ui_applyanimation",
+        "messageview_getresult",
         "combinepatch_networkupdate",
         "combinepatch_initialremoterecordupdate",
         "combinepatch_ticketinitialize",
@@ -387,6 +394,11 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
         "combinepatch_selectsavemessage",
         "combinepatch_selectpostselectionconnectionmessage",
         "combinepatch_postselectionconnectionupdate",
+        "combinepatch_postselectionconnectionupdateofficial",
+        "combinepatch_transactionrecoveryupdate",
+        "combinepatch_transactionrecoveryupdateofficial",
+        "combinepatch_recoveryresult",
+        "combinepatch_forcerollbacksuccess",
         "combinepatch_disconnectupdate",
         "combinepatch_disconnectskipremotejob",
         "combinepatch_disconnectskipremotejobofficial",
@@ -569,6 +581,13 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
         "combinepatch_selectsavemessage",
         "combinepatch_selectpostselectionconnectionmessage",
         "combinepatch_postselectionconnectionupdate",
+        "combinepatch_postselectionconnectionupdateofficial",
+        "combinepatch_transactionrecoveryupdate",
+        "combinepatch_transactionrecoveryupdateofficial",
+        "combinepatch_recoveryresult",
+        "combinepatch_forcerollbacksuccess",
+        "unlockmode_postselectionupdate",
+        "unlockmode_recoveryupdate",
         "combinepatch_disconnectupdate",
         "combinepatch_disconnectskipremotejob",
         "combinepatch_disconnectskipremotejobofficial",
@@ -709,6 +728,9 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
         (0x002AFE50, "combinepatch_bankdatasyncinitialize", False, ARM_COND_AL, "Bank data-sync initializer"),
         (0x002A58B4, "combinepatch_selectpostselectionstate", False, ARM_COND_AL, "post-selection state"),
         (0x002A93F4, "combinepatch_postselectionconnectionupdate", False, ARM_COND_AL, "post-selection connection"),
+        (0x002A8760, "combinepatch_transactionrecoveryupdate", False, ARM_COND_AL, "mode-specific mismatch notice completion"),
+        (0x002A5860, "combinepatch_recoveryresult", False, ARM_COND_AL, "mismatch retry through native game-selection creation"),
+        (0x002A588C, "combinepatch_forcerollbacksuccess", False, ARM_COND_EQ, "official forced rollback completion latch"),
         (0x002A970C, "combinepatch_selectpostselectionconnectionmessage", True, ARM_COND_AL, "post-selection initializer message"),
         (0x002A981C, "combinepatch_firstpresentdispatch", False, ARM_COND_AL, "first-present and local-mileage dispatch"),
         (0x002AED3C, "combinepatch_selectpostselectionconnectionmessage", True, ARM_COND_AL, "first-use connection message"),
@@ -892,14 +914,29 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
                 base_image[image_offset(start):image_offset(end)]:
             raise ValueError("native first-create callbacks or HOME cleanup changed")
 
-    # Native transaction recovery remains intact alongside the restored HOME states.
-    # 原版事务恢复入口与已恢复的 HOME 状态均保持原状。
-    expect_word(
-        image,
-        RESTORED_HOME_END,
-        read_word(base_image, RESTORED_HOME_END),
-        "transaction-recovery state entry",
-    )
+    # Unlock wrappers replay only the native prologues. Recovery, networking,
+    # selected-game saving, callback cleanup and state creation stay native.
+    # 解锁包装仅重放原版入口；恢复、联网、所选游戏保存、回调清理与状态创建保持原版。
+    for entry, trampoline, prologue, end in (
+        (0x002A8760, "combinepatch_transactionrecoveryupdateofficial", 0xE92D40F0, 0x002A9118),
+        (0x002A93F4, "combinepatch_postselectionconnectionupdateofficial", 0xE92D4070, 0x002A9700),
+    ):
+        expect_word(base_image, entry, prologue, f"base {trampoline} prologue")
+        expect_word(image, symbols[trampoline], prologue, f"{trampoline} prologue")
+        expect_branch(image, symbols[trampoline] + 4, entry + 4, False, ARM_COND_AL,
+                      f"{trampoline} native continuation")
+        if image[image_offset(entry + 4):image_offset(end)] != \
+                base_image[image_offset(entry + 4):image_offset(end)]:
+            raise ValueError(f"native recovery body or cleanup changed at {entry:#x}")
+    for start, end in ((0x002A5864, 0x002A588C), (0x002A5890, 0x002A58A4),
+                       (0x002A593C, 0x002A6750)):
+        if image[image_offset(start):image_offset(end)] != \
+                base_image[image_offset(start):image_offset(end)]:
+            raise ValueError("native recovery routing, controller or state creation changed")
+    expect_branch(image, symbols["combinepatch_forcerollbacksuccess"] + 20,
+                  0x002A58A4, False, ARM_COND_AL, "forced rollback resumes native state 17")
+    if symbols["unlockmode_recoverystorage"] != 0x003FAFF6:
+        raise ValueError("unlock recovery status moved outside its reserved runtime byte")
 
     expect_word(base_image, 0x002B1AD0, 0xE92D40F8, "base title-state prologue")
     expect_word(base_image, 0x002AC958, 0xE5945040, "base no-game HOME choice setup")
@@ -1287,6 +1324,9 @@ def verify_messages(source_romfs: Path, output_romfs: Path) -> None:
             module.LANGUAGE_MENU_LINE: module.LANGUAGE_MENU_MESSAGES[archive],
             module.UNLOCK_USE_BANK_LINE: module.UNLOCK_MENU_MESSAGES[archive],
             module.UNLOCK_GAME_SELECTION_LINE: module.UNLOCK_GAME_SELECTION_MESSAGES[archive],
+            module.UNLOCK_NO_RECOVERY_LINE: module.UNLOCK_NO_RECOVERY_MESSAGES[archive],
+            module.UNLOCK_RECOVERED_LINE: module.UNLOCK_RECOVERED_MESSAGES[archive],
+            module.UNLOCK_FORCED_RECOVERED_LINE: module.UNLOCK_FORCED_RECOVERED_MESSAGES[archive],
         }
         for line, expected in expected_lines.items():
             if output_lines[line] != expected:

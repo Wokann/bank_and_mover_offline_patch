@@ -275,6 +275,25 @@ Unlock Mode is a separate entry into the stock online transaction-recovery
 flow. It does not inherit Download Mode's Bankdata capture, post-download state
 skip, or download-complete message.
 
+First confirm that none of the cartridge or digital saves matches the server.
+Then select any game and hold L + A + START while confirming. Without the
+combination, the stock mismatch notice remains. Acknowledging it lets native
+recovery cleanup and destruction finish before recreating state 10, the same
+game-selection chain reached after confirming the first feature-menu entry.
+This does not return to the menu or directly reuse the old selection UI.
+
+After native selected-game transaction cleanup, show the appropriate result
+and wait for acknowledgment before native disconnection. None of these routes
+enters mileage or boxes:
+
+- No recovery needed: “Server status is normal. Unlock Mode is not needed.”
+- Automatic recovery of a matching save: “Automatic recovery completed. The server lock has been cleared.”
+- Successful official forced unlock: “Forced unlock completed. The server lock has been cleared.”
+
+Recovery success requires an accepted native commit/rollback; matching a save
+or opening the unlock screen alone does not qualify. Network errors,
+cancellation and empty candidate lists retain their native handling.
+
 ```text
 Title screen: Unlock Mode
         │
@@ -282,7 +301,7 @@ Title screen: Unlock Mode
 Feature menu: Enter Force Unlock
         │
         ▼
-Select the relevant game while holding L + A + START
+Confirm all saves mismatch; select any game while holding L + A + START
         │
         ▼
 Stock forced-unlock challenge state
@@ -291,7 +310,10 @@ Stock forced-unlock challenge state
                                       as “Enter this unlock code: xxxxxxxx”
         │
         ▼
-Stock input validation, rollback request, result handling, and continuation
+Stock input validation, rollback request, and selected-game transaction cleanup
+        │
+        ▼
+Forced-unlock completion notice → acknowledgment → native disconnect to title
 ```
 
 The server response owns a vector of candidate values. The stock validator
@@ -303,7 +325,8 @@ operation. If the vector is empty, the original prompt is used unchanged.
 
 This mode still shares project-wide menu restrictions but uses the stock Turtle
 record. It preserves native state 15 ticket and online-gift checks by default,
-and its recovery state remains the stock state machine. The local offline
+and native transaction requests/validation remain intact; only the described
+post-notice branches change. The local offline
 `bankdata.bin` is neither loaded nor uploaded by the unlock display hook.
 
 ## Ticket and online-gift checks: public and test builds
@@ -343,7 +366,7 @@ It is therefore kept only in the personal test branch and will not be submitted
 to Azahar's official main branch.
 
 Both paths remain in the same code. This definition changes only the policy
-byte at `[0x003FE8E8, 0x003FE8E9)`. State 15 retains its original entry and
+byte at `[0x003FEAD4, 0x003FEAD5)`. State 15 retains its original entry and
 state transitions. Only three calls are redirected: job initialization at
 `0x002B0444`, result polling at `0x002B0464`, and unbinding at `0x002B1994`.
 The initialization wrapper passes job, shared data, session mode and policy to
@@ -616,7 +639,9 @@ bytes, while runtime mapping grows by only four pages, `0x4000` (16 KiB).
 | `0x00100010`, 4 bytes | Native startup `BLX` to the Thumb constructor walker | Calls the loader, restores registers and tail-resumes at `0x00102BA5`. |
 | `[0x00285BA8, 0x0028711C)` | Native HOME box-selection UI | Original bytes preserved throughout; not reclaimed. |
 | `[0x002A7BF0, 0x002A8404)` | Native state 27 HOME flow and companions | Original bytes preserved throughout; not reclaimed. |
-| `[0x002A8404, 0x002A8760)` | Native state 14 eShop flow and companions | Original bytes preserved; subsequent transaction recovery is intact. |
+| `[0x002A8404, 0x002A8760)` | Native state 14 eShop flow and companions | Original bytes preserved; not reclaimed. |
+| `0x002A8760`, `0x002A93F4`, 4 bytes each | Native state 18/17 update prologues | Branch to added-page mode dispatch, then replay the original push and complete native body; only Unlock Mode adds acknowledgment-driven retry/exit branches. |
+| `0x002A5860`, `0x002A588C`, 4 bytes each | Native state-18 result test and state-23 success branch | Unlock Mode reconstructs state 10 after confirmed mismatch and latches successful official forced rollback; native controller, construction and cleanup remain intact. |
 | `0x002B0444`, `0x002B0464`, `0x002B1994`, 4 bytes each | State 15 job initialization, polling and unbinding | Call added-page wrappers; all other state-15 bytes and native jobs stay intact. |
 | `0x002B1B98`, `0x002B1BDC`, 4 bytes each | Title-exit UI-root load and completion return | Wait for native shared-prompt release before native title destruction, then reload the selected record and language; cleanup bodies remain intact. |
 | `[0x00313910, 0x00313A40)` | Original last text-page padding | `0x130` bytes reserved for Luma LayeredFS; untouched. |
@@ -624,7 +649,7 @@ bytes, while runtime mapping grows by only four pages, `0x4000` (16 KiB).
 | `[0x00313B1C, 0x00313FC0)` | Original last text-page padding | Unused executable padding, `0x4A4` bytes. |
 | `[0x00313FC0, 0x00314000)` | Original last text-page padding | Zero-padded 64-byte `offline_patch_v1.0.0` identifier. |
 | `[0x003ABACC, 0x003FA904)` | Native logical BSS | Explicit zeros; native variables and startup clearing retained. No payload. |
-| `[0x003FAFF0, 0x003FB000)` | Final 16 bytes of original RW mapping, after logical BSS | First four bytes hold session mode, capture status (`0` not attempted, `1` saved, `2` failed), R-key history and title selection; `+4` stores this ticket job's backend, `+5` records pending first-language selection; ten bytes reserved. |
+| `[0x003FAFF0, 0x003FB000)` | Final 16 bytes of original RW mapping, after logical BSS | First four bytes hold session mode, capture status (`0` not attempted, `1` saved, `2` failed), R-key history and title selection; `+4` stores this ticket job's backend, `+5` records pending first-language selection, `+6` stores session recovery result (`0` none, `1` successful official forced unlock, `2` successful native automatic recovery); nine bytes reserved. |
 | `[0x003FB000, 0x003FC000)` | Added RW mapping | Zero-filled separator, not an unmapped guard page. |
 | `[0x003FC000, 0x003FF000)` | Three new pages after native BSS | All feature wrappers, C backends and paths; enabled for execution on hardware by the loader. |
 
@@ -633,22 +658,22 @@ eShop entries without consuming their function bodies. Original Mode restores
 their native routes. Title, feature, language and Turtle hooks select the
 appropriate behavior without replacing the native storage implementation.
 
-Added-page placements total `0x28EC` (10476 bytes), leaving `0x714` (1812 bytes):
+Added-page placements total `0x2AD8` (10968 bytes), leaving `0x528` (1320 bytes):
 
 | Content | Actual range | Size |
 | --- | --- | --- |
 | Text, save and language assembly wrappers | `[0x003FC000, 0x003FC414)` | `0x414` |
 | `patch_paths.o` | `[0x003FC414, 0x003FC4C7)` | `0xB3`, then one alignment byte |
-| Mode, title and connection wrappers | `[0x003FC4C8, 0x003FCE04)` | `0x93C` |
-| `turtle_redirect.o` | `[0x003FCE04, 0x003FD348)` | `0x544` |
-| `fs_helpers.o` | `[0x003FD348, 0x003FD918)` | `0x5D0` |
-| `bankdata_redirect.o` | `[0x003FD918, 0x003FDFF0)` | `0x6D8` |
-| `offline_flow.o` | `[0x003FDFF0, 0x003FE110)` | `0x120` |
-| `local_mileage.o` | `[0x003FE110, 0x003FE530)` | `0x420` |
-| `local_ticket.o` | `[0x003FE530, 0x003FE840)` | `0x310` |
-| `unlock_mode.o` | `[0x003FE840, 0x003FE890)` | `0x50` |
-| Ticket assembly wrappers, literal pool and policy byte | `[0x003FE890, 0x003FE8EC)` | `0x5C` |
-| Unused added-page space | `[0x003FE8EC, 0x003FF000)` | `0x714` |
+| Mode, title, connection and unlock branch wrappers | `[0x003FC4C8, 0x003FCE84)` | `0x9BC` |
+| `turtle_redirect.o` | `[0x003FCE84, 0x003FD3C8)` | `0x544` |
+| `fs_helpers.o` | `[0x003FD3C8, 0x003FD998)` | `0x5D0` |
+| `bankdata_redirect.o` | `[0x003FD998, 0x003FE070)` | `0x6D8` |
+| `offline_flow.o` | `[0x003FE070, 0x003FE190)` | `0x120` |
+| `local_mileage.o` | `[0x003FE190, 0x003FE5B0)` | `0x420` |
+| `local_ticket.o` | `[0x003FE5B0, 0x003FE8C0)` | `0x310` |
+| `unlock_mode.o` | `[0x003FE8C0, 0x003FEA7C)` | `0x1BC` |
+| Ticket assembly wrappers, literal pool and policy byte | `[0x003FEA7C, 0x003FEAD8)` | `0x5C` |
+| Unused added-page space | `[0x003FEAD8, 0x003FF000)` | `0x528` |
 
 Native text's actual size stays fixed, preserving Luma LayeredFS placement.
 Its path still uses the rodata tail at `[0x00369370, 0x00369397)`, which this

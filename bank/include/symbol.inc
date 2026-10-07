@@ -96,6 +96,13 @@
 .definelabel NetworkConnection_MessageIdLoad,      0x002AF3B4
 .definelabel NetworkPreparation_MessageIdLoad,     0x002AF1D0
 .definelabel BankFlow_PostSelectionMetadataPath, 0x002A58B4
+.definelabel BankFlow_RecoveryResult,           0x002A5860
+.definelabel BankFlow_ForceRollbackSuccess,     0x002A588C
+.definelabel TransactionRecoveryState_Update,  0x002A8760
+.definelabel MessageView_GetResult,             0x001D6600
+.definelabel Ui_SetPaneVisible,                 0x001E7084
+.definelabel Ui_ApplyAnimation,                 0x001E69AC
+.definelabel UnlockMode_RecoveryStorage,        0x003FAFF6
 .definelabel StateTimer_Reset,                  0x00229DB4
 .definelabel StateTimer_HasElapsed,             0x001D5BB0
 .definelabel StateLocalSave_Poll,               0x002B4A20

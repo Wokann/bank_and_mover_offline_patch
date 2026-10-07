@@ -226,13 +226,14 @@ the middle, states 18 and 17 resolve the persisted state on a later use.
 | state 15 | Remote entitlement/campaign | Public policy `0` stays native; test policy `1` uses local results only for a confirmed missing Azahar interface | Always supply required ticket fields locally; disable online campaigns | Same policy as Download Mode |
 | state 9 | Server-side first creation | Stock creation, upload and asynchronous success wait in substate 7 | Create the initial local `bankdata.bin` | Stock creation and upload |
 | state 11 | Select recovery path | Not entered | Keep the test, but redirect result `9` to state 17 instead of state 18 | Stock |
-| state 18 | Current Turtle remote recovery | Not entered | Never entered | Stock; challenge UI may append the first server candidate |
-| state 17 | Selected-game remote recovery | Not entered | Keep stock UI timing without remote commit/rollback | Stock |
-| state 16 | Download complete file | Not entered | Load the complete object from `bankdata.bin` | Stock download; no local capture |
+| state 18 | Current Turtle remote recovery and game matching | Not entered | Never entered | Native requests, validation and combination; an acknowledged mismatch recreates state 10 after cleanup |
+| state 23 | Official forced-unlock challenge and rollback | Not normally entered | Not normally entered | Display the first server candidate; successful result `4 → 17` latches completion, with other native branches unchanged |
+| state 17 | Selected-game remote recovery | Not entered | Keep stock UI timing without remote commit/rollback | Finish native transactions/game saving, show no-recovery/automatic-recovery/forced-unlock result, then disconnect after acknowledgment |
+| state 16 | Download complete file | Not entered | Load the complete object from `bankdata.bin` | Not normally entered |
 | state 28 | Game-independent complete download | Keep native `+0x41=1`; capture the loaded current-format record in its success callback | Not normally entered | Not normally entered |
 | state 29 | Pre-HOME remote release and UI cleanup | Keep native job and destruction; success enters state 20 instead of state 27 | Not normally entered | Not normally entered |
-| state 12/13 | Local mileage plus online gifts | Skipped after download | Keep local mileage; skip only online-gift lookup | Stock |
-| state 25 | Normal Bank Box | Not entered after capture | Stock Bank Box | Stock Bank Box |
+| state 12/13 | Local mileage plus online gifts | Skipped after download | Keep local mileage; skip only online-gift lookup | Not normally entered |
+| state 25 | Normal Bank Box | Not entered after capture | Stock Bank Box | Not normally entered |
 | state 7 | Remote stage, game save, commit/rollback | Normally not reached; stock if reached | Local file stage, commit, and rollback | Stock |
 | state 19/20 | Remote release and disconnect | Disconnect in state 20 after state 29 completes release | Local cleanup and title return | Stock |
 
@@ -332,7 +333,7 @@ console time and an expiry 999 days later. Purchase counts stay
 provided. Native getters and exit cleanup copy the resulting entitlement and
 date. Local unbinding does not access a nonexistent network client; native
 destruction still runs. No system eShop applet or loading-animation simulation
-is used. Both paths remain present, and only the policy byte at `0x003FE8E8`
+is used. Both paths remain present, and only the policy byte at `0x003FEAD4`
 changes between builds. Initialization records this job's backend at `0x003FAFF4`;
 polling and cleanup keep that selection. The policy does not alter other networking,
 transaction recovery, mileage calculations, or post-download exit branches.
@@ -368,14 +369,44 @@ result `23` and the direct-entry flag for account checks, first creation, and
 state 28 download. Cancellation follows native failure/title
 return. Original Mode retains the complete HOME question.
 
-Unlock Mode follows the stock state 11/18/17 transaction-recovery branches. At
-the stock state-18 challenge screen, the server response already owns a vector
+Unlock Mode retains native transaction requests and recovery validation in
+states 11/18/17. At the stock state-23 challenge screen, the server response owns a vector
 of accepted candidate values. The original validator compares the entered
 eight-digit number against every candidate modulo `100,000,000`. Unlock Mode
 uses the same rule to place the first candidate in message number register 1
 and appends it as a third prompt line. The stock challenge value in register 0,
-input validation, rollback request, success/failure result, and continuation
-remain unchanged. An empty candidate vector retains the stock two-line prompt.
+input validation, rollback request, success/failure result, and state-23
+destinations remain unchanged. An empty vector retains the stock two-line prompt.
+
+Unlock Mode adds completion notices and mismatch reselection:
+
+- **Native matching/recovery succeeds:** finish state 17, including any selected-game
+  transaction commit/rollback, game saving and its result wait. On native success
+  `4`, choose the notice from the actual session recovery result: `0x76` means
+  “Server status is normal. Unlock Mode is not needed.”, `0x77` means “Automatic
+  recovery completed. The server lock has been cleared.”, and `0x78` means “Forced
+  unlock completed. The server lock has been cleared.” Retain native waiting-sound
+  stopping, loading-pane hiding and message animation setup. Wait for native
+  message result `4` (acknowledgment), then return disconnect result `3 → state 20`.
+  All three results share this exit, without entering state 16, mileage or boxes.
+  Error `3` and game-save failure `20` retain native routes and cannot report success.
+- **Locked without the combination:** keep the stock mismatch notice in state 18.
+  Only a native update from substate `10` that returns pending `0` and advances
+  to `12` identifies acknowledgment; change that result to `19`. The native flow
+  controller still waits for local saving and remote-client cleanup, unbinds and
+  destroys the client and old state, then reconstructs state 10 and calls its
+  native initializer. This is the first menu entry's post-confirmation
+  `12 → state 10` path, not a menu return or a jump into an old UI. An asynchronous
+  network error returns complete `1` with error `3`, so it cannot trigger this retry.
+
+Runtime byte `0x003FAFF6` stores this session's result: `0` none, `1` after state
+23's successful official forced rollback `4 → 17`, or `2` after state 18's native
+automatic recovery succeeds `4 → 17`. Title session binding clears it. Matching
+a save, holding the combination, opening the challenge UI or entering a candidate
+does not set a success result early. The byte is not serialized into Turtle or
+Bankdata. Cancellation, empty candidates, official rollback failures and other
+network errors retain native results; the other three modes do not use these
+Unlock-only branches.
 
 ### Offline save transaction
 

@@ -38,6 +38,7 @@
 .definelabel CombinePatch_TitleRPreviousOffset, 2
 .definelabel CombinePatch_TitleSelectedModeOffset, 3
 .definelabel CombinePatch_InitialLanguagePendingOffset, 5
+.definelabel CombinePatch_UnlockRecoveryOffset, UnlockMode_RecoveryStorage - CombinePatch_ModeStorage
 .definelabel CombinePatch_BlankMessage, 0x60
 .definelabel CombinePatch_DownloadProgressMessage, 0x61
 .definelabel CombinePatch_DownloadSuccessMessage, 0x62
@@ -121,6 +122,12 @@
     b CombinePatch_SelectPostSelectionState
 .org PostSelectionConnectionState_Update
     b CombinePatch_PostSelectionConnectionUpdate
+.org TransactionRecoveryState_Update
+    b CombinePatch_TransactionRecoveryUpdate
+.org BankFlow_RecoveryResult
+    b CombinePatch_RecoveryResult
+.org BankFlow_ForceRollbackSuccess
+    beq CombinePatch_ForceRollbackSuccess
 .org PostSelectionConnectionState_Initialize + 0x0C
     bl CombinePatch_SelectPostSelectionConnectionMessage
 .org BankCreateConnection_MessageIdLoad
@@ -803,6 +810,8 @@ CombinePatch_TitleBindSession:
     bl TurtleRedirect_PrepareSession
     eor r0,r0,#1
     strb r0,[r6,#CombinePatch_InitialLanguagePendingOffset]
+    mov r0,#0
+    strb r0,[r6,#CombinePatch_UnlockRecoveryOffset]
     mov r0,#1
     pop {r4,r5,r6,pc}
     .pool
@@ -1083,8 +1092,53 @@ CombinePatch_PostSelectionConnectionUpdate:
 @@offlineReturn:
     pop {r4,pc}
 @@native:
+    cmp r12,#CombinePatch_ModeUnlock
+    ldreq r1,=CombinePatch_PostSelectionConnectionUpdateOfficial
+    beq UnlockMode_PostSelectionUpdate
+CombinePatch_PostSelectionConnectionUpdateOfficial:
     push {r4-r6,lr}
     b PostSelectionConnectionState_Update + 4
+    .pool
+
+// Only Unlock Mode changes the acknowledged mismatch result. The flow
+// controller still runs the native finalizer/destructor before creating state 10,
+// the same state reached after confirming the first feature-menu entry.
+// 只有解锁模式改动不匹配提示确认后的结果。流程控制器仍先执行原版收尾与析构，
+// 再创建 state 10，与确认功能选单第一项后进入的状态相同。
+CombinePatch_TransactionRecoveryUpdate:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeUnlock
+    ldreq r1,=CombinePatch_TransactionRecoveryUpdateOfficial
+    beq UnlockMode_RecoveryUpdate
+CombinePatch_TransactionRecoveryUpdateOfficial:
+    push {r4-r7,lr}
+    b TransactionRecoveryState_Update + 4
+    .pool
+
+CombinePatch_RecoveryResult:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeUnlock
+    bne @@native
+    cmp r2,#19
+    moveq r0,#10
+    popeq {r4,pc}
+@@native:
+    cmp r2,#3
+    b BankFlow_RecoveryResult + 4
+    .pool
+
+// Latch success only after the official forced rollback reports completion;
+// pressing the combination or opening the keyboard does not set this flag.
+// 仅在官方强制回滚报告完成后记录成功；按组合键或打开输入界面不会设置此标记。
+CombinePatch_ForceRollbackSuccess:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r3,[r12,#CombinePatch_SessionModeOffset]
+    cmp r3,#CombinePatch_ModeUnlock
+    moveq r3,#1
+    streqb r3,[r12,#CombinePatch_UnlockRecoveryOffset]
+    b BankFlow_ForceRollbackSuccess + 0x18
     .pool
 
 CombinePatch_DisconnectUpdate:

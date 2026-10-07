@@ -200,6 +200,9 @@ TITLE_MODE_ORIGINAL_LINE = 114
 DOWNLOAD_NO_GAME_LINE = 115
 DOWNLOAD_FAILED_LINE = 116
 DOWNLOAD_START_LINE = 117
+UNLOCK_NO_RECOVERY_LINE = 118
+UNLOCK_RECOVERED_LINE = 119
+UNLOCK_FORCED_RECOVERED_LINE = 120
 TITLE_TEXT_BUFFER_LENGTH = 54
 
 DISABLED_MESSAGES = {
@@ -371,16 +374,55 @@ DOWNLOAD_SUCCESS_MESSAGES = {
 }
 
 UNLOCK_GAME_SELECTION_MESSAGES = {
-    "0/0/4": f"ゲームをえらんで ボタンをおすとき、\n{L_BUTTON} + {A_BUTTON} + STARTを おしつづけて\nアンロックモードに はいります。",
-    "0/0/5": f"ゲームを選んでボタンを押すとき、\n{L_BUTTON} + {A_BUTTON} + STARTを押し続けて\nアンロックモードに入ります。",
-    "0/0/6": f"When confirming a game,\nhold {L_BUTTON} + {A_BUTTON} + START to enter Unlock Mode.",
-    "0/0/7": f"En confirmant un jeu,\nmaintenez {L_BUTTON} + {A_BUTTON} + START pour ouvrir\nle mode Déverrouillage.",
-    "0/0/8": f"Quando confermi un gioco,\ntieni {L_BUTTON} + {A_BUTTON} + START per aprire\nla modalità Sblocco.",
-    "0/0/9": f"Beim Bestätigen eines Spiels\n{L_BUTTON} + {A_BUTTON} + START gedrückt halten,\num den Entsperrmodus zu öffnen.",
-    "0/1/0": f"Al confirmar un juego,\nmantén {L_BUTTON} + {A_BUTTON} + START para abrir\nel modo Desbloqueo.",
-    "0/1/1": f"게임을 선택해 버튼을 누를 때\n{L_BUTTON} + {A_BUTTON} + START를 계속 눌러\n잠금 해제 모드로 들어갑니다.",
-    "0/1/2": f"选择游戏按下按钮的同时，\n按住{L_BUTTON} + {A_BUTTON} + START 以进入解锁模式。",
-    "0/1/3": f"選擇遊戲按下按鈕的同時，\n按住{L_BUTTON} + {A_BUTTON} + START 以進入解鎖模式。",
+    "0/0/4": f"カセット・DLばんがどれも サーバーとあわない\nなら、ゲームをえらび けっていじに おしつづけて\n{L_BUTTON} + {A_BUTTON} + STARTで きょうせいアンロック。",
+    "0/0/5": f"カセット・DL版が全てサーバーと不一致なら、\n任意のゲームを選び、決定時に{L_BUTTON} + {A_BUTTON} + STARTを\n押し続けて強制アンロックします。",
+    "0/0/6": f"Only if no cartridge/digital save matches the server:\nPick any game; hold {L_BUTTON} + {A_BUTTON} + START when confirming\nto force Unlock Mode.",
+    "0/0/7": f"Si aucune sauvegarde (cartouche/numérique) ne\ncorrespond au serveur, validez un jeu au choix avec\n{L_BUTTON} + {A_BUTTON} + START maintenus pour forcer le déverrouillage.",
+    "0/0/8": f"Se nessun salvataggio (cartuccia/digitale) corrisponde\nal server, scegli un gioco; alla conferma tieni premuti\n{L_BUTTON} + {A_BUTTON} + START per forzare lo sblocco.",
+    "0/0/9": f"Wenn kein Spielstand (Modul/digital) zum Server passt,\nbeliebiges Spiel wählen; beim Bestätigen\n{L_BUTTON} + {A_BUTTON} + START zum Zwangsentsperren halten.",
+    "0/1/0": f"Si ninguna partida (cartucho/digital) coincide\ncon el servidor, confirma cualquier juego manteniendo\n{L_BUTTON} + {A_BUTTON} + START para forzar el desbloqueo.",
+    "0/1/1": f"모든 카트리지·다운로드판 저장 데이터가 서버와\n불일치함을 확인한 뒤 아무 게임을 골라, 확인 시\n{L_BUTTON} + {A_BUTTON} + START를 누른 채 강제 잠금 해제 모드로.",
+    "0/1/2": f"请先确认所有卡带及数字版存档都无法与\n服务器匹配，再任选游戏。确认时按住\n{L_BUTTON} + {A_BUTTON} + START 强制进入解锁模式。",
+    "0/1/3": f"請先確認所有卡帶及數位版存檔都無法與\n伺服器相符，再任選遊戲。確認時按住\n{L_BUTTON} + {A_BUTTON} + START 強制進入解鎖模式。",
+}
+
+UNLOCK_NO_RECOVERY_MESSAGES = {
+    "0/0/4": "サーバーは せいじょうです。\nアンロックモードは ふようです。",
+    "0/0/5": "サーバーは正常です。\nアンロックモードは不要です。",
+    "0/0/6": "Server status is normal.\nUnlock Mode is not needed.",
+    "0/0/7": "Le serveur fonctionne normalement.\nLe déverrouillage n'est pas nécessaire.",
+    "0/0/8": "Lo stato del server è normale.\nNon è necessario sbloccare.",
+    "0/0/9": "Der Serverstatus ist normal.\nEntsperren ist nicht erforderlich.",
+    "0/1/0": "El estado del servidor es normal.\nNo se necesita desbloquear.",
+    "0/1/1": "서버 상태가 정상입니다.\n잠금 해제 모드에 들어갈 필요가 없습니다.",
+    "0/1/2": "服务器状态正常，\n无需进入解锁模式。",
+    "0/1/3": "伺服器狀態正常，\n無需進入解鎖模式。",
+}
+
+UNLOCK_RECOVERED_MESSAGES = {
+    "0/0/4": "じどうふっきゅうが おわりました。\nサーバーの ロックを かいじょしました。",
+    "0/0/5": "自動復旧が完了しました。\nサーバーのロックを解除しました。",
+    "0/0/6": "Automatic recovery completed.\nThe server lock has been cleared.",
+    "0/0/7": "Récupération automatique terminée.\nLe verrou du serveur est levé.",
+    "0/0/8": "Ripristino automatico completato.\nIl blocco del server è rimosso.",
+    "0/0/9": "Automatische Wiederherstellung beendet.\nDie Serversperre wurde aufgehoben.",
+    "0/1/0": "Recuperación automática completada.\nEl servidor se ha desbloqueado.",
+    "0/1/1": "자동 복구가 완료되었습니다.\n서버 잠금이 해제되었습니다.",
+    "0/1/2": "已自动完成事务恢复。\n服务器锁定已解除。",
+    "0/1/3": "已自動完成交易復原。\n伺服器鎖定已解除。",
+}
+
+UNLOCK_FORCED_RECOVERED_MESSAGES = {
+    "0/0/4": "きょうせいアンロックが おわりました。\nサーバーの ロックを かいじょしました。",
+    "0/0/5": "強制アンロックが完了しました。\nサーバーのロックを解除しました。",
+    "0/0/6": "Forced unlock completed.\nThe server lock has been cleared.",
+    "0/0/7": "Déverrouillage forcé terminé.\nLe verrou du serveur est levé.",
+    "0/0/8": "Sblocco forzato completato.\nIl blocco del server è rimosso.",
+    "0/0/9": "Zwangsentsperren abgeschlossen.\nDie Serversperre wurde aufgehoben.",
+    "0/1/0": "Desbloqueo forzado completado.\nEl servidor se ha desbloqueado.",
+    "0/1/1": "강제 잠금 해제가 완료되었습니다.\n서버 잠금이 해제되었습니다.",
+    "0/1/2": "强制解锁已完成。\n服务器锁定已解除。",
+    "0/1/3": "強制解鎖已完成。\n伺服器鎖定已解除。",
 }
 
 UNLOCK_SUPPORT_REFERENCE_LABELS = {
@@ -531,6 +573,9 @@ def verify_kana_archive_messages() -> None:
         LANGUAGE_MENU_MESSAGES[archive],
         UNLOCK_MENU_GREETINGS[archive],
         UNLOCK_GAME_SELECTION_MESSAGES[archive],
+        UNLOCK_NO_RECOVERY_MESSAGES[archive],
+        UNLOCK_RECOVERED_MESSAGES[archive],
+        UNLOCK_FORCED_RECOVERED_MESSAGES[archive],
         UNLOCK_SUPPORT_REFERENCE_LABELS[archive],
         UNLOCK_CODE_LABELS[archive],
     )
@@ -676,6 +721,9 @@ def main() -> None:
                 (finish_message_values(text_code_units(DOWNLOAD_NO_GAME_MESSAGES[archive])), no_game_flags),
                 (finish_message_values(text_code_units(DOWNLOAD_FAILED_MESSAGES[archive])), disconnect_flags),
                 (finish_message_values(text_code_units(DOWNLOAD_START_MESSAGES[archive])), download_start_flags),
+                (finish_message_values(text_code_units(UNLOCK_NO_RECOVERY_MESSAGES[archive])), game_selection_flags),
+                (finish_message_values(text_code_units(UNLOCK_RECOVERED_MESSAGES[archive])), game_selection_flags),
+                (finish_message_values(text_code_units(UNLOCK_FORCED_RECOVERED_MESSAGES[archive])), game_selection_flags),
             ),
         )
         greeting_entry = entries[MENU_MESSAGE_FILE_INDEX]
@@ -746,6 +794,9 @@ def main() -> None:
             TITLE_MODE_ORIGINAL_LINE: title_mode_original,
             UNLOCK_USE_BANK_LINE: UNLOCK_MENU_MESSAGES[archive],
             UNLOCK_GAME_SELECTION_LINE: UNLOCK_GAME_SELECTION_MESSAGES[archive],
+            UNLOCK_NO_RECOVERY_LINE: UNLOCK_NO_RECOVERY_MESSAGES[archive],
+            UNLOCK_RECOVERED_LINE: UNLOCK_RECOVERED_MESSAGES[archive],
+            UNLOCK_FORCED_RECOVERED_LINE: UNLOCK_FORCED_RECOVERED_MESSAGES[archive],
         }
         for index, value in expected.items():
             if rebuilt_lines[index] != value:
