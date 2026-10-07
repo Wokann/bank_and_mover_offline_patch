@@ -11,8 +11,8 @@
 .definelabel ONLINE_TICKET_CHECK_BYPASS, 0
 
 // Offline behavior is the baseline. Mode wrappers branch to these native entry
-// points when Download or Unlock Mode was selected on the title screen.
-// 离线行为作为基线；标题界面选定下载模式或解锁模式后，模式包装函数会跳转到这些
+// points when Download, Unlock or Original Mode was selected on the title screen.
+// 离线行为作为基线；标题界面选定下载、解锁或原版模式后，模式包装函数会跳转到这些
 // 原版入口。
 .definelabel OfflinePatch_VersionStorageSize, 0x40
 .definelabel OfflinePatch_VersionStorageStart, TextMappedEnd - OfflinePatch_VersionStorageSize
@@ -27,12 +27,14 @@
 .definelabel CombinePatch_ModeOffline, 0
 .definelabel CombinePatch_ModeDownload, 1
 .definelabel CombinePatch_ModeUnlock, 2
-.definelabel CombinePatch_ModeCount, 3
+.definelabel CombinePatch_ModeOriginal, 3
+.definelabel CombinePatch_ModeCount, 4
 .definelabel CombinePatch_KeyR, 0x100
 .definelabel CombinePatch_SessionModeOffset, 0
 .definelabel CombinePatch_DownloadCapturedOffset, 1
 .definelabel CombinePatch_TitleRPreviousOffset, 2
 .definelabel CombinePatch_TitleSelectedModeOffset, 3
+.definelabel CombinePatch_InitialLanguagePendingOffset, 5
 .definelabel CombinePatch_BlankMessage, 0x60
 .definelabel CombinePatch_DownloadProgressMessage, 0x61
 .definelabel CombinePatch_DownloadSuccessMessage, 0x62
@@ -53,6 +55,9 @@
 .definelabel CombinePatch_UnlockUseBankMessage, 0x6E
 .definelabel CombinePatch_UnlockGameSelectionPrompt, 0x6F
 .definelabel CombinePatch_UnlockChallengePrompt, 0x70
+.definelabel CombinePatch_NoGameBlockedMessage, 0x71
+.definelabel CombinePatch_SupportReferencePrompt, 0x72
+.definelabel CombinePatch_TitleModeOriginalMessage, 0x73
 
 .open INPUT_CODE, OUTPUT_CODE, 0x00100000
 
@@ -96,6 +101,14 @@
     b CombinePatch_TitleScreenUpdate
 .org TitleScreenUi_Create + 0xA0
     bl CombinePatch_TitleModeTextInitialize
+.org TitleScreenState_Initialize + 0x3C
+    b CombinePatch_TitlePreview
+.org TitleScreenState_ExitComplete
+    b CombinePatch_TitleBindSession
+.org BankFlow_SelectNextState + 0x100
+    beq CombinePatch_TitleResult
+.org BankFlow_SelectNextState + 0xC8
+    b CombinePatch_TitleOrResume
 
 .org BankFlow_PostSelectionMetadataPath
     b CombinePatch_SelectPostSelectionState
@@ -139,10 +152,9 @@
 .org BankFlow_SelectNextState + 0x170
     beq CombinePatch_HomeResult
 .org InitialGameCheck_NoGameChoiceSetup
-    // After the native no-game message finishes and is cleared, return through
-    // the existing failure substate instead of creating the HOME choice UI.
-    // 原版无游戏提示显示完毕并清理后，走现成的失败子状态，不创建 HOME 选项。
-    b InitialGameCheck_FailureTransition
+    b CombinePatch_NoGameChoice
+.org InitialGameCheck_NoGameMessageLoad
+    bl CombinePatch_SelectNoGameMessage
 .org BankFlow_SelectNextState + 0x34C
     beq CombinePatch_Result21
 
@@ -228,17 +240,17 @@
 // 仅重定向 Turtle 记录的存储后端。原版包装函数仍负责对象校验、loaded 标志和
 // 后端错误映射。
 .org TurtleStorage_LoadBackendCall
-    bl TurtleRedirect_LoadBackend
+    bl CombinePatch_TurtleLoad
 .org TurtleStorage_SaveBackendCall
-    bl TurtleRedirect_SaveBackend
+    bl CombinePatch_TurtleSave
 .org Title_TurtleStorageCheckCall
     bl TurtleRedirect_CheckBackend
 .org Initial_TurtleStorageCheckCall
-    bl TurtleRedirect_CheckBackend
+    bl CombinePatch_TurtleCheck
 .org Initial_TurtleStorageFormatCall
-    bl TurtleRedirect_FormatBackend
+    bl CombinePatch_TurtleFormat
 .org Initial_TurtleStorageFormatPollCall
-    bl TurtleRedirect_FormatPoll
+    bl CombinePatch_TurtleFormatPoll
 
 .org CombinePatch_CodeStart
 .area CombinePatch_CodeEnd-CombinePatch_CodeStart
@@ -252,13 +264,16 @@ CombinePatch_RedirectHomeToLanguage:
     pop {r4,pc}
 
 // The stock menu's greeting uses BMG line 17. The LayeredFS archive appends
-// one explanation for each of the three modes; select it after the startup
-// mode latch.
-// 原版菜单说明使用 BMG 第 17 行。LayeredFS 档案为三种模式各追加一条说明，
-// 在启动模式锁定后选择其中之一。
+// one explanation for each of the first three modes; Original keeps stock text.
+// Select the explanation after the startup mode latch.
+// 原版菜单说明使用 BMG 第 17 行。LayeredFS 为前三种模式各追加一条说明，原版模式
+// 保留原文；在启动模式锁定后选择其中之一。
 CombinePatch_ShowModeGreeting:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12]
+    cmp r12,#CombinePatch_ModeOriginal
+    moveq r2,#0x11
+    beq @@show
     cmp r12,#CombinePatch_ModeDownload
     moveq r2,#CombinePatch_DownloadMenuGreeting
     beq @@show
@@ -309,23 +324,67 @@ CombinePatch_SelectUseBankMenuText:
 // Other stock menu labels remain unchanged.
 // 这里只选择当前补丁模式明确替换的标签；其余原版选单标签保持不变。
 CombinePatch_SelectSupportMenuText:
-    mov r8,#CombinePatch_DisabledMenuMessage
+    mrs r12,cpsr
+    push {r0,r12}
+    ldr r0,=CombinePatch_ModeStorage
+    ldrb r0,[r0]
+    cmp r0,#CombinePatch_ModeOriginal
+    moveq r8,#0x2B
+    movne r8,#CombinePatch_DisabledMenuMessage
+    pop {r0,r12}
+    msr cpsr_f,r12
     bx lr
+    .pool
 
 CombinePatch_SelectInstalledMoverMenuText:
-    mov r5,#CombinePatch_DisabledMenuMessage
+    mrs r12,cpsr
+    push {r0,r12}
+    ldr r0,=CombinePatch_ModeStorage
+    ldrb r0,[r0]
+    cmp r0,#CombinePatch_ModeOriginal
+    moveq r5,#0x2D
+    movne r5,#CombinePatch_DisabledMenuMessage
+    pop {r0,r12}
+    msr cpsr_f,r12
     bx lr
+    .pool
 
 CombinePatch_SelectDownloadMoverMenuText:
-    mov r6,#CombinePatch_DisabledMenuMessage
+    mrs r12,cpsr
+    push {r0,r12}
+    ldr r0,=CombinePatch_ModeStorage
+    ldrb r0,[r0]
+    cmp r0,#CombinePatch_ModeOriginal
+    moveq r6,#0x2C
+    movne r6,#CombinePatch_DisabledMenuMessage
+    pop {r0,r12}
+    msr cpsr_f,r12
     bx lr
+    .pool
 
 CombinePatch_SelectHomeMenuTextR6:
-    mov r6,#CombinePatch_LanguageMenuMessage
+    mrs r12,cpsr
+    push {r0,r12}
+    ldr r0,=CombinePatch_ModeStorage
+    ldrb r0,[r0]
+    cmp r0,#CombinePatch_ModeOriginal
+    moveq r6,#0x56
+    movne r6,#CombinePatch_LanguageMenuMessage
+    pop {r0,r12}
+    msr cpsr_f,r12
     bx lr
+    .pool
 
 CombinePatch_SelectHomeMenuTextR5:
-    mov r5,#CombinePatch_LanguageMenuMessage
+    mrs r12,cpsr
+    push {r0,r12}
+    ldr r0,=CombinePatch_ModeStorage
+    ldrb r0,[r0]
+    cmp r0,#CombinePatch_ModeOriginal
+    moveq r5,#0x56
+    movne r5,#CombinePatch_LanguageMenuMessage
+    pop {r0,r12}
+    msr cpsr_f,r12
     bx lr
     .pool
 
@@ -367,7 +426,9 @@ CombinePatch_ShowUnlockPrompt:
     b @@done
 @@stock:
     mov r0,r5
-    mov r1,#0x22
+    cmp r6,#CombinePatch_ModeOriginal
+    moveq r1,#0x22
+    movne r1,#CombinePatch_SupportReferencePrompt
     bl FlowView_SetTextMessage
 @@done:
     add sp,sp,#8
@@ -393,10 +454,10 @@ CombinePatch_SelectDisconnectMessage:
     movne r1,#CombinePatch_DownloadSuccessMessage
     bx lr
 
-// State 21 persists a changed language before using the local disconnect
-// delay. State 20 uses OfflinePatch_DisconnectUpdate directly.
-// state 21 会先持久化变更后的语言，再进入本地断开延时；state 20 则直接使用
-// OfflinePatch_DisconnectUpdate。
+// Persist the patch's language-menu selection to the active backend. Native
+// modes then resume their real disconnect job; Offline uses its local delay.
+// 把补丁语言选单的选择保存至当前后端。原存档模式随后继续真实断开作业，离线模式
+// 使用本地延时。首次原存档初始化仍由原版游戏检查链提交待选语言。
 CombinePatch_DisconnectWithLanguageSave:
     push {r4,lr}
     mov r4,r0
@@ -448,6 +509,13 @@ CombinePatch_DisconnectWithLanguageSave:
     pop {r4,pc}
 @@disconnect:
     mov r0,r4
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeOffline
+    beq @@localDisconnect
+    bl CombinePatch_DisconnectUpdateOfficial
+    pop {r4,pc}
+@@localDisconnect:
     bl OfflinePatch_DisconnectUpdate
     pop {r4,pc}
     .pool
@@ -549,20 +617,29 @@ CombinePatch_PathDataEnd:
 
 .align 4
 
-// Reset the title selector whenever its UI is created, then replace the stock
-// bottom HOME-help line. The narrow version pane remains completely native.
-// 每次创建标题界面 UI 时重置模式选择器，随后替换原版底部 HOME 帮助行。狭窄的
-// 版本号窗格保持完全原版。
+// Keep the selected mode when returning to the title; its zero-initialized
+// byte defaults to Offline on a fresh launch. Reset only per-session flags.
+// 返回标题时保留所选模式，首次启动时该字节的零初值表示离线；只重置会话标志。
 CombinePatch_TitleModeTextInitialize:
     ldr r12,=CombinePatch_ModeStorage
     mov r1,#CombinePatch_ModeOffline
     strb r1,[r12,#CombinePatch_SessionModeOffset]
     strb r1,[r12,#CombinePatch_DownloadCapturedOffset]
     strb r1,[r12,#CombinePatch_TitleRPreviousOffset]
-    strb r1,[r12,#CombinePatch_TitleSelectedModeOffset]
+    strb r1,[r12,#CombinePatch_InitialLanguagePendingOffset]
+    ldrb r3,[r12,#CombinePatch_TitleSelectedModeOffset]
+    cmp r3,#CombinePatch_ModeDownload
+    moveq r3,#CombinePatch_TitleModeDownloadMessage
+    beq @@show
+    cmp r3,#CombinePatch_ModeUnlock
+    moveq r3,#CombinePatch_TitleModeUnlockMessage
+    beq @@show
+    cmp r3,#CombinePatch_ModeOriginal
+    moveq r3,#CombinePatch_TitleModeOriginalMessage
+    movne r3,#CombinePatch_TitleModeOfflineMessage
+@@show:
     mov r1,#1
     mov r2,#0x10
-    mov r3,#CombinePatch_TitleModeOfflineMessage
     b BankUi_SetMessageLine
     .pool
 
@@ -618,10 +695,10 @@ CombinePatch_TitleScreenUpdate:
     pop {r3,r4,r5,r6,r7,pc}
     .pool
 
-// Advance Offline -> Download -> Unlock -> Offline on each R rising edge and
+// Advance Offline -> Download -> Unlock -> Original -> Offline on each R rising edge and
 // immediately rebind the bottom title help line. No caller after title exit
 // invokes this routine.
-// 每次 R 键上升沿按“离线→下载→解锁→离线”循环切换，并立即重新绑定标题底部
+// 每次 R 键上升沿按“离线→下载→解锁→原版→离线”循环切换，并立即重新绑定标题底部
 // 帮助行。标题退出后不会有调用者再执行此例程。
 CombinePatch_TitleProcessModeToggle:
     push {r4,r5,r6,lr}
@@ -662,11 +739,132 @@ CombinePatch_TitleProcessModeToggle:
     beq @@setText
     cmp r3,#CombinePatch_ModeUnlock
     moveq r3,#CombinePatch_TitleModeUnlockMessage
+    beq @@setText
+    cmp r3,#CombinePatch_ModeOriginal
+    moveq r3,#CombinePatch_TitleModeOriginalMessage
     movne r3,#CombinePatch_TitleModeOfflineMessage
 @@setText:
     bl BankUi_SetMessageLine
 @@done:
     pop {r4,r5,r6,pc}
+    .pool
+
+// The stock initializer has removed the previous view before this hook. Rebind
+// the common title preview to SD only when returning from a native-save mode.
+// 原版初始化器已销毁上一视图；从原存档模式返回时，将公共标题预览重新绑定到 SD。
+CombinePatch_TitlePreview:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r0,[r12,#CombinePatch_SessionModeOffset]
+    cmp r0,#CombinePatch_ModeOffline
+    beq @@resume
+    mov r2,#CombinePatch_ModeOffline
+    strb r2,[r12,#CombinePatch_SessionModeOffset]
+    ldr r0,[r4,#8]
+    ldr r1,[r4,#0x0C]
+    bl TurtleRedirect_PrepareSession
+@@resume:
+    ldr r5,[r4,#0x2C]
+    b TitleScreenState_Initialize + 0x40
+    .pool
+
+// Only after title teardown may the record and localized resources switch.
+// A fresh backend uses stock language selection and subsequent initialization, then
+// continues to game checking without choosing the mode for a second time.
+// 仅在标题销毁后切换记录与语言资源。新后端走原版语言选择及后续初始化状态，之后继续
+// 检查游戏，不要求重新选择模式。
+CombinePatch_TitleBindSession:
+    ldr r0,[r5,#8]
+    ldr r1,[r5,#0x0C]
+    ldr r6,=CombinePatch_ModeStorage
+    ldrb r2,[r6,#CombinePatch_SessionModeOffset]
+    bl TurtleRedirect_PrepareSession
+    eor r0,r0,#1
+    strb r0,[r6,#CombinePatch_InitialLanguagePendingOffset]
+    mov r0,#1
+    pop {r4,r5,r6,pc}
+    .pool
+
+CombinePatch_TitleResult:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_InitialLanguagePendingOffset]
+    cmp r12,#0
+    moveq r0,#3
+    movne r0,#1
+    b BankFlow_SelectNextState + 0xCC
+    .pool
+
+CombinePatch_TitleOrResume:
+    cmp r1,#21
+    bne @@title
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r2,[r12,#CombinePatch_InitialLanguagePendingOffset]
+    cmp r2,#0
+    beq @@title
+    mov r2,#0
+    strb r2,[r12,#CombinePatch_InitialLanguagePendingOffset]
+    mov r0,#3
+    b BankFlow_SelectNextState + 0xCC
+@@title:
+    mov r0,#2
+    b BankFlow_SelectNextState + 0xCC
+    .pool
+
+CombinePatch_TurtleLoad:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeOffline
+    beq TurtleRedirect_LoadBackend
+    b TurtleStorage_LoadAtOnce
+    .pool
+
+CombinePatch_TurtleSave:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeOffline
+    beq TurtleRedirect_SaveBackend
+    b TurtleStorage_SaveAtOnce
+    .pool
+
+CombinePatch_TurtleCheck:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeOffline
+    beq TurtleRedirect_CheckBackend
+    b TurtleStorage_CheckArchiveStatus
+    .pool
+
+CombinePatch_TurtleFormat:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeOffline
+    beq TurtleRedirect_FormatBackend
+    b TurtleStorage_FormatStart
+    .pool
+
+CombinePatch_TurtleFormatPoll:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeOffline
+    beq TurtleRedirect_FormatPoll
+    b TurtleStorage_FormatPoll
+    .pool
+
+CombinePatch_SelectNoGameMessage:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeOriginal
+    moveq r2,r3
+    movne r2,#CombinePatch_NoGameBlockedMessage
+    bx lr
+    .pool
+
+CombinePatch_NoGameChoice:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeOriginal
+    bne InitialGameCheck_FailureTransition
+    ldr r5,[r4,#0x40]
+    b InitialGameCheck_NoGameChoiceSetup + 4
     .pool
 
 // Connection availability reads only the session mode latched as the title
@@ -769,6 +967,8 @@ CombinePatch_BankDataSyncInitialize:
     ldrb r12,[r12,#CombinePatch_SessionModeOffset]
     cmp r12,#CombinePatch_ModeUnlock
     beq @@native
+    cmp r12,#CombinePatch_ModeOriginal
+    beq @@native
     cmp r12,#CombinePatch_ModeDownload
     bne @@offline
     cmp r3,#0
@@ -851,9 +1051,18 @@ CombinePatch_DisconnectUpdate:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12]
     cmp r12,#CombinePatch_ModeOffline
-    bne @@native
-    b CombinePatch_DisconnectWithLanguageSave
+    beq CombinePatch_DisconnectWithLanguageSave
+    cmp r12,#CombinePatch_ModeOriginal
+    beq @@native
+    ldrb r12,[r0,#0x3C]
+    cmp r12,#0
+    beq @@native
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_InitialLanguagePendingOffset]
+    cmp r12,#0
+    beq CombinePatch_DisconnectWithLanguageSave
 @@native:
+CombinePatch_DisconnectUpdateOfficial:
     push {r4,lr}
     b DisconnectCleanupState_Update + 4
     .pool
@@ -916,8 +1125,13 @@ CombinePatch_CreateInitial:
     .pool
 
 CombinePatch_BankCreateSuccess:
-    mov r0,#8
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12]
+    cmp r12,#CombinePatch_ModeOriginal
+    moveq r0,#7
+    movne r0,#8
     b BankCreateState_Update + 0x238
+    .pool
 
 CombinePatch_SelectPostSelectionState:
     ldr r12,=CombinePatch_ModeStorage
@@ -943,7 +1157,12 @@ CombinePatch_RewardResult:
     .pool
 
 CombinePatch_HomeResult:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeOriginal
+    beq BankFlow_SelectNextState + 0x1F8
     b CombinePatch_RedirectHomeToLanguage
+    .pool
 
 CombinePatch_Result21:
     ldr r12,=CombinePatch_ModeStorage
@@ -970,10 +1189,10 @@ CombinePatch_Result6Or12:
     b BankFlow_SelectNextState + 0x294
     .pool
 
-// Download and Unlock modes must not inherit any Offline save substitutions.
+// Download, Unlock and Original must not inherit Offline save substitutions.
 // The native branches below replay exactly the instructions overwritten at
 // each hook and then resume the original save state.
-// 下载模式与解锁模式不能继承任何离线保存替换。下面的原版分支会重放各钩子处被
+// 下载、解锁和原版模式不能继承任何离线保存替换。下面的原版分支会重放各钩子处被
 // 覆盖的指令，然后回到原版保存状态。
 CombinePatch_SaveBegin:
     ldr r12,=CombinePatch_ModeStorage
@@ -1090,11 +1309,15 @@ CombinePatch_SaveRollbackWait:
     b BankSaveState_Update + 0x414
     .pool
 
-// Support code and Mover/eShop are disabled in all three modes. HOME is deliberately
+// Support code and Mover/eShop are disabled in the first three modes. HOME is deliberately
 // left native here so its existing Bank-flow hook can redirect it to language.
-// 三种模式都禁用支持代码与 Mover/eShop。HOME 在这里故意保持原版，使现有 Bank
+// 前三种模式禁用支持代码与 Mover/eShop；原版模式直接使用原回调。HOME 在这里保持原版，使 Bank
 // 流程钩子能够把它重定向至语言选择。
 CombinePatch_MenuSelectionCallback:
+    ldr r2,=CombinePatch_ModeStorage
+    ldrb r2,[r2,#CombinePatch_SessionModeOffset]
+    cmp r2,#CombinePatch_ModeOriginal
+    beq @@native
     ldr r2,[r0,#0x10]
     cmp r2,#1
     bne @@native

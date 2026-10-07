@@ -1,4 +1,4 @@
-# Combined offline, download, and unlock patch
+# Combined offline, download, unlock, and original patch
 
 See [`docs/code-analysis.md`](docs/code-analysis.md) for the stock
 program's memory map, state table, network paths, BankObject, and bankdata
@@ -15,26 +15,31 @@ The upload patch has been permanently discontinued. This project imports
 server data in Download Mode and uses a separate local copy in Offline Mode; it
 never uploads offline changes to the official service. Unlock Mode enters the
 stock online transaction-recovery flow but never substitutes local Bankdata for
-the server Bank.
+the server Bank. Original Mode uses the stock save and complete official Bank
+flow; it never loads the offline Bank for upload.
 
 ## Modes and recommended workflow
 
-The title screen defaults to **Offline Mode**. Each press of the physical **R**
-button advances through **Offline Mode**, **Download Mode**, and **Unlock
-Mode**. The line below the stock HOME-menu help updates immediately. Press
+On a fresh launch, the title screen defaults to **Offline Mode**. Each press of the physical **R**
+button advances through **Offline Mode**, **Download Mode**, **Unlock Mode**,
+and **Original Mode**. The line below the stock HOME-menu help updates immediately. Press
 **A**, **START**, or touch the lower screen to latch the displayed mode for the
 whole session; R no longer changes it after leaving the title screen.
+Returning to the title retains the selected mode. Restarting the application
+resets it to Offline; no mode preference is written to a save.
 
 ```text
 Title screen (default: Offline)
         │
         ├── R ───────────────► Download
         ├── R again ─────────► Unlock
+        ├── R again ─────────► Original
         ├── R again ─────────► Offline
         └── A / START / touch
                   │ latch displayed mode
                   ├── Download ─► official server download ─► local file
                   ├── Unlock  ─► stock forced-unlock path
+                  ├── Original ─► stock save and complete official flow
                   └── Offline  ─► local file ─► normal Bank use
 ```
 
@@ -55,7 +60,8 @@ preferred when an existing official Bank account must be preserved locally.
 ## Local files and invariants
 
 Offline and Download modes use the same checked Bankdata-file implementation.
-All three modes share the redirected Turtle-record backend described below.
+Only Offline Mode redirects the Turtle record; the other three modes use its
+stock backend after the title selection is confirmed.
 
 | File | Purpose |
 |---|---|
@@ -79,8 +85,8 @@ an existing invalid file cannot participate in recovery.
 
 ### Local-record redirection
 
-All three patch modes redirect the persistence backend of the stock logical
-`data:/turtle` record to `sd:/3ds/Bank/sav.bin`. They neither replace nor
+Offline Mode redirects the persistence backend of the stock logical
+`data:/turtle` record to `sd:/3ds/Bank/sav.bin`. The patch neither replaces nor
 directly parse the outer `00000001.sav`. Stock object clearing, language setup,
 transaction-field updates, checksum generation, validation, the loaded flag,
 and the upper-level initialization state machine remain in control. Only the
@@ -104,7 +110,7 @@ First-use initialization still lets the stock flow clear the object, apply the
 selected language, and invoke its normal save wrapper. Redirected formatting
 only resets `sav.bin` and `sav.tmp`; it does not fake object initialization or
 format the stock save archive. Once `sav.bin` is available, all later
-local-record reads and writes in all three modes use it exclusively. An SD write
+local-record reads and writes in Offline Mode use it exclusively. An SD write
 failure is returned as a save failure and never falls back to modifying the
 stock save.
 
@@ -115,6 +121,25 @@ identified fields. See
 Because the record can be migrated again from the stock save or rebuilt by the
 first-use flow, it uses only `sav.tmp` to prevent short writes and does not
 create `.bak` or `.break` files.
+
+Before mode selection, common startup/title handling uses the SD backend as
+before, including read-only migration from a valid stock record if needed.
+After the title view is destroyed, the chosen backend is checked and reloaded:
+
+| Selected mode | Record for subsequent checks, loads, formatting and saves |
+| --- | --- |
+| Offline | `sd:/3ds/Bank/sav.bin` |
+| Download / Unlock / Original | Stock logical `data:/turtle`; native archive, commit and transaction handling |
+
+Reloading clears the previous record's loaded flag and pending language.
+A valid record supplies its own language and Kanji setting; missing/invalid
+records enter native language selection, then resume game checking and its
+initialization chain in the selected mode. The SD record is never imported
+into the stock save. Returning to the title reloads the SD preview before
+creating its UI. Native-mode saves are not mirrored to `sav.bin`; save failures
+never switch to the other backend.
+
+> **Privacy:** A `sav.bin` migrated from the original internal save for offline use may contain personal or account-related information. Do not upload it publicly or share it casually. The same precaution applies to downloaded `bankdata.bin` files.
 
 ## Download Mode
 
@@ -165,7 +190,8 @@ bypasses local mileage, Bank Box, and save screens and uses the stock no-save
 exit. If local capture fails, the patch does not falsify the official callback
 result or silently mark the capture successful.
 
-Download Mode preserves the native state 15 entitlement, ticket, campaign, and
+Download Mode writes transaction records and language changes to the stock save,
+not `sav.bin`. It preserves the native state 15 entitlement, ticket, campaign, and
 online-gift checks by default, including their waits, messages, and error
 handling. The one-byte switch below enables a local bypass for emulator tests;
 it does not change the post-download mileage, Box, and save-screen skip.
@@ -202,7 +228,7 @@ lets the existing message system add leading zeroes. It does not invent a code,
 skip validation, force a success result, or replace the subsequent server
 operation. If the vector is empty, the original prompt is used unchanged.
 
-This mode still shares project-wide menu restrictions and the redirected Turtle
+This mode still shares project-wide menu restrictions but uses the stock Turtle
 record. It preserves native state 15 ticket and online-gift checks by default,
 and its recovery state remains the stock state machine. The local offline
 `bankdata.bin` is neither loaded nor uploaded by the unlock display hook.
@@ -221,10 +247,10 @@ that allow the missing-interface fallback.
 | Session mode / environment | `0`: require native checks, public default | `1`: allow automatic missing-interface fallback for tests |
 | --- | --- | --- |
 | Offline, any environment | Local 999-day entitlement without online campaign queries | Same as left |
-| Download / Unlock, hardware or unknown environment | Native ticket, campaign and online-gift checks | Same as left |
-| Download / Unlock, Azahar with the interface implemented | Native checks | Same as left |
-| Download / Unlock, Azahar confirmed to lack the interface | Native error handling; never fabricate results | Automatically select local ticket results |
-| Download / Unlock, failed probe or ordinary ticket error | Native error handling | Native error handling; no automatic approval |
+| Download / Unlock / Original, hardware or unknown environment | Native ticket, campaign and online-gift checks | Same as left |
+| Download / Unlock / Original, Azahar with the interface implemented | Native checks | Same as left |
+| Download / Unlock / Original, Azahar confirmed to lack the interface | Native error handling; never fabricate results | Automatically select local ticket results |
+| Download / Unlock / Original, failed probe or ordinary ticket error | Native error handling | Native error handling; no automatic approval |
 
 At the time of this ticket-routing commit, official Azahar does not implement
 `am:net`'s `GetRightsOnlyTicketData` (command `0x0821`; see the
@@ -244,7 +270,7 @@ It is therefore kept only in the personal test branch and will not be submitted
 to Azahar's official main branch.
 
 Both paths remain in the same code. This definition changes only the policy
-byte at `[0x003FE480, 0x003FE481)`. State 15 retains its original entry and
+byte at `[0x003FE810, 0x003FE811)`. State 15 retains its original entry and
 state transitions. Only three calls are redirected: job initialization at
 `0x002B0444`, result polling at `0x002B0464`, and unbinding at `0x002B1994`.
 The initialization wrapper passes job, shared data, session mode and policy to
@@ -278,7 +304,7 @@ exit, unlock transactions, mileage or box dispatch. **Test policy is not a guara
 of safe online use**. The 999-day expiry and displayed entitlement fields have no
 identified direct serialization path into Bankdata. However, the local current
 date is copied into shared data: first creation writes it into the new Bankdata
-before upload, and Unlock Mode's native mileage/save flow can upload the resulting
+before upload, and Unlock/Original's native mileage/save flow can upload the resulting
 mileage and date. Existing-bank Download Mode skips that mileage/save flow, but
 first creation still uploads.
 
@@ -401,24 +427,48 @@ allowed only after the original game-save result succeeds. Delete, rename,
 close, size, write-length, restoration, and rollback results are checked.
 Ending Bank use without saving does not install a new `bankdata.bin`.
 
+## Original Mode
+
+Original Mode follows Unlock in the R-button cycle. Once confirmed, it reloads
+the stock Turtle record and uses the original initialization, transaction
+recovery, ticket and gift checks, mileage, Box, save and disconnect paths.
+Missing stock records use that path, not an existing SD record. The complete
+feature menu, original upper-screen text, support-code, Mover/eShop and HOME
+operations are restored. Without usable game data, the original HOME question
+is available. The title's mode-switch hint remains.
+
+Tickets share Download/Unlock's public/test policy: `0` requires native checks;
+`1` permits local results only after confirming the missing Azahar interface.
+Other official operations are not bypassed.
+
+This is not an offline-data upload mode: it neither captures nor supplies
+`bankdata.bin`, and it does not synchronize the two Turtle records.
+
 ## Shared menu, messages, and language handling
 
-| Feature-menu entry | Offline Mode | Download Mode | Unlock Mode |
-|---|---|---|---|
-| First entry | Use Pokemon Bank | Download Bank Data | Enter Force Unlock |
-| About Pokemon Bank | Stock information screen | Stock information screen | Stock information screen |
-| Support | Disabled; return to feature menu | Disabled; return to feature menu | Disabled; return to feature menu |
-| Poke Mover/eShop | Disabled; return to feature menu | Disabled; return to feature menu | Disabled; return to feature menu |
-| Pokemon HOME | Stock language-selection flow | Stock language-selection flow | Stock language-selection flow |
-| Back | Stock behavior | Stock behavior | Stock behavior |
+| Feature-menu entry | Offline Mode | Download Mode | Unlock Mode | Original Mode |
+|---|---|---|---|---|
+| First entry | Use Pokemon Bank | Download Bank Data | Enter Force Unlock | Stock Use Pokemon Bank |
+| About Pokemon Bank | Stock information screen | Stock information screen | Stock information screen | Stock information screen |
+| Support | Disabled | Disabled | Disabled | Stock support code |
+| Poke Mover/eShop | Disabled | Disabled | Disabled | Stock behavior |
+| Pokemon HOME | Language selection | Language selection | Language selection | Stock HOME transfer |
+| Back | Stock behavior | Stock behavior | Stock behavior | Stock behavior |
 
-The former HOME entry is redirected before any HOME networking or Box state is
+In the first three modes, the former HOME entry is redirected before any HOME networking or Box state is
 created. It opens the stock language selector. Before returning to the title,
 the patch copies the pending language and Japanese Kanji setting into the
 persistent settings object, starts native local-save mode 0, and waits for it
-to finish. The language therefore survives an immediate restart. A blank
+to finish. Offline changes go to `sav.bin`; Download/Unlock changes go to the
+stock record and then use the native disconnect job. A blank
 disconnect entry prevents a newly selected font from rendering stale text in
 the previous language.
+
+The first three modes also block the no-game HOME shortcut. Only the two
+original warning pages are shown, retaining both button-confirmation waits
+before returning to the title. The complete original message and challenge-code
+prompt are preserved for Original Mode; custom variants are appended instead
+of overwriting original message entries.
 
 Stock network, Bank-connection, save, and disconnect entries remain unchanged.
 Mode-specific text is appended and selected only by the state that owns it.
@@ -498,31 +548,31 @@ bytes, while runtime mapping grows by only four pages, `0x4000` (16 KiB).
 | `[0x00313B1C, 0x00313FC0)` | Original last text-page padding | Unused executable padding, `0x4A4` bytes. |
 | `[0x00313FC0, 0x00314000)` | Original last text-page padding | Zero-padded 64-byte `offline_patch_v1.0.0` identifier. |
 | `[0x003ABACC, 0x003FA904)` | Native logical BSS | Explicit zeros; native variables and startup clearing retained. No payload. |
-| `[0x003FAFF0, 0x003FB000)` | Final 16 bytes of original RW mapping, after logical BSS | First four bytes hold session mode, capture flag, R-key history and title selection; `+4` stores this ticket job's backend; eleven bytes reserved. |
+| `[0x003FAFF0, 0x003FB000)` | Final 16 bytes of original RW mapping, after logical BSS | First four bytes hold session mode, capture flag, R-key history and title selection; `+4` stores this ticket job's backend, `+5` records pending first-language selection; ten bytes reserved. |
 | `[0x003FB000, 0x003FC000)` | Added RW mapping | Zero-filled separator, not an unmapped guard page. |
 | `[0x003FC000, 0x003FF000)` | Three new pages after native BSS | All feature wrappers, C backends and paths; enabled for execution on hardware by the loader. |
 
-All three existing modes still disable HOME, support-code and eShop entries,
-but their bodies are no longer consumed. This only prepares space and native
-functions for a future Original Mode; that mode is not added here. Feature,
-language and Turtle hooks would still require mode-aware routing.
+Offline, Download and Unlock still disable or redirect HOME, support-code and
+eShop entries without consuming their function bodies. Original Mode restores
+their native routes. Title, feature, language and Turtle hooks select the
+appropriate behavior without replacing the native storage implementation.
 
-Added-page placements total `0x2484` (9348 bytes), leaving `0xB7C` (2940 bytes):
+Added-page placements total `0x2814` (10260 bytes), leaving `0x7EC` (2028 bytes):
 
 | Content | Actual range | Size |
 | --- | --- | --- |
-| Text, save and language assembly wrappers | `[0x003FC000, 0x003FC338)` | `0x338` |
-| `patch_paths.o` | `[0x003FC338, 0x003FC3EB)` | `0xB3`, then one alignment byte |
-| Mode, title and connection wrappers | `[0x003FC3EC, 0x003FCADC)` | `0x6F0` |
-| `turtle_redirect.o` | `[0x003FCADC, 0x003FCF58)` | `0x47C` |
-| `fs_helpers.o` | `[0x003FCF58, 0x003FD528)` | `0x5D0` |
-| `bankdata_redirect.o` | `[0x003FD528, 0x003FDB84)` | `0x65C` |
-| `offline_flow.o` | `[0x003FDB84, 0x003FDCA4)` | `0x120` |
-| `local_mileage.o` | `[0x003FDCA4, 0x003FE0C8)` | `0x424` |
-| `local_ticket.o` | `[0x003FE0C8, 0x003FE3D8)` | `0x310` |
-| `unlock_mode.o` | `[0x003FE3D8, 0x003FE428)` | `0x50` |
-| Ticket assembly wrappers, literal pool and policy byte | `[0x003FE428, 0x003FE484)` | `0x5C` |
-| Unused added-page space | `[0x003FE484, 0x003FF000)` | `0xB7C` |
+| Text, save and language assembly wrappers | `[0x003FC000, 0x003FC418)` | `0x418` |
+| `patch_paths.o` | `[0x003FC418, 0x003FC4CB)` | `0xB3`, then one alignment byte |
+| Mode, title and connection wrappers | `[0x003FC4CC, 0x003FCDA4)` | `0x8D8` |
+| `turtle_redirect.o` | `[0x003FCDA4, 0x003FD2E8)` | `0x544` |
+| `fs_helpers.o` | `[0x003FD2E8, 0x003FD8B8)` | `0x5D0` |
+| `bankdata_redirect.o` | `[0x003FD8B8, 0x003FDF14)` | `0x65C` |
+| `offline_flow.o` | `[0x003FDF14, 0x003FE034)` | `0x120` |
+| `local_mileage.o` | `[0x003FE034, 0x003FE458)` | `0x424` |
+| `local_ticket.o` | `[0x003FE458, 0x003FE768)` | `0x310` |
+| `unlock_mode.o` | `[0x003FE768, 0x003FE7B8)` | `0x50` |
+| Ticket assembly wrappers, literal pool and policy byte | `[0x003FE7B8, 0x003FE814)` | `0x5C` |
+| Unused added-page space | `[0x003FE814, 0x003FF000)` | `0x7EC` |
 
 Native text's actual size stays fixed, preserving Luma LayeredFS placement.
 Its path still uses the rodata tail at `[0x00369370, 0x00369397)`, which this

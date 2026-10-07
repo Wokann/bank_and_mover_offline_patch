@@ -156,6 +156,9 @@ TITLE_MODE_UNLOCK_LINE = 109
 UNLOCK_USE_BANK_LINE = 110
 UNLOCK_GAME_SELECTION_LINE = 111
 UNLOCK_CHALLENGE_LINE = 112
+NO_GAME_BLOCKED_LINE = 113
+UNLOCK_SUPPORT_REFERENCE_LINE = 114
+TITLE_MODE_ORIGINAL_LINE = 115
 TITLE_TEXT_BUFFER_LENGTH = 54
 
 DISABLED_MESSAGES = {
@@ -217,10 +220,10 @@ SHORT_TITLE_HOME_MESSAGES = {
     "0/1/0": "Pulsa\ue073: menú HOME",
 }
 
-# Three appended BMG entries replace the wide bottom HOME-help line while the
+# Four appended BMG entries replace the wide bottom HOME-help line while the
 # stock version pane remains unchanged. The title hook rebinds this line after
 # each R press.
-# 三条追加 BMG 条目替换宽大的底部 HOME 帮助行，原版版本号窗格保持不变。标题钩子会在
+# 四条追加 BMG 条目替换宽大的底部 HOME 帮助行，原版版本号窗格保持不变。标题钩子会在
 # 每次按下 R 后重新绑定该行。
 TITLE_MODE_OFFLINE_MESSAGES = {
     "0/0/4": f"現在のモード：オフライン（{R_BUTTONS['0/0/4']}で切替）",
@@ -259,6 +262,19 @@ TITLE_MODE_UNLOCK_MESSAGES = {
     "0/1/1": f"현재 모드: 잠금 해제 ({R_BUTTONS['0/1/1']}으로 전환)",
     "0/1/2": f"当前模式：解锁模式（按{R_BUTTONS['0/1/2']}键切换模式）",
     "0/1/3": f"目前模式：解鎖模式（按{R_BUTTONS['0/1/3']}鍵切換模式）",
+}
+
+TITLE_MODE_ORIGINAL_MESSAGES = {
+    "0/0/4": f"現在のモード：オリジナル（{R_BUTTONS['0/0/4']}で切替）",
+    "0/0/5": f"現在のモード：オリジナル（{R_BUTTONS['0/0/5']}で切替）",
+    "0/0/6": f"Mode: Original ({R_BUTTONS['0/0/6']}:switch mode)",
+    "0/0/7": f"Mode: Original ({R_BUTTONS['0/0/7']}:changer)",
+    "0/0/8": f"Modalità: Originale ({R_BUTTONS['0/0/8']}:cambia)",
+    "0/0/9": f"Modus: Original({R_BUTTONS['0/0/9']}:Modus wechseln)",
+    "0/1/0": f"Modo: Original ({R_BUTTONS['0/1/0']}:cambiar modo)",
+    "0/1/1": f"현재 모드: 원본 ({R_BUTTONS['0/1/1']}으로 전환)",
+    "0/1/2": f"当前模式：原版模式（按{R_BUTTONS['0/1/2']}键切换模式）",
+    "0/1/3": f"目前模式：原版模式（按{R_BUTTONS['0/1/3']}鍵切換模式）",
 }
 
 OFFLINE_MENU_GREETINGS = {
@@ -529,6 +545,9 @@ def main() -> None:
         title_mode_flags = message_codec.u16(
             original, section_offset + 4 + TITLE_HOME_LINE * 8 + 6
         )
+        no_game_flags = message_codec.u16(
+            original, section_offset + 4 + NO_GAME_RECORD_LINE * 8 + 6
+        )
         internet_flags = message_codec.u16(
             original, section_offset + 4 + INTERNET_CONNECTION_LINE * 8 + 6
         )
@@ -560,6 +579,7 @@ def main() -> None:
             title_mode_offline = original_lines[TITLE_HOME_LINE] + R_BUTTONS[archive]
             title_mode_download = title_mode_offline
             title_mode_unlock = title_mode_offline
+            title_mode_original = title_mode_offline
         else:
             title_home = SHORT_TITLE_HOME_MESSAGES.get(
                 archive, original_lines[TITLE_HOME_LINE]
@@ -576,6 +596,10 @@ def main() -> None:
                 f"{title_home}\n"
                 f"{TITLE_MODE_UNLOCK_MESSAGES[archive]}"
             )
+            title_mode_original = (
+                f"{title_home}\n"
+                f"{TITLE_MODE_ORIGINAL_MESSAGES[archive]}"
+            )
         # The stock title TextBox reserves 54 UTF-16 characters. The renderer
         # clears the whole pane instead of truncating an oversized string.
         # 原版标题 TextBox 仅预留 54 个 UTF-16 字符；越界时渲染器会清空整个
@@ -584,6 +608,7 @@ def main() -> None:
             ("offline", title_mode_offline),
             ("download", title_mode_download),
             ("unlock", title_mode_unlock),
+            ("original", title_mode_original),
         ):
             if len(title_text) > TITLE_TEXT_BUFFER_LENGTH:
                 raise ValueError(
@@ -611,11 +636,12 @@ def main() -> None:
                 (UNLOCK_MENU_MESSAGES[archive], use_bank_flags),
                 (UNLOCK_GAME_SELECTION_MESSAGES[archive], game_selection_flags),
             ),
-            ((unlock_challenge, unlock_challenge_flags),),
-            value_replacements={
-                NO_GAME_RECORD_LINE: no_game_prompt,
-                UNLOCK_CHALLENGE_SOURCE_LINE: unlock_support_reference,
-            },
+            (
+                (unlock_challenge, unlock_challenge_flags),
+                (no_game_prompt, no_game_flags),
+                (unlock_support_reference, unlock_challenge_flags),
+                (finish_message_values(text_code_units(title_mode_original)), title_mode_flags),
+            ),
         )
         greeting_entry = entries[MENU_MESSAGE_FILE_INDEX]
         greeting_original = greeting_entry.files[0]
@@ -680,6 +706,7 @@ def main() -> None:
             LANGUAGE_MENU_LINE: LANGUAGE_MENU_MESSAGES[archive],
             DOWNLOAD_GAME_SELECTION_LINE: DOWNLOAD_GAME_SELECTION_MESSAGES[archive],
             TITLE_MODE_UNLOCK_LINE: title_mode_unlock,
+            TITLE_MODE_ORIGINAL_LINE: title_mode_original,
             UNLOCK_USE_BANK_LINE: UNLOCK_MENU_MESSAGES[archive],
             UNLOCK_GAME_SELECTION_LINE: UNLOCK_GAME_SELECTION_MESSAGES[archive],
         }
@@ -693,13 +720,18 @@ def main() -> None:
         if rebuilt_greetings[UNLOCK_MENU_GREETING_LINE] != unlock_menu_greeting:
             raise ValueError(f"unlock-menu greeting verification failed for {archive}")
         if message_codec.read_message_line_values(
-            rebuilt_entries[MESSAGE_FILE_INDEX].files[0], NO_GAME_RECORD_LINE
+            rebuilt_entries[MESSAGE_FILE_INDEX].files[0], NO_GAME_BLOCKED_LINE
         ) != no_game_prompt:
             raise ValueError(f"no-game prompt verification failed for {archive}")
         if message_codec.read_message_line_values(
             rebuilt_entries[MESSAGE_FILE_INDEX].files[0], UNLOCK_CHALLENGE_LINE
         ) != unlock_challenge:
             raise ValueError(f"unlock-challenge verification failed for {archive}")
+        for index in range(len(original_lines)):
+            if message_codec.read_message_line_values(
+                rebuilt_entries[MESSAGE_FILE_INDEX].files[0], index
+            ) != message_codec.read_message_line_values(original, index):
+                raise ValueError(f"stock message changed for {archive}, line {index}")
         if rebuilt_greetings[MENU_GREETING_LINE] != greeting_original_lines[MENU_GREETING_LINE]:
             raise ValueError(f"stock-menu greeting verification failed for {archive}")
         destination.parent.mkdir(parents=True, exist_ok=True)

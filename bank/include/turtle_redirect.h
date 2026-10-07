@@ -47,7 +47,8 @@ enum TurtlePathStatus {
 
 enum TurtleStorageConstant {
     TURTLE_OBJECT_VALID = 1,
-    TURTLE_APPLICATION_CONDITION_ID = 4
+    TURTLE_APPLICATION_CONDITION_ID = 4,
+    TURTLE_MODE_OFFLINE = 0
 };
 
 typedef s32 (*TurtleStorage_LoadAtOnceFn)(void *,void *,void *);
@@ -60,6 +61,10 @@ typedef u32 (*ObjectGetSizeFn)(void *);
 typedef void *(*ObjectGetDataFn)(void *);
 typedef s32 (*ObjectValidateFn)(void *,void *);
 typedef void (*ObjectPrepareFn)(void *);
+typedef s32 (*GameData_LoadTurtleFn)(void *,void *);
+typedef void (*GameData_ClearTurtleFn)(void *);
+typedef u32 (*TurtleRecord_GetSettingFn)(void *);
+typedef void (*Language_ApplySettingsFn)(u32,void *,u32);
 
 /* Partial views of the native logical-record object, serialized buffer, and
    storage callback objects. */
@@ -105,6 +110,20 @@ typedef struct TurtleFormatStateView {
     TurtleStorageView *storage;
 } TurtleFormatStateView;
 
+typedef struct TurtleLanguageSelectionView {
+    void *vtable;
+    u32 languageId;
+    u8 useJapaneseKanji;
+} TurtleLanguageSelectionView;
+
+typedef struct TurtleGameDataView {
+    u8 reserved00[0x74];
+    TurtleObjectView *record;
+    TurtleStorageView *storage;
+    u8 reserved7C[0x74];
+    TurtleLanguageSelectionView *languageSelection;
+} TurtleGameDataView;
+
 #define TurtleStorage_LoadAtOnce \
     ((TurtleStorage_LoadAtOnceFn)0x002BB1A8u)
 #define TurtleStorage_CheckArchiveStatus \
@@ -117,6 +136,11 @@ typedef struct TurtleFormatStateView {
     ((ApplicationConditionFn)0x00229EB4u)
 #define TurtleRecord_SetTransactionState \
     ((TurtleRecord_SetTransactionStateFn)0x001D4D84u)
+#define GameData_LoadTurtle ((GameData_LoadTurtleFn)0x0015DBF0u)
+#define GameData_ClearTurtle ((GameData_ClearTurtleFn)0x0015DC50u)
+#define TurtleRecord_GetLanguage ((TurtleRecord_GetSettingFn)0x002CB914u)
+#define TurtleRecord_GetKanji ((TurtleRecord_GetSettingFn)0x002CB8F4u)
+#define Language_ApplySettings ((Language_ApplySettingsFn)0x0025C08Cu)
 
 s32 TurtleRedirect_LoadBackend(void *storage,void *path,void *object);
 s32 TurtleRedirect_SaveBackend(void *storage,void *path,void *object);
@@ -124,5 +148,6 @@ s32 TurtleRedirect_CheckBackend(void *storage,void *path);
 s32 TurtleRedirect_FormatBackend(void *state);
 s32 TurtleRedirect_FormatPoll(void *state,u8 *result);
 int TurtleRedirect_ClearTransactionAndSave(void *storage,void *object);
+int TurtleRedirect_PrepareSession(TurtleGameDataView *gameData,void *heap,u32 mode);
 
 #endif

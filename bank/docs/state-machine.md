@@ -2,7 +2,7 @@
 
 This document records the outer state machine, network paths, and transaction
 branches in the supported stock binary, then compares them with the current
-combined patch's Download, Offline, and Unlock modes. See
+combined patch's Download, Offline, Unlock, and Original modes. See
 [`code-analysis.md`](code-analysis.md) for the memory map, function map, and
 data-structure overview.
 
@@ -219,7 +219,7 @@ the middle, states 18 and 17 resolve the persisted state on a later use.
 | Node | Stock | Download Mode | Offline Mode | Unlock Mode |
 |---|---|---|---|---|
 | state 3 without usable game data | Ask whether to move directly to HOME after the warning | Keep the missing-data/Pokédex warning, then return to the title | Same as Download Mode | Same as Download Mode |
-| Turtle backend | Stock `data:/turtle` storage | Redirected to `sd:/3ds/Bank/sav.bin` | Redirected to the same `sav.bin` | Redirected to the same `sav.bin` |
+| Turtle backend | Stock `data:/turtle` storage | Stock backend after mode confirmation | Redirected to `sd:/3ds/Bank/sav.bin` | Stock backend after mode confirmation |
 | state 5 | Real connection | Stock | Complete the session locally; no remote job | Stock |
 | state 8 | Server account summary | Stock | Classify existing/first-use from local `bankdata.bin/.bak` | Stock |
 | state 15 | Remote entitlement/campaign | Public policy `0` stays native; test policy `1` uses local results only for a confirmed missing Azahar interface | Always supply required ticket fields locally; disable online campaigns | Same policy as Download Mode |
@@ -237,16 +237,34 @@ Download Mode is not a full stock mode. It retains real networking, first-use
 creation, transaction recovery, and complete-file download. State 15 preserves
 native ticket and online-gift checks by default; a successful capture takes the stock
 no-save exit. HOME, support-code, and Mover/eShop menu operations are also
-disabled or redirected by the patch. Because the Turtle backend is redirected
-globally, server transaction descriptors written in Download Mode are stored
-in `sav.bin`, not the stock logical-record backend.
+disabled or redirected by the patch. Download and Unlock reload the stock
+Turtle record after title-mode confirmation; server transaction descriptors
+are saved through the native backend, not to `sav.bin`.
+
+Original Mode follows the Stock column, including native first-creation UI
+timing, all menu functions, original messages, and the no-game HOME question.
+It does not capture or load local Bankdata. Tickets share Download/Unlock's
+public/test policy: `0` requires native results; `1` permits local results only
+for the confirmed missing Azahar interface. The title mode hint is still shown.
+
+Common startup/title handling uses the SD preview. Once the title view has
+been destroyed, the selected record is checked and reloaded, clearing its
+predecessor's loaded flag and pending language. Missing or invalid records go
+through language selection (state 1), disconnect cleanup (state 21), and game
+checking (state 3), whose native chain initializes the selected backend.
+Download/Unlock's added language-menu operation saves its choice to the stock
+record; Offline saves to SD. Returning to the title restores the SD preview
+before title UI creation. These rebinds do not copy SD data into the stock save
+or mirror native writes back to SD, and write failures never switch backends.
+The title keeps the selected mode across returns within this run; a fresh
+launch defaults to Offline. Preview and session-backend selection remain separate.
 
 State 15 retains its native entry, transitions, job construction and cleanup.
 Only job initialization at `0x002B0444`, result polling at `0x002B0464`, and
 unbinding at `0x002B1994` are redirected. Wrappers occupy added pages after
 native BSS; HOME box-selection UI stays intact. Other bytes in
 `[0x002B0270, 0x002B1AD0)` and the
-native job implementation remain intact. Download and Unlock modes call native
+native job implementation remain intact. Download, Unlock and Original modes call native
 interfaces with `ONLINE_TICKET_CHECK_BYPASS=0`, including native failure when an
 interface is missing. Test policy `1` uses local results only for Azahar's verified
 unimplemented-handler reply; hardware, unknown environments, implemented
@@ -256,7 +274,7 @@ console time and an expiry 999 days later. Purchase counts stay
 provided. Native getters and exit cleanup copy the resulting entitlement and
 date. Local unbinding does not access a nonexistent network client; native
 destruction still runs. No system eShop applet or loading-animation simulation
-is used. Both paths remain present, and only the policy byte at `0x003FE480`
+is used. Both paths remain present, and only the policy byte at `0x003FE810`
 changes between builds. Initialization records this job's backend at `0x003FAFF4`;
 polling and cleanup keep that selection. The policy does not alter other networking,
 transaction recovery, mileage calculations, or post-download exit branches.
@@ -265,7 +283,7 @@ The subproject README documents the capability probe.
 Local results are not display-only: `0x002B1924` copies the job's current date
 at `+0xB8` to shared `+0x28`. First Bankdata initialization at `0x002AE8B0`
 reads that date; state 9 serializes the body and uploads it. Mileage at
-`0x002AD1BC` also reads the date and updates mileage/date fields; Unlock Mode
+`0x002AD1BC` also reads the date and updates mileage/date fields; Unlock and Original
 can reach the native save path, whose `0x002B2320` serializer stages the body
 for upload. Download Mode with an existing bank skips mileage and normal saving,
 but not first creation.

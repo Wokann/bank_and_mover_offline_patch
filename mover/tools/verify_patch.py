@@ -277,6 +277,8 @@ def main() -> None:
     missing = sorted(required - sym.keys())
     if missing:
         raise ValueError(f"missing armips symbols: {', '.join(missing)}")
+    if word(patched, sym["combinepatch_titletextinitialize"] + 16) != 0xE5DC3001:
+        raise ValueError("title initializer must restore the retained mode selection")
     code_start = EXPANDED_PAYLOAD_START
     code_end = EXPANDED_PAYLOAD_START + EXPANDED_PAYLOAD_SIZE
     if not code_start < sym["combinepatch_codeusedend"] <= code_end:

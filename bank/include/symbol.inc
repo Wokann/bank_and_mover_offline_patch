@@ -55,6 +55,7 @@
 .definelabel BankMenuState_ModeGreetingCall0,   0x002A6824
 .definelabel BankMenuState_ModeGreetingCall5,   0x002A6978
 .definelabel InitialGameCheck_NoGameChoiceSetup, 0x002AC958
+.definelabel InitialGameCheck_NoGameMessageLoad, 0x002AC79C
 .definelabel InitialGameCheck_FailureTransition, 0x002ACA90
 .definelabel GameSelectionState_MessageIdLoad,    0x002ADD0C
 ; Stock call that binds message line 34 after challenge register 0 is ready.
@@ -100,6 +101,11 @@
 .definelabel StateLocalSave_Poll,               0x002B4A20
 .definelabel StateLocalSave_Begin,              0x002B4AB4
 .definelabel LocalSettings_SetLanguage,          0x002BAF00
+.definelabel GameData_LoadTurtle,                0x0015DBF0
+.definelabel GameData_ClearTurtle,               0x0015DC50
+.definelabel TurtleRecord_GetLanguage,           0x002CB914
+.definelabel TurtleRecord_GetKanji,              0x002CB8F4
+.definelabel Language_ApplySettings,             0x0025C08C
 .definelabel TurtleStorage_LoadBackendCall,        0x0015DC00
 .definelabel TurtleStorage_SaveBackendCall,        0x0015DC40
 .definelabel Title_TurtleStorageCheckCall,         0x002A484C
@@ -154,6 +160,8 @@
 ; through the byte at state+0x3C.
 ; 标题更新会显示两层标题 UI，并通过 state+0x3C 的字节报告标题退出。
 .definelabel TitleScreenState_Update,           0x002B1AD0
+.definelabel TitleScreenState_Initialize,       0x002B1BF0
+.definelabel TitleScreenState_ExitComplete,     0x002B1BDC
 ; This initializer binds BMG line 78 to pane 0x24 through Ui_SetMessageLine.
 ; 此初始化器通过 Ui_SetMessageLine 将 BMG 第 78 行绑定到文字框 0x24。
 .definelabel TitleScreenUi_Create,              0x002B48D4

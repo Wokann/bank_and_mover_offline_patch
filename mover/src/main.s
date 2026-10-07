@@ -127,12 +127,16 @@
 .area CombinePatch_CodeEnd-CombinePatch_CodeStart
 
 CombinePatch_TitleTextInitialize:
+    // Preserve the chosen mode across title returns; fresh-launch storage is zero.
+    // 返回标题时保留所选模式；首次启动时存储区为零，默认离线。
     ldr r12,=CombinePatch_ModeStorage
     mov r3,#CombinePatch_ModeOffline
     strb r3,[r12,#CombinePatch_SessionModeOffset]
-    strb r3,[r12,#CombinePatch_SelectedModeOffset]
     strb r3,[r12,#CombinePatch_TitleRPreviousOffset]
-    mov r3,#CombinePatch_TitleOfflineMessage
+    ldrb r3,[r12,#CombinePatch_SelectedModeOffset]
+    cmp r3,#CombinePatch_ModeOnline
+    moveq r3,#CombinePatch_TitleOnlineMessage
+    movne r3,#CombinePatch_TitleOfflineMessage
     b MoverUi_SetMessageLine
 
 // Reproduce the complete stock six-instruction title update. The chosen mode

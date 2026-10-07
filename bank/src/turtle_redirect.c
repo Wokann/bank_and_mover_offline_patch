@@ -5,6 +5,30 @@
 /* Redirect the logical Turtle record to the raw SD file used by offline mode. */
 /* 将 Turtle 逻辑记录重定向到离线模式使用的 SD 原始文件。 */
 
+/* Rebind after the title view has been destroyed. The selected storage supplies
+   the whole record, including its language and transaction fields. A missing
+   language returns to native language selection and subsequent initialization; no SD record
+   is copied into native storage. */
+/* 在标题视图销毁后重新绑定。所选存储提供完整记录，包括语言及事务字段。缺少语言
+   时返回原版语言选择及后续初始化链；不会把 SD 记录复制进原存档。 */
+__attribute__((used,noinline))
+int TurtleRedirect_PrepareSession(TurtleGameDataView *gameData,void *heap,u32 mode)
+{
+    s32 result;
+    u32 language;
+    GameData_ClearTurtle(gameData);
+    gameData->languageSelection->languageId=0;
+    gameData->languageSelection->useJapaneseKanji=0;
+    result=mode==TURTLE_MODE_OFFLINE?
+        TurtleRedirect_CheckBackend(gameData->storage,heap):
+        TurtleStorage_CheckArchiveStatus(gameData->storage,heap);
+    if (result || GameData_LoadTurtle(gameData,heap)!=TURTLE_OBJECT_VALID) return 0;
+    language=TurtleRecord_GetLanguage(gameData->record);
+    if (!language) return 0;
+    Language_ApplySettings(language&0xFFu,heap,TurtleRecord_GetKanji(gameData->record));
+    return 1;
+}
+
 static void *objectBuffer(void *object)
 {
     TurtleObjectView *view=(TurtleObjectView *)object;

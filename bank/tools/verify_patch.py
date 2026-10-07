@@ -332,6 +332,18 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
         "combinepatch_titlemodetextinitialize",
         "combinepatch_titlescreenupdate",
         "combinepatch_titleprocessmodetoggle",
+        "combinepatch_titlepreview",
+        "combinepatch_titlebindsession",
+        "combinepatch_titleresult",
+        "combinepatch_titleorresume",
+        "combinepatch_turtleload",
+        "combinepatch_turtlesave",
+        "combinepatch_turtlecheck",
+        "combinepatch_turtleformat",
+        "combinepatch_turtleformatpoll",
+        "combinepatch_nogamechoice",
+        "combinepatch_selectnogamemessage",
+        "turtleredirect_preparesession",
         "combinepatch_networkskipremotejob",
         "combinepatch_networkskipremotejobofficial",
         "combinepatch_payloadbegin",
@@ -672,6 +684,10 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
     hook_branches = (
         (0x002B1AD0, "combinepatch_titlescreenupdate", False, ARM_COND_AL, "title input and session latch"),
         (0x002B4974, "combinepatch_titlemodetextinitialize", True, ARM_COND_AL, "title mode text"),
+        (0x002B1C2C, "combinepatch_titlepreview", False, ARM_COND_AL, "title SD preview"),
+        (0x002B1BDC, "combinepatch_titlebindsession", False, ARM_COND_AL, "session record reload after title teardown"),
+        (0x002A5680, "combinepatch_titleresult", False, ARM_COND_EQ, "selected backend language check"),
+        (0x002A5648, "combinepatch_titleorresume", False, ARM_COND_AL, "resume selected mode after first language save"),
         (0x002AF1FC, "combinepatch_networkupdate", False, ARM_COND_AL, "network update"),
         (0x002AF37C, "combinepatch_networkavailability", True, ARM_COND_AL, "mode latch"),
         (0x002AF38C, "combinepatch_networkskipremotejob", False, ARM_COND_AL, "network remote-job bypass"),
@@ -695,7 +711,8 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
         (0x002AE864, "combinepatch_bankcreatesuccess", False, ARM_COND_NE, "first-use success"),
         (0x002A57C8, "combinepatch_rewardresult", False, ARM_COND_EQ, "mode-specific reward result"),
         (0x002A56F0, "combinepatch_homeresult", False, ARM_COND_EQ, "HOME redirect"),
-        (0x002AC958, "initialgamecheck_failuretransition", False, ARM_COND_AL, "no-game HOME entry bypass"),
+        (0x002AC958, "combinepatch_nogamechoice", False, ARM_COND_AL, "mode-specific no-game HOME entry"),
+        (0x002AC79C, "combinepatch_selectnogamemessage", True, ARM_COND_AL, "mode-specific no-game prompt"),
         (0x002A58CC, "combinepatch_result21", False, ARM_COND_EQ, "language result"),
         (0x002A57E0, "combinepatch_result5", False, ARM_COND_EQ, "no-save result"),
         (0x002A57F0, "combinepatch_result6or12", False, ARM_COND_EQ, "result six or twelve"),
@@ -722,12 +739,12 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
         (0x002B20E8, "combinepatch_saverollback", True, ARM_COND_AL, "save rollback"),
         (0x002B2100, "combinepatch_saverollbackwait", False, ARM_COND_AL, "save rollback wait"),
         (0x002B2548, "combinepatch_selectsavemessage", True, ARM_COND_AL, "save message"),
-        (0x0015DC00, "turtleredirect_loadbackend", True, ARM_COND_AL, "Turtle load backend"),
-        (0x0015DC40, "turtleredirect_savebackend", True, ARM_COND_AL, "Turtle save backend"),
+        (0x0015DC00, "combinepatch_turtleload", True, ARM_COND_AL, "Turtle load backend"),
+        (0x0015DC40, "combinepatch_turtlesave", True, ARM_COND_AL, "Turtle save backend"),
         (0x002A484C, "turtleredirect_checkbackend", True, ARM_COND_AL, "title Turtle check"),
-        (0x002AC578, "turtleredirect_checkbackend", True, ARM_COND_AL, "initial Turtle check"),
-        (0x002AC678, "turtleredirect_formatbackend", True, ARM_COND_AL, "Turtle format start"),
-        (0x002AC68C, "turtleredirect_formatpoll", True, ARM_COND_AL, "Turtle format poll"),
+        (0x002AC578, "combinepatch_turtlecheck", True, ARM_COND_AL, "initial Turtle check"),
+        (0x002AC678, "combinepatch_turtleformat", True, ARM_COND_AL, "Turtle format start"),
+        (0x002AC68C, "combinepatch_turtleformatpoll", True, ARM_COND_AL, "Turtle format poll"),
     )
     for address, target_symbol, link, condition, name in hook_branches:
         expect_branch(image, address, symbols[target_symbol], link, condition, name)
@@ -741,6 +758,43 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
         (0x002AC68C, "turtlestorage_formatpoll", "base Turtle format poll"),
     ):
         expect_branch(base_image, address, symbols[target_symbol], True, ARM_COND_AL, name)
+
+    if symbols["combinepatch_modecount"] != 4 or symbols["combinepatch_modeoriginal"] != 3:
+        raise ValueError("title selector must include Original after Unlock")
+    if symbols["combinepatch_initiallanguagependingoffset"] != 5:
+        raise ValueError("backend language latch overlaps mode or ticket flags")
+    expect_word(image, symbols["combinepatch_titlemodetextinitialize"] + 24,
+                0xE5DC3003, "restore retained title selection")
+    for operation, local_target, native_target in (
+        ("load", "turtleredirect_loadbackend", "turtlestorage_loadatonce"),
+        ("save", "turtleredirect_savebackend", "turtlestorage_saveatonce"),
+        ("check", "turtleredirect_checkbackend", "turtlestorage_checkarchivestatus"),
+        ("format", "turtleredirect_formatbackend", "turtlestorage_formatstart"),
+        ("formatpoll", "turtleredirect_formatpoll", "turtlestorage_formatpoll"),
+    ):
+        wrapper = symbols[f"combinepatch_turtle{operation}"]
+        if not EXPANDED_PAYLOAD_START <= wrapper < symbols["combinepatch_codeusedend"]:
+            raise ValueError(f"Turtle {operation} wrapper outside added pages")
+        word = read_word(image, wrapper)
+        if word & 0xFFFFF000 != 0xE59FC000:
+            raise ValueError(f"Turtle {operation} lacks session-mode literal")
+        expect_word(image, wrapper + 8 + (word & 0xFFF), RUNTIME_STORAGE_START,
+                    f"Turtle {operation} session storage")
+        expect_word(image, wrapper + 4, 0xE5DCC000, f"Turtle {operation} mode load")
+        expect_word(image, wrapper + 8, 0xE35C0000, f"Turtle {operation} offline test")
+        expect_branch(image, wrapper + 12, symbols[local_target], False, ARM_COND_EQ,
+                      f"Turtle {operation} offline route")
+        expect_branch(image, wrapper + 16, symbols[native_target], False, ARM_COND_AL,
+                      f"Turtle {operation} native route")
+    for address in (0x002B1BD8, 0x002B1BE0, 0x002B1BF0, 0x002B1C28):
+        expect_word(image, address, read_word(base_image, address), "stock title lifecycle")
+    expect_word(base_image, 0x002AC958, 0xE5945040, "native no-game choice view")
+    no_game = symbols["combinepatch_nogamechoice"]
+    expect_branch(image, no_game + 12, symbols["initialgamecheck_failuretransition"],
+                  False, ARM_COND_NE, "first three modes block HOME after confirmation")
+    expect_word(image, no_game + 16, 0xE5945040, "Original no-game choice view")
+    expect_branch(image, no_game + 20, 0x002AC95C, False, ARM_COND_AL,
+                  "Original no-game HOME continuation")
 
     # Native transaction recovery remains intact alongside the restored HOME states.
     # 原版事务恢复入口与已恢复的 HOME 状态均保持原状。
@@ -896,34 +950,42 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
     expect_word(base_image, 0x002B2548, 0xE3A01008, "base save message")
     expect_word(
         image,
-        symbols["combinepatch_bankcreatesuccess"],
-        0xE3A00008,
-        "combined first-use success state",
+        symbols["combinepatch_bankcreatesuccess"] + 12,
+        0x03A00007,
+        "Original first-use success state",
     )
+    expect_word(image, symbols["combinepatch_bankcreatesuccess"] + 16,
+                0x13A00008, "first three modes first-use success state")
 
     expect_branch(
         image,
-        symbols["combinepatch_homeresult"],
+        symbols["combinepatch_homeresult"] + 16,
         symbols["combinepatch_redirecthometolanguage"],
         False,
         ARM_COND_AL,
         "HOME language redirect",
     )
-    expect_word(image, symbols["combinepatch_menuselectioncallback"], 0xE5902010, "menu state load")
-    expect_word(image, symbols["combinepatch_menuselectioncallback"] + 4, 0xE3520001, "menu state check")
-    expect_word(image, symbols["combinepatch_menuselectioncallback"] + 12, 0xE3510002, "support entry check")
+    expect_branch(image, symbols["combinepatch_homeresult"] + 12,
+                  0x002A5778, False, ARM_COND_EQ, "Original HOME dispatch")
+    menu_callback = symbols["combinepatch_menuselectioncallback"]
+    expect_word(image, menu_callback + 8, 0xE3520003, "Original menu mode check")
+    expect_branch(image, menu_callback + 12, menu_callback + 44, False,
+                  ARM_COND_EQ, "Original menu native callback")
+    expect_word(image, menu_callback + 16, 0xE5902010, "menu state load")
+    expect_word(image, menu_callback + 20, 0xE3520001, "menu state check")
+    expect_word(image, menu_callback + 28, 0xE3510002, "support entry check")
     expect_branch(
         image,
-        symbols["combinepatch_menuselectioncallback"] + 16,
+        menu_callback + 32,
         symbols["combinepatch_menuselectiondisabled"],
         False,
         ARM_COND_EQ,
         "support entry return",
     )
-    expect_word(image, symbols["combinepatch_menuselectioncallback"] + 20, 0xE3510003, "Mover entry check")
+    expect_word(image, menu_callback + 36, 0xE3510003, "Mover entry check")
     expect_branch(
         image,
-        symbols["combinepatch_menuselectioncallback"] + 24,
+        menu_callback + 40,
         symbols["combinepatch_menuselectiondisabled"],
         False,
         ARM_COND_EQ,
@@ -1066,7 +1128,7 @@ def verify_messages(source_romfs: Path, output_romfs: Path) -> None:
             )
         )
         no_game_values = module.message_codec.read_message_line_values(
-            output_message_file, module.NO_GAME_RECORD_LINE
+            output_message_file, module.NO_GAME_BLOCKED_LINE
         )
         if no_game_values != expected_no_game_values:
             raise ValueError(f"no-game prompt mismatch in archive {archive}")
@@ -1090,6 +1152,14 @@ def verify_messages(source_romfs: Path, output_romfs: Path) -> None:
             f"{title_home}\n"
             f"{module.TITLE_MODE_UNLOCK_MESSAGES[archive]}"
         )
+        expected_title_mode_original = (
+            f"{title_home}\n"
+            f"{module.TITLE_MODE_ORIGINAL_MESSAGES[archive]}"
+        )
+        for line in range(len(source_lines)):
+            if module.message_codec.read_message_line_values(output_message_file, line) != \
+                    module.message_codec.read_message_line_values(source_message_file, line):
+                raise ValueError(f"stock message {line} changed in archive {archive}")
         expected_lines = {
             module.INTERNET_CONNECTION_LINE: source_lines[module.INTERNET_CONNECTION_LINE],
             module.BANK_CONNECTION_LINE: source_lines[module.BANK_CONNECTION_LINE],
@@ -1111,6 +1181,7 @@ def verify_messages(source_romfs: Path, output_romfs: Path) -> None:
             module.TITLE_MODE_OFFLINE_LINE: expected_title_mode_offline,
             module.TITLE_MODE_DOWNLOAD_LINE: expected_title_mode_download,
             module.TITLE_MODE_UNLOCK_LINE: expected_title_mode_unlock,
+            module.TITLE_MODE_ORIGINAL_LINE: expected_title_mode_original,
             module.DISABLED_LINE: module.DISABLED_MESSAGES[archive],
             module.LANGUAGE_MENU_LINE: module.LANGUAGE_MENU_MESSAGES[archive],
             module.DOWNLOAD_GAME_SELECTION_LINE: module.DOWNLOAD_GAME_SELECTION_MESSAGES[archive],
@@ -1143,7 +1214,7 @@ def verify_messages(source_romfs: Path, output_romfs: Path) -> None:
             source_message_file, module.UNLOCK_CHALLENGE_SOURCE_LINE
         )
         output_stock_challenge_values = module.message_codec.read_message_line_values(
-            output_message_file, module.UNLOCK_CHALLENGE_SOURCE_LINE
+            output_message_file, module.UNLOCK_SUPPORT_REFERENCE_LINE
         )
         expected_support_values = module.build_support_reference_values(
             source_challenge_values,

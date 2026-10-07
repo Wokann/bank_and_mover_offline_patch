@@ -14,7 +14,7 @@ The patches never upload offline changes to the official server. An upload patch
 
 | Application | Title-screen modes | Purpose |
 |---|---|---|
-| Pokemon Bank | Offline / Download / Unlock | Load, edit, and save the local Bank offline; download a complete official Bank to the SD card; or enter the stock forced-unlock flow for a mismatched save |
+| Pokemon Bank | Offline / Download / Unlock / Original | Use a local Bank offline; download the official Bank; display an unlock candidate; or use the complete official Bank interface |
 | Poke Mover | Offline / Online | Transfer Pokemon into the same local Bank's Transport Box, or use the official server path |
 
 - Press the physical **R** button on the title screen to switch modes. Pressing **A**, **START**, or the lower screen latches the displayed mode for that session.
@@ -22,6 +22,7 @@ The patches never upload offline changes to the official server. An upload patch
 - Bank validates the primary file, attempts recovery from `bankdata.bak`, and protects saves with `bankdata.tmp`, complete-write checks, and a previous-generation backup.
 - Bank Download Mode retains the official account, game-detection, and server-download flow. It commits the data locally and returns to the title screen without entering the boxes or uploading data.
 - Bank Unlock Mode preserves the stock online transaction-recovery flow and exposes one server-returned unlock candidate on the official challenge-code screen.
+- Bank Original Mode restores the official menus, messages, HOME/eShop operations, ticket checks, and normal online Bank flow. After confirming the mode, only Offline uses `sav.bin`; Download, Unlock, and Original use the stock save.
 - Poke Mover Offline Mode retains stock game reading, filtering, conversion, Transport Box checks, and source-game saving while replacing server Bank I/O with local transactions.
 - Both Poke Mover modes can scan Gen 5 ROM/save pairs on the SD card in addition to a physical cartridge and redirect subsequent I/O for the selected digital save back to the SD card.
 - Added messages cover all ten language archives shipped with both applications.
@@ -55,7 +56,7 @@ Poke Mover:   00040000000C9C00
 
 ### Pokemon Bank
 
-The title screen defaults to **Offline Mode**. Press **R** to cycle through **Download Mode**, **Unlock Mode**, and back to Offline Mode.
+On a fresh launch, the title screen defaults to **Offline Mode**. Press **R** to cycle through **Download Mode**, **Unlock Mode**, **Original Mode**, and back to Offline Mode. Returning to the title retains the mode just used; restarting the application resets it to Offline. This choice is not written to a save.
 
 If the official server already contains your Bank, first enter Download Mode, choose “Download Bank data locally,” complete the stock account checks, and select any available game. After the completion message returns to the title screen, switch back to Offline Mode and use the normal Bank interface to manage boxes and save locally.
 
@@ -63,11 +64,15 @@ Download Mode overwrites the current local Bank, so back it up first. If no serv
 
 Unlock Mode is intended only for the stock save-mismatch lock. Enter its first menu item, select the relevant game, and hold **L + A + START** while confirming the game to open the official forced-unlock screen. If the server supplies an accepted candidate, the patch shows its first eight-digit form on a third line. The subsequent rollback, validation, and server handling remain stock behavior; this mode does not capture `bankdata.bin` or use Download Mode's early-exit route.
 
-> **Privacy:** `bankdata.bin` downloaded in Download Mode may contain private account-related identifiers, player and Trainer information, and timestamps. Do not upload it publicly or share it casually.
+Original Mode uses the complete official Bank menus and online flow, including HOME, support-code, and Mover/eShop entries. It does not load or capture the local `bankdata.bin`.
+
+Startup/title handling still previews the redirected record. Once a mode is confirmed, its record is reloaded: Offline uses `SD:/3ds/Bank/sav.bin`; the other modes use the stock `data:/turtle`. Each record supplies its own language and transaction state. Missing or invalid stock records follow native language selection and initialization, without importing SD data or mirroring native saves back to SD. The first three modes continue to block the no-game HOME shortcut; Original retains the official prompt.
+
+> **Privacy:** `bankdata.bin` downloaded in Download Mode may contain private account-related identifiers, player and Trainer information, and timestamps. The `sav.bin` copied from the original internal save for local offline use may also contain personal or account-related information. Do not upload either file publicly or share it casually.
 
 ### Poke Mover
 
-The title screen defaults to **Offline Mode**. Press **R** to select **Online Mode**.
+On a fresh launch, the title screen defaults to **Offline Mode**. Press **R** to select **Online Mode**. Returning to the title retains the mode just used; restarting the application resets it to Offline. This choice is not written to a save.
 
 - Offline Mode requires a `bankdata.bin` previously downloaded or initialized by Bank. Mover does not download or create this file.
 - A successful offline transfer writes Pokemon into the Transport Box of the same local Bank; retrieve them later with Bank in Offline Mode.

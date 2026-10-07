@@ -31,10 +31,12 @@ committed only to the local Bank file and are never uploaded by this project.
 
 ## Mode selection
 
-The title screen starts in **Offline Mode**. Press the physical **R** button to
+On a fresh launch, the title screen starts in **Offline Mode**. Press the physical **R** button to
 switch between **Offline Mode** and **Online Mode**. The mode line is shown
 below the HOME-menu help text, uses the same button glyph as the Bank patch,
-and updates immediately.
+and updates immediately. Returning to the title retains the selected mode;
+restarting the application resets it to Offline. The choice stays in runtime
+memory and is not written to a save.
 
 Press **A**, **START**, or touch the lower screen to latch the displayed mode
 for the session. R no longer changes mode after leaving the title screen.
