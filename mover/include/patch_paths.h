@@ -9,5 +9,7 @@ extern const char directoryBank[10];
 extern const char bankPath[23];
 extern const char tempPath[23];
 extern const char backupPath[23];
+extern const char turtleSavePath[18];
+extern const char turtleTempPath[18];
 
 #endif

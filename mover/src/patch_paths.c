@@ -8,3 +8,5 @@ const char directoryBank[] = "/3ds/Bank";
 const char bankPath[] = "/3ds/Bank/bankdata.bin";
 const char tempPath[] = "/3ds/Bank/bankdata.tmp";
 const char backupPath[] = "/3ds/Bank/bankdata.bak";
+const char turtleSavePath[] = "/3ds/Bank/sav.bin";
+const char turtleTempPath[] = "/3ds/Bank/sav.tmp";

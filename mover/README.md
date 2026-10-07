@@ -70,8 +70,8 @@ and legality services. Gen 5 source discovery and I/O for the selected digital
 `.sav` form a shared input layer in both modes; they do not switch Online
 Mode to the local Bank backend.
 
-Online Mode therefore does not read, write, create, rename, or delete any
-Bank file under `sd:/3ds/Bank/`. It keeps the official server flow and its network
+Online Mode therefore does not read, write, create, rename, or delete local
+`bankdata.bin`, `bankdata.tmp`, or `bankdata.bak`. It keeps the official server flow and its network
 messages. If an SD-backed Gen 5 source is selected, however, Online Mode uses
 the same redirect to read and write its paired `.sav` under
 `sd:/roms/nds/saves/`.
@@ -88,6 +88,27 @@ mode variants, four offline connection/save messages, and 28 Gen 5 game names
 copied from the original seven game-language resources. Connection/save
 overrides apply only in Offline Mode; ROM-language game names apply in both
 modes. All ten shipped UI languages are rebuilt and validated.
+
+## Shared UI language
+
+Both modes read the language ID and Japanese kana/kanji preference from
+`sd:/3ds/Bank/sav.bin` before native startup binds the message archive and font.
+The file must be exactly `0x200` bytes and contain a supported language ID.
+Missing, unreadable or unsupported settings retain the original startup fallback,
+including console-based language selection.
+
+A confirmed native Mover language selection also updates those settings in an
+existing complete `sav.bin`. The update preserves every other byte, including
+transaction metadata, checksum and the unused tail. Language fields
+`0x28–0x2B` lie outside the original checksum's `0x00–0x1F` input, so the checksum
+does not need to be recalculated. Mover does not create a missing Bank record or
+write the original Bank save archive.
+
+The complete updated record is written and closed as `sav.tmp` before deleting
+`sav.bin` and renaming the temporary file. Failure before the replacement keeps
+the existing record; failure after deletion leaves the completed temporary file
+for Bank's existing recovery. No `.bak` or `.break` is added for these settings.
+This shared language file is independent of the mode-specific Bankdata backend.
 
 ## Offline prerequisites and local file
 
@@ -410,6 +431,7 @@ state object; the native state exit path performs cleanup.
 | `src/local_ticket.c` | Job-backend selection, Azahar missing-interface probe, local job/campaign results and console-calendar calculation |
 | `src/local_validation.c` | Read-only Gen 5 integrity/empty-slot classification and Gen 5/VC per-slot result isolation |
 | `src/offline_flow.c` | Independent network, disconnect, remote-check, no-transfer, and save-delay state updates |
+| `src/language_settings.c` / `include/language_settings.h` | Share Bank's SD language settings before native resource binding and update confirmed selections through `sav.tmp` |
 | `src/patch_paths.c` | Shared SD path constants |
 | `src/patch_messages.py` | Appends and validates mode/offline text and original ROM-language game names in all ten UI-language archives |
 | `tools/message_archive.py` | Self-contained GARC and encrypted message-file codec |
@@ -505,7 +527,7 @@ the source code matches the supported version. The build removes the generated
 
 The text-tail bootstrap obtains a real process handle through `DuplicateHandle`,
 queries `GetSystemInfo(0x20000, 0)`, and calls `ControlProcessMemory` with operation
-`6` and permission `7` only for `0x00365000–0x00367000`. SVC result `0` continues
+`6` and permission `7` only for `0x00365000–0x00368000`. SVC result `0` continues
 normally. The only nonzero compatibility case is a successful environment query
 with emulator ID `2`, high word `0`, and an SVC result equal to its input process
 handle. Hardware and unknown environments retain strict result checks; negative

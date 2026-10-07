@@ -28,7 +28,7 @@ VERSION_STORAGE_START = TEXT_MAPPED_END - VERSION_STORAGE_SIZE
 VERSION_IDENTIFIER = b"offline_patch_v1.0.0\0"
 PAYLOAD_START = 0x0028D2E0
 EXPANDED_PAYLOAD_START = 0x00365000
-EXPANDED_PAYLOAD_SIZE = 0x2000
+EXPANDED_PAYLOAD_SIZE = 0x3000
 TICKET_INTERFACES = (
     (0x00249754, "initialize", "ticketjob_initialize", 0x0023D3C0),
     (0x00249774, "poll", "ticketjob_poll", 0x0023E230),
@@ -246,6 +246,10 @@ def main() -> None:
         "localvalidation_payloadbegin", "localvalidation_payloadend",
         "offlineflow_payloadbegin", "offlineflow_payloadend",
         "patchpaths_payloadbegin", "patchpaths_payloadend",
+        "languagesettings_payloadbegin", "languagesettings_payloadend",
+        "languagesettings_load", "languagesettings_storeselection",
+        "combinepatch_loadbanklanguage", "combinepatch_savebanklanguage",
+        "languageselection_setsettings",
         "combinepatch_titletextinitialize", "combinepatch_titlestateupdate",
         "combinepatch_titleprocessmodetoggle", "combinepatch_networkupdate",
         "combinepatch_networkavailability",
@@ -312,6 +316,7 @@ def main() -> None:
         ("patchpaths_payloadbegin", "patchpaths_payloadend"),
         ("localvalidation_payloadbegin", "localvalidation_payloadend"),
         ("ndsfs_payloadbegin", "ndsfs_payloadend"),
+        ("languagesettings_payloadbegin", "languagesettings_payloadend"),
     )
     for begin, end in payload_objects:
         if sym[begin] >= sym[end]:
@@ -335,7 +340,7 @@ def main() -> None:
     if sym[tail_objects[-1][1]] != sym["combinepatch_offlinepayloadusedend"]:
         raise ValueError("offline payload end does not follow the final object")
     for module in ("fshelpers", "ndssources", "bankdataredirect",
-                   "offlineflow", "localvalidation", "ndsfs"):
+                   "offlineflow", "localvalidation", "ndsfs", "languagesettings"):
         verify_no_immediate_thumb_blx(
             patched, sym[f"{module}_payloadbegin"], sym[f"{module}_payloadend"]
         )
@@ -468,7 +473,7 @@ def main() -> None:
             word(patched, loader_start + 24) != 0xE8BD5FFF:
         raise ValueError("expansion bootstrap does not preserve startup registers")
     if arm_literal_value(patched, loader_start + 4, 0) != EXPANDED_PAYLOAD_START or \
-            word(patched, loader_start + 8) != 0xE3A01A02:
+            word(patched, loader_start + 8) != 0xE3A01A03:
         raise ValueError("expansion bootstrap protects the wrong pages")
     if branch_target(patched, loader_start + 12) != \
             (sym["codeexpansion_enable"], True, 0xE):
@@ -698,6 +703,32 @@ def main() -> None:
                        (0x00244D2C, 0x002450F4)):
         if patched[start - IMAGE_BASE:end - IMAGE_BASE] != base[start - IMAGE_BASE:end - IMAGE_BASE]:
             raise ValueError(f"native source/save implementation changed: {start:08X}-{end:08X}")
+
+    for address, helper in ((0x00240D7C, "combinepatch_loadbanklanguage"),
+                             (0x0025C618, "combinepatch_savebanklanguage")):
+        if branch_target(patched, address) != (sym[helper], True, 0xE):
+            raise ValueError("shared language hook does not call its wrapper")
+    load_language = sym["combinepatch_loadbanklanguage"]
+    if word(patched, load_language) != 0xE92D400D or \
+            arm_literal_value(patched, load_language + 4, 12) != \
+            sym["languagesettings_load"] + 1 or \
+            word(patched, load_language + 8) != 0xE12FFF3C or \
+            word(patched, load_language + 12) != 0xE1A01000 or \
+            word(patched, load_language + 16) != 0xE8BD800D:
+        raise ValueError("language load must preserve native registers and return language in r1")
+    store_language = sym["combinepatch_savebanklanguage"]
+    if arm_literal_value(patched, store_language, 12) != \
+            sym["languagesettings_storeselection"] + 1 or \
+            word(patched, store_language + 4) != 0xE12FFF1C:
+        raise ValueError("confirmed language selection does not interwork to Thumb")
+    for start, end, hook in ((0x00240D28, 0x00240E50, 0x00240D7C),
+                             (0x0025C5BC, 0x0025C62C, 0x0025C618)):
+        if patched[start - IMAGE_BASE:hook - IMAGE_BASE] != base[start - IMAGE_BASE:hook - IMAGE_BASE] or \
+                patched[hook + 4 - IMAGE_BASE:end - IMAGE_BASE] != base[hook + 4 - IMAGE_BASE:end - IMAGE_BASE]:
+            raise ValueError("native language startup/confirmation changed outside the hook")
+    for start, end in ((0x0022AF28, 0x0022AFD8), (0x0022C06C, 0x0022C078)):
+        if patched[start - IMAGE_BASE:end - IMAGE_BASE] != base[start - IMAGE_BASE:end - IMAGE_BASE]:
+            raise ValueError("native language resource binding or selection setter changed")
 
     messages = load_helper(Path(__file__).resolve().parents[1] / "src" / "patch_messages.py")
     game_titles = messages.read_game_titles(args.source_romfs)

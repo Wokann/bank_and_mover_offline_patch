@@ -52,19 +52,19 @@ byte for byte. No native ticket-job or free-campaign function is reclaimed.
 | Payload area | Modules | Used end / remaining space |
 |---|---|---|
 | Text tail `0x0028D2E0–0x0028DFC0`: mapped executable padding | Startup trampoline and automatic-environment `code_expansion.o` | `0x0028D3C0` / `0xC00` bytes |
-| Added pages `0x00365000–0x00367000`: extended data, executable after startup | All mode wrappers, native trampolines, and feature objects | `0x00366ED6` / `0x12A` bytes |
+| Added pages `0x00365000–0x00368000`: extended data, executable after startup | All mode wrappers, native trampolines, and feature objects | `0x00367040` / `0xFC0` bytes |
 
 The startup hook redirects only the call at `0x00100010` to the small loader.
 It preserves `r0–r12/LR`, duplicates the current-process pseudo-handle with SVC
 `0x27`, queries SVC `0x2A` for the environment, and uses the real handle for
 SVC `0x70` (operation `6`, permission `7`) on
-the two added pages, closes the handle, restores registers, and continues the
+the three added pages, closes the handle, restores registers, and continues the
 native constructor walker at `0x00102ADC` in Thumb state. Hardware errors stop
 through SVC Break. Only the identified-Azahar compatibility case below may
 continue without a successful permission change.
 
 The matching ExHeader retains all original segment bases and text/rodata sizes.
-It extends data to `0x7B` pages, ending at `0x00367000`, sets BSS size to zero,
+It extends data to `0x7C` pages, ending at `0x00368000`, sets BSS size to zero,
 and grants only required SVC bits while preserving existing descriptors.
 Original BSS is explicit zero-filled image data at unchanged addresses;
 `0x00364000–0x00365000` is also a zero-filled RW separator, not an unmapped
@@ -77,11 +77,11 @@ the rest of the process are not globally made executable.
 
 ### Shared BPS loading and automatic environment handling
 
-The BPS source length is `0x22A000`, target length is `0x267000`, and metadata
+The BPS source length is `0x22A000`, target length is `0x268000`, and metadata
 length is zero. Luma allocates the target range from the expanded ExHeader before
 patching; unmodified Azahar's BPS implementation resizes its image to the target
 length before reconstructing it. Both obtain the same bytes and map data through
-`0x00367000`. The original BSS-clear bounds `0x003293FC–0x003638A4` remain intact.
+`0x00368000`. The original BSS-clear bounds `0x003293FC–0x003638A4` remain intact.
 See [Luma's BPS decoder](https://github.com/LumaTeam/Luma3DS/blob/master/sysmodules/loader/source/bps_patcher.cpp)
 and [Azahar's BPS resizing](https://github.com/azahar-emu/azahar/blob/9e6f523a57fac9564ac0bf8286db3c3702d301ec/src/core/file_sys/patch.cpp#L260-L280).
 
@@ -216,6 +216,42 @@ fields; they were not run during this investigation. Missing-SVC compatibility
 is limited to the tested Azahar behavior, not every Citra fork or a future emulator
 that strictly enforces instruction-fetch permissions. An implemented SVC should
 continue to use the normal success path.
+
+## Shared Bank language settings
+
+Two call-site hooks share the SD language settings in both modes:
+
+| Hook | Original operation | Replacement |
+|---|---|---|
+| `0x00240D7C` | Load cached language from game data `+0xD0` before constructing startup views | Read the language fields from an exact-size `sav.bin`, update cached language and kanji flag `+0xD4`, then return the selected ID in `r1` |
+| `0x0025C618` | `LanguageSelection_SetSettings` (`0x0022C06C`) after the native language-confirmation callback has rebound resources | Retain that setter, then update the existing SD record through `sav.tmp` |
+
+The startup wrapper preserves `r0`, `r2`, `r3` and the return address. Its native
+continuation still calls `0x0022AF28`, which selects both the message archive and
+font, and sets the controller's language-ready flag. Missing/unreadable files,
+wrong file lengths and IDs outside `1/2/3/4/5/7/8/9/10` leave the cached settings
+unchanged; the normal console-language/selection fallback remains reachable.
+The Japanese preference is normalized to boolean. The resource-binding function
+and the native setter remain intact.
+
+`language_settings.c/.h` describes the two 16-bit fields at `0x28` and `0x2A` in
+the serialized `0x200`-byte Bank record. Bank's original checksum validation
+(`0x002CB920`) covers only `0x00–0x1F`; its checksum update at `0x002BAF38` uses
+the same input. Both exclude language settings. The Mover update changes only
+`0x28–0x2B`, retaining `0x00–0x27` and `0x2C–0x1FF` exactly, without rebuilding
+transaction metadata or recalculating its checksum.
+
+Startup only reads. A confirmed selection retains the native in-memory setter,
+then reads the entire existing file; missing/wrong-size records are not created
+or replaced. Identical settings require no write. Updates use the existing
+`readCompleteFile`, `writeCompleteFile`, `openArchive`, `pathCommand`,
+`renamePath` and `closeArchive` helpers. The order is delete stale `sav.tmp`,
+write/flush/close the complete temporary record, delete `sav.bin`, then rename.
+Read/archive/delete-temporary/write failures cannot delete the original;
+delete-original failure cannot proceed to rename. A failed final rename leaves
+the complete temporary record for Bank's existing missing-file recovery.
+No original Bank archive is opened, and the Bankdata transaction hooks are
+unrelated to these language operations.
 
 ## Ticket state and local results
 

@@ -33,6 +33,15 @@
 .org MoverStartup_ConstructorCall
     bl CodeExpansion_Startup
 
+// Share Bank's SD language settings in both modes; native startup still binds
+// the corresponding archive/font, and confirmed selections update the SD file.
+// 两个模式共用 Bank 的 SD 语言设置；原版启动继续绑定对应资源与字库，确认
+// 语言选择后同步更新 SD 文件。
+.org MoverStartup_LanguageLoad
+    bl CombinePatch_LoadBankLanguage
+.org MoverLanguageSelection_SettingsCall
+    bl CombinePatch_SaveBankLanguage
+
 // Title mode selection. The displayed R uses the same private-use button glyph
 // as the Bank patch and is independent of the native input bit.
 // 标题模式选择。画面中的 R 使用与 Bank 补丁相同的专用区按键字形，并与原生
@@ -619,6 +628,17 @@ OfflinePatch_GetPokemonEntry:
 
 // Keep all remaining feature modules consecutive inside the added pages.
 // 其余功能模块在新增页内连续排列。
+CombinePatch_LoadBankLanguage:
+    push {r0,r2,r3,lr}
+    ldr r12,=LanguageSettings_Load + 1
+    blx r12
+    mov r1,r0
+    pop {r0,r2,r3,pc}
+CombinePatch_SaveBankLanguage:
+    ldr r12,=LanguageSettings_StoreSelection + 1
+    bx r12
+    .pool
+
 LocalTicket_PayloadBegin:
     .importobj BUILD_DIRECTORY + "/local_ticket.o"
 LocalTicket_PayloadEnd:
@@ -641,6 +661,9 @@ LocalValidation_PayloadEnd:
 NdsFs_PayloadBegin:
     .importobj BUILD_DIRECTORY + "/nds_fs.o"
 NdsFs_PayloadEnd:
+LanguageSettings_PayloadBegin:
+    .importobj BUILD_DIRECTORY + "/language_settings.o"
+LanguageSettings_PayloadEnd:
 CombinePatch_OfflinePayloadUsedEnd:
 .endarea
 

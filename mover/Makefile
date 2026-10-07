@@ -41,7 +41,8 @@ THUMB_CFLAGS := $(filter-out -marm,$(ARM_CFLAGS)) -mthumb -fno-jump-tables
 CFLAGS := $(ARM_CFLAGS)
 
 $(BUILD)/bankdata_redirect.o $(BUILD)/fs_helpers.o $(BUILD)/local_validation.o \
-$(BUILD)/offline_flow.o $(BUILD)/nds_fs.o $(BUILD)/nds_sources.o: CFLAGS := $(THUMB_CFLAGS)
+$(BUILD)/offline_flow.o $(BUILD)/nds_fs.o $(BUILD)/nds_sources.o \
+$(BUILD)/language_settings.o: CFLAGS := $(THUMB_CFLAGS)
 
 -include $(OBJECTS:.o=.d)
 
@@ -55,7 +56,7 @@ $(BUILD)/%.o: $(SRC)/%.c | $(BUILD)
 	"$(OBJDUMP)" -dr -z "$@" > "$(@:.o=.s)"
 
 $(PREPARED_BASE): FORCE $(BASE) $(EXHEADER) $(TOOLS)/prepare_expanded_code.py | $(BUILD)
-	"$(PYTHON)" -B -m tools.prepare_expanded_code prepare --base-code "$(BASE)" --base-exheader "$(EXHEADER)" --output-code "$@" --output-exheader "$(EXPANDED_EXHEADER)" --payload-start 0x00365000 --payload-size 0x2000
+	"$(PYTHON)" -B -m tools.prepare_expanded_code prepare --base-code "$(BASE)" --base-exheader "$(EXHEADER)" --output-code "$@" --output-exheader "$(EXPANDED_EXHEADER)" --payload-start 0x00365000 --payload-size 0x3000
 
 $(PATCHED): FORCE $(SRC)/main.s $(OBJECTS) $(ASSEMBLY_BASE) $(TOOLS)/verify_patch.py
 	cd "$(SRC)" && "$(ARMIPS)" -erroronwarning -stat -sym "../$(SYMBOLS)" -strequ INPUT_CODE "../$(ASSEMBLY_BASE)" -strequ OUTPUT_CODE "../$(PATCHED)" -strequ BUILD_DIRECTORY "../$(BUILD)" main.s

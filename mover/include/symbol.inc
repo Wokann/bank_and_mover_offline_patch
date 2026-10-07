@@ -18,7 +18,7 @@
 .definelabel BssActualEnd,                      0x003638A4
 .definelabel ReadWriteMappedEnd,                0x00364000
 .definelabel CodeExpansion_PayloadStart,        0x00365000
-.definelabel CodeExpansion_PayloadSize,         0x2000
+.definelabel CodeExpansion_PayloadSize,         0x3000
 .definelabel MoverStartup_ConstructorCall,       0x00100010
 .definelabel MoverStartup_RunConstructors,      0x00102ADC
 
@@ -62,6 +62,9 @@
 .definelabel MoverTitleState_Update,            0x00249F20
 .definelabel MoverTitleUi_Create,               0x0024B9E4
 .definelabel MoverTitleUi_HomeMessageCall,      0x0024BA84
+.definelabel MoverStartup_LanguageLoad,         0x00240D7C
+.definelabel MoverLanguageSelection_SettingsCall, 0x0025C618
+.definelabel LanguageSelection_SetSettings,     0x0022C06C
 .definelabel MoverDisconnectState_Update,       0x0024709C
 .definelabel MoverDisconnectState_Initialize,   0x00247234
 .definelabel MoverDisconnect_SkipRemoteJob,     0x00247290

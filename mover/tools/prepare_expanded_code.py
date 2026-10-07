@@ -46,7 +46,7 @@ DATA_ACTUAL_END = DATA_INFO[0] + DATA_INFO[2]
 BSS_ACTUAL_END = DATA_ACTUAL_END + BSS_SIZE
 OLD_RW_MAPPED_END = (BSS_ACTUAL_END + PAGE_SIZE - 1) & -PAGE_SIZE
 DEFAULT_PAYLOAD_START = 0x00365000
-DEFAULT_PAYLOAD_SIZE = 0x2000
+DEFAULT_PAYLOAD_SIZE = 0x3000
 KERNEL_CAPS_OFFSET = 0x370
 KERNEL_CAPS_COUNT = 28
 REQUIRED_SVCS = frozenset((0x23, 0x27, 0x2A, 0x3C, 0x70))
@@ -225,9 +225,9 @@ class PreparationTests(unittest.TestCase):
 
     def test_layout_and_exact_header_fields(self) -> None:
         code, header, added = self.prepare()
-        self.assertEqual(len(code), 0x267000)
+        self.assertEqual(len(code), 0x268000)
         self.assertEqual(code[:len(self.code)], self.code)
-        self.assertEqual(struct.unpack_from("<III", header, 0x34), (0x7B, 0x7B000, 0))
+        self.assertEqual(struct.unpack_from("<III", header, 0x34), (0x7C, 0x7C000, 0))
         self.assertEqual(header[:0x34], self.header[:0x34])
         self.assertEqual(header[0x400:], self.header[0x400:])
         self.assertEqual(added, REQUIRED_SVCS)
