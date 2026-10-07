@@ -52,7 +52,7 @@ byte for byte. No native ticket-job or free-campaign function is reclaimed.
 | Payload area | Modules | Used end / remaining space |
 |---|---|---|
 | Text tail `0x0028D2E0–0x0028DFC0`: mapped executable padding | Startup trampoline and automatic-environment `code_expansion.o` | `0x0028D3C0` / `0xC00` bytes |
-| Added pages `0x00365000–0x00368000`: extended data, executable after startup | All mode wrappers, native trampolines, and feature objects | `0x00367040` / `0xFC0` bytes |
+| Added pages `0x00365000–0x00368000`: extended data, executable after startup | All mode wrappers, native trampolines, and feature objects | `0x00367050` / `0xFB0` bytes |
 
 The startup hook redirects only the call at `0x00100010` to the small loader.
 It preserves `r0–r12/LR`, duplicates the current-process pseudo-handle with SVC

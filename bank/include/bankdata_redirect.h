@@ -149,6 +149,7 @@ typedef struct BankInitialRecordSharedView {
 /* Result of validating one local Bankdata candidate. */
 /* 单个本地 Bankdata 候选文件的校验结果。 */
 enum BankdataFileStatus {
+    BANKDATA_FILE_IO_ERROR = -2,
     BANKDATA_FILE_INVALID = -1,
     BANKDATA_FILE_MISSING = 0,
     BANKDATA_FILE_VALID = 1

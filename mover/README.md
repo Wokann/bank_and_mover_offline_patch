@@ -161,9 +161,9 @@ flow continues. If directory enumeration IPC fails after opening the directory,
 the current uncommitted scan is discarded and the native no-usable-software
 error route is used; the failure is not mistaken for a normal end of directory
 and no partial list is shown. Custom directory and save-validation phases still
-run the native loading-view update once per frame. Closing a file performs both
-the FSFILE service close and the kernel-handle close, preventing handle leaks
-while many candidates are scanned.
+run the native loading-view update once per frame. File and directory close
+still attempt kernel-handle release after a failed service-close request and
+return the first error, preventing handle leaks while scanning many candidates.
 
 Up to four logical Gen 5 sources are emitted first, after which the native flow
 continues appending VC sources. Because the stock array holds only 40 entries,

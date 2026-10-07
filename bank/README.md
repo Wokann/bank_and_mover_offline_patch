@@ -366,7 +366,7 @@ It is therefore kept only in the personal test branch and will not be submitted
 to Azahar's official main branch.
 
 Both paths remain in the same code. This definition changes only the policy
-byte at `[0x003FEBB8, 0x003FEBB9)`. State 15 retains its original entry and
+byte at `[0x003FECC8, 0x003FECC9)`. State 15 retains its original entry and
 state transitions. Only three calls are redirected: job initialization at
 `0x002B0444`, result polling at `0x002B0464`, and unbinding at `0x002B1994`.
 The initialization wrapper passes job, shared data, session mode and policy to
@@ -423,10 +423,12 @@ files:
 ```text
 Inspect bankdata.bin length and format header at offset 0x15C
         ├── valid ─────────────────────────────► existing-record mode
+        ├── I/O failure ────────────────────────► error; no initialization
         └── missing or invalid
                   │
                   ▼
              Inspect bankdata.bak
+                  ├── I/O failure ────────────► error; no initialization
                   ├── valid ─► read and validate all 0xBB518 bytes
                   │            copy to bankdata.bin; retain bak
                   │            create no .break file
@@ -445,12 +447,33 @@ files do not create placeholder `.break` files. If preservation copying fails
 four times, the invalid original remains untouched and first-use creation is
 still allowed to continue. If both files are absent, first use starts directly.
 
+Only a successful inspection with an incorrect length or format header marks a
+file invalid. Open, size-query, read, short-read and close failures are I/O
+errors, not reasons to preserve a damaged file or create a new Bank. File close
+always attempts both the FSFILE service close and kernel-handle release,
+returning the first error.
+
+Preservation copies are only for manually salvaging residual data when all
+normal copies are damaged. They are not automatic recovery inputs and do not
+participate in `.bin/.bak/.tmp` rotation or keep multiple generations. Copying
+writes directly to the matching `.break`, allowing replacement of an older copy,
+and checks byte counts, flushing and both close results. Failure cleans up only
+a destination actually opened by this copy; a source-open failure does not delete
+an untouched older `.break`. Copying does not modify normal rotation files.
+Preservation copies are not guaranteed to survive an interruption.
+
+Initial creation stages a complete `bankdata.tmp`, then uses the ordinary
+`.bin/.bak` rotation. Restoring a valid `.bak` instead reads and stages it before
+replacing the missing or invalid `.bin`, always retaining `.bak` without that
+rotation. Failed installation reports an error; startup can retry from the valid
+backup. This does not change `sav.bin` initialization or the `0x1C` policy.
+
 The stock first-use decision and messages remain in control. The patch skips
 only the remote record-ID substates, then lets the native empty-object
 initializer obtain the available console/account values, create 100 localized
 Bank Boxes, and set the real creation date. The remote creation call is
-replaced by a checked direct write of the complete new `bankdata.bin`; a failed
-first write removes its partial output.
+replaced by complete staging and protected installation. Staging failure leaves
+the old `bankdata.bin` intact, and restoration retains the valid `bankdata.bak`.
 
 The runtime offline entitlement expires at the console time plus 999 days.
 That value is separate from mileage time. Existing identity fields and the

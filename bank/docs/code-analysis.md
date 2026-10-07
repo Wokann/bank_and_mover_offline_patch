@@ -615,7 +615,7 @@ without changing the mileage reference or relying on fixed server campaign dates
 Native exit cleanup copies the resulting entitlement and date.
 Local unbinding does not access a nonexistent network client; native
 destruction still runs. No system eShop applet or loading-animation simulation
-is used. Both paths remain present, and only the policy byte at `0x003FEBB8`
+is used. Both paths remain present, and only the policy byte at `0x003FECC8`
 changes between builds. Initialization records this job's backend at `0x003FAFF4`;
 polling and cleanup keep that selection. The policy does not alter other networking,
 transaction recovery, mileage calculations, or post-download exit branches.

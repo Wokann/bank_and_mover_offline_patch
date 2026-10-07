@@ -41,6 +41,7 @@ typedef s32 (*FSFILE_GetSizeFn)(u32 *,u64 *);
 volatile u32 *fsCommandBuffer(void);
 s32 fsSync(u32 handle);
 s32 fsCloseHandle(u32 handle);
+s32 closeFile(u32 handle);
 
 s32 openArchive(u64 *archive);
 void closeArchive(u64 archive);

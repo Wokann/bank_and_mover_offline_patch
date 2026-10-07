@@ -48,12 +48,13 @@ s32 readDirectoryEntry(u32 handle,FsDirectoryEntry *entry,u32 *entriesRead)
 s32 closeDirectory(u32 handle)
 {
     volatile u32 *c=fsCommandBuffer();
-    s32 result;
+    s32 result,closeResult;
+    if (!handle) return 0;
     c[0]=FSDIR_CMD_CLOSE;
     result=fsSync(handle);
     if (!result) result=(s32)c[1];
-    if (result) return result;
-    return fsCloseHandle(handle);
+    closeResult=fsCloseHandle(handle);
+    return result?result:closeResult;
 }
 
 s32 readFileRangeUtf16(const u16 *path,u32 pathSize,u64 offset,void *data,u32 dataSize)

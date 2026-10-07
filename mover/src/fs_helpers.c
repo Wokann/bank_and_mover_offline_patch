@@ -27,11 +27,11 @@ s32 fsCloseHandle(u32 handle)
 s32 closeFile(u32 handle)
 {
     u32 localHandle=handle;
-    s32 result;
+    s32 result,closeResult;
     if (!handle) return 0;
     result=FSFILE_Close(&localHandle);
-    if (result) return result;
-    return fsCloseHandle(handle);
+    closeResult=fsCloseHandle(handle);
+    return result?result:closeResult;
 }
 
 s32 openArchive(u64 *archive)

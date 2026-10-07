@@ -25,6 +25,16 @@ s32 fsCloseHandle(u32 handle)
     return (s32)r0;
 }
 
+s32 closeFile(u32 handle)
+{
+    u32 localHandle=handle;
+    s32 result,closeResult;
+    if (!handle) return 0;
+    result=FSFILE_Close(&localHandle);
+    closeResult=fsCloseHandle(handle);
+    return result?result:closeResult;
+}
+
 s32 openArchive(u64 *archive)
 {
     volatile u32 *c = fsCommandBuffer();
@@ -126,7 +136,7 @@ s32 getFileSize(const char *path,u32 pathSize,u64 *size)
     s32 result=openFile(path,pathSize,OPEN_READ,&handle);
     s32 closeResult=0;
     if (!result) result=FSFILE_GetSize(&handle,size);
-    if (handle) closeResult=FSFILE_Close(&handle);
+    if (handle) closeResult=closeFile(handle);
     return result?result:closeResult;
 }
 
@@ -142,7 +152,7 @@ s32 readCompleteFile(const char *path,u32 pathSize,u32 expectedFileSize,u64 offs
     if (!result && fileSize!=expectedFileSize) result=-1;
     if (!result) result=FSFILE_Read(&handle,&bytesRead,offset,data,dataSize);
     if (!result && bytesRead!=dataSize) result=-1;
-    if (handle) closeResult=FSFILE_Close(&handle);
+    if (handle) closeResult=closeFile(handle);
     return result?result:closeResult;
 }
 
@@ -154,6 +164,6 @@ int writeCompleteFile(const char *path,u32 pathSize,const void *data,u32 dataSiz
     result=openFile(path,pathSize,OPEN_READ|OPEN_WRITE|OPEN_CREATE,&handle);
     if (!result) result=setSize(handle,fileSize);
     if (!result) result=FSFILE_Write(&handle,&bytesWritten,0,data,dataSize,WRITE_FLUSH);
-    if (handle) closeResult=FSFILE_Close(&handle);
+    if (handle) closeResult=closeFile(handle);
     return !result && !closeResult && bytesWritten==dataSize;
 }
