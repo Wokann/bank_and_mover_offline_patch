@@ -513,7 +513,7 @@ the middle, states 18 and 17 resolve the persisted state on a later use.
 | state 12/13 | Local mileage plus online gifts | Skipped after download | Keep local mileage; skip only online-gift lookup | Not normally entered |
 | state 25 | Normal Bank Box | Not entered after capture | Stock Bank Box | Not normally entered |
 | state 7 | Remote stage, game save, commit/rollback | Normally not reached; stock if reached | Local file stage, commit, and rollback | Stock |
-| state 19/20 | Remote release and disconnect | Disconnect in state 20 after state 29 completes release | Local cleanup and title return | Stock |
+| state 19/20 | Remote release and disconnect | Disconnect in state 20 after state 29 completes release | State 19 completes locally; keep native prompt/timed finalizer, then state 20 cleanup and title return | Stock |
 
 Download Mode retains real networking, first-use creation, and native ticket
 and online-gift checks. It uses the stock HOME complete-file downloader without
@@ -615,7 +615,7 @@ without changing the mileage reference or relying on fixed server campaign dates
 Native exit cleanup copies the resulting entitlement and date.
 Local unbinding does not access a nonexistent network client; native
 destruction still runs. No system eShop applet or loading-animation simulation
-is used. Both paths remain present, and only the policy byte at `0x003FEB68`
+is used. Both paths remain present, and only the policy byte at `0x003FEBB8`
 changes between builds. Initialization records this job's backend at `0x003FAFF4`;
 polling and cleanup keep that selection. The policy does not alter other networking,
 transaction recovery, mileage calculations, or post-download exit branches.
@@ -689,6 +689,28 @@ does not set a success result early. The byte is not serialized into Turtle or
 Bankdata. Cancellation, empty candidates, official rollback failures and other
 network errors retain native results; the other three modes do not use these
 Unlock-only branches.
+
+#### Offline exit before the Bank Box
+
+Declining to continue at the state-12 full-gift warning returns result `21`;
+state 13 can also terminate with result `21`. Both retain the native transition
+to state 19. Its Offline update reports completion without allocating or binding
+a remote job, sending rollback, or waiting for a server callback. The native
+initializer still prepares the prompt and timer; the finalizer retains its
+1,500-ms wait and existing null-job cleanup before state 20 returns to title.
+Download, Unlock and Original resume the complete native state-19 update.
+
+This exit does not fabricate a transaction descriptor or change Turtle fields,
+and does not stage, commit or roll back local Bankdata files. Local save-failure
+rollback belongs to state 7, not this pre-Box exit. The existing Offline
+state-25 no-save exit continues directly to state 20.
+
+离线在 state 12 的礼物已满提示中选择不继续使用，或 state 13 返回终止结果 `21`，
+仍按原版转换进入 state 19。仅替换其离线更新：不创建或绑定远端作业、不发送回滚
+请求，直接报告阶段完成；保留原版提示、计时初始化以及 1,500 毫秒收尾等待，随后
+进入 state 20 清理并返回标题。下载、解锁、原版模式继续完整原版函数。这里不伪造
+事务描述、不改 Turtle 字段，也不操作本地银行文件；保存失败的本地回滚仍由 state 7
+负责。现有离线 state 25 的不保存退出仍直接进入 state 20。
 
 #### Offline save transaction
 

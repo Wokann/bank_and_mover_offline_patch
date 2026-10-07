@@ -402,6 +402,9 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
         "combinepatch_disconnectupdate",
         "combinepatch_disconnectskipremotejob",
         "combinepatch_disconnectskipremotejobofficial",
+        "combinepatch_nosaverollbackupdate",
+        "combinepatch_nosaverollbackupdateofficial",
+        "banknosaverollbackstate_update",
         "combinepatch_bankcreatestate0",
         "combinepatch_bankcreatestate0official",
         "combinepatch_bankcreateaftermessages",
@@ -444,6 +447,7 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
         "offlinepatch_networkupdate",
         "offlinepatch_postselectionconnectionupdate",
         "offlinepatch_disconnectupdate",
+        "offlinepatch_nosaverollbackupdate",
         "offlinepatch_initialremoterecordupdate",
         "localticket_initialize",
         "localticket_poll",
@@ -546,6 +550,32 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
     expect_word(image, slot_date + 24, symbols["combinepatch_modestorage"],
                 "slot-date session-mode pointer")
 
+    # State 19 keeps its native body, initializer, callbacks and timed finalizer.
+    # Only the update prologue dispatches Offline to a local completion result.
+    # state 19 保留原版函数体、初始化、回调和计时收尾，仅在更新入口分流离线完成结果。
+    rollback_state = symbols["banknosaverollbackstate_update"]
+    first, last = image_offset(rollback_state + 4), image_offset(0x002AED78)
+    body = bytearray(image[first:last])
+    message_call = 0x002AED3C
+    position = image_offset(message_call) - first
+    body[position:position + 4] = base_image[
+        image_offset(message_call):image_offset(message_call) + 4]
+    if body != base_image[first:last]:
+        raise ValueError("native no-save rollback lifecycle changed outside its hooks")
+    rollback_dispatch = symbols["combinepatch_nosaverollbackupdate"]
+    expect_word(image, rollback_dispatch, 0xE59FC010, "rollback mode-pointer load")
+    expect_word(image, rollback_dispatch + 4, 0xE5DCC000, "rollback session-mode load")
+    expect_word(image, rollback_dispatch + 8, 0xE35C0000, "rollback Offline-only test")
+    expect_branch(image, rollback_dispatch + 12,
+                  symbols["offlinepatch_nosaverollbackupdate"], False, ARM_COND_EQ,
+                  "offline no-save rollback completion")
+    expect_word(image, rollback_dispatch + 16, read_word(base_image, rollback_state),
+                "native rollback prologue replay")
+    expect_branch(image, rollback_dispatch + 20, rollback_state + 4,
+                  False, ARM_COND_AL, "native rollback body resume")
+    expect_word(image, rollback_dispatch + 24, symbols["combinepatch_modestorage"],
+                "rollback session-mode pointer")
+
     # Keep the marker at a stable address and reserve the complete zero-padded
     # block for future compatibility metadata.
     # 将标识固定在稳定地址，并为未来兼容性元数据保留完整的零填充区域。
@@ -608,6 +638,8 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
         raise ValueError("imported local-file payload objects are not contiguous or ordered")
 
     business_wrapper_symbols = (
+        "combinepatch_nosaverollbackupdate",
+        "combinepatch_nosaverollbackupdateofficial",
         "combinepatch_selectbankslotdate",
         "combinepatch_networkavailability",
         "combinepatch_titlemodetextinitialize",
@@ -706,6 +738,7 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
             raise ValueError(f"{name} is outside the added executable pages")
 
     for name in (
+        "offlinepatch_nosaverollbackupdate",
         "offlinepatch_networkupdate",
         "offlinepatch_postselectionconnectionupdate",
         "offlinepatch_disconnectupdate",
@@ -779,6 +812,7 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
         (0x002AED3C, "combinepatch_selectpostselectionconnectionmessage", True, ARM_COND_AL, "first-use connection message"),
         (0x002AF1D0, "combinepatch_selectpostselectionconnectionmessage", True, ARM_COND_AL, "network preparation message"),
         (0x002ABC24, "combinepatch_disconnectupdate", False, ARM_COND_AL, "disconnect"),
+        (0x002AEB9C, "combinepatch_nosaverollbackupdate", False, ARM_COND_AL, "mode-specific no-save remote rollback"),
         (0x002ABD94, "combinepatch_disconnectskipremotejob", False, ARM_COND_AL, "disconnect remote-job bypass"),
         (0x002AE5C0, "combinepatch_bankcreatestate0", False, ARM_COND_AL, "first-use setup"),
         (0x002AE74C, "combinepatch_bankcreateaftermessages", False, ARM_COND_AL, "first-use messages"),

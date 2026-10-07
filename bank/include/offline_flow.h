@@ -20,6 +20,7 @@ typedef void (*StateTimer_ResetFn)(void *);
 
 int OfflinePatch_NetworkUpdate(BankStateView *state);
 int OfflinePatch_PostSelectionConnectionUpdate(BankStateView *state);
+int OfflinePatch_NoSaveRollbackUpdate(BankStateView *state);
 int OfflinePatch_DisconnectUpdate(BankStateView *state);
 int OfflinePatch_SaveDisplayDelayUpdate(BankStateView *state);
 

@@ -1,7 +1,7 @@
 #include "offline_flow.h"
 
-/* Local replacements for connection and save-display state updates. */
-/* 连接与保存提示状态的本地替代实现。 */
+/* Local replacements for connection, exit and save-display state updates. */
+/* 连接、退出与保存提示状态的本地替代实现。 */
 __attribute__((noinline))
 static int updateNetworkFlag(BankStateView *state,u8 connected)
 {
@@ -44,6 +44,17 @@ int OfflinePatch_PostSelectionConnectionUpdate(BankStateView *state)
     /* Report completion through the stock state transition. Its native exit
        path owns the wait UI, animation and sound cleanup. */
     /* 通过原版状态转换报告完成；等待界面、动画及声音均由其原生退出路径负责清理。 */
+    state->phase=BANK_STATE_PHASE_COMPLETE;
+    return BANK_STATE_UPDATE_FINISHED;
+}
+
+__attribute__((used,noinline,section(".text.offline")))
+int OfflinePatch_NoSaveRollbackUpdate(BankStateView *state)
+{
+    /* Offline has no remote transaction to release. Keep the native initializer
+       and timed finalizer, and complete without creating a remote job. */
+    /* 离线没有需要释放的远端事务。保留原版初始化和计时收尾，不创建远端作业，
+       直接报告本阶段正常完成。 */
     state->phase=BANK_STATE_PHASE_COMPLETE;
     return BANK_STATE_UPDATE_FINISHED;
 }

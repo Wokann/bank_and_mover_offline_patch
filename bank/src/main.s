@@ -145,6 +145,8 @@
 
 .org DisconnectCleanupState_Update
     b CombinePatch_DisconnectUpdate
+.org BankNoSaveRollbackState_Update
+    b CombinePatch_NoSaveRollbackUpdate
 .org DisconnectCleanup_SkipRemoteJob
     b CombinePatch_DisconnectSkipRemoteJob
     nop
@@ -1161,6 +1163,19 @@ CombinePatch_ForceRollbackSuccess:
     moveq r3,#1
     streqb r3,[r12,#CombinePatch_UnlockRecoveryOffset]
     b BankFlow_ForceRollbackSuccess + 0x18
+    .pool
+
+// Offline exit keeps the stock prompt, timer and finalizer without creating or
+// binding a remote rollback job. Every native mode resumes the original body.
+// 离线退出保留原版提示、计时与收尾，不创建或绑定远端回滚作业；其他模式继续原函数。
+CombinePatch_NoSaveRollbackUpdate:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeOffline
+    beq OfflinePatch_NoSaveRollbackUpdate
+CombinePatch_NoSaveRollbackUpdateOfficial:
+    push {r4-r6,lr}
+    b BankNoSaveRollbackState_Update + 4
     .pool
 
 CombinePatch_DisconnectUpdate:

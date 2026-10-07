@@ -366,7 +366,7 @@ It is therefore kept only in the personal test branch and will not be submitted
 to Azahar's official main branch.
 
 Both paths remain in the same code. This definition changes only the policy
-byte at `[0x003FEB68, 0x003FEB69)`. State 15 retains its original entry and
+byte at `[0x003FEBB8, 0x003FEBB9)`. State 15 retains its original entry and
 state transitions. Only three calls are redirected: job initialization at
 `0x002B0444`, result polling at `0x002B0464`, and unbinding at `0x002B1994`.
 The initialization wrapper passes job, shared data, session mode and policy to
@@ -496,6 +496,13 @@ The wait screen, spinner, and rhythmic sound remain owned by the original
 state initializer, update, and exit path. The combined patch reports local
 completion through the original state object instead of introducing a second
 UI/sound owner; native state exit performs the cleanup before the Box flow.
+
+Declining to continue at the full-gift warning, or terminating the reward flow
+with result `21`, keeps the native transition to state 19. Offline completes
+this state without creating a remote rollback job; its stock prompt, timer and
+1,500-ms finalizer remain intact before state 20 cleans up and returns to title.
+This exit does not change Turtle transaction fields or rotate Bankdata files.
+The other three modes retain the complete native remote rollback flow.
 
 ## Offline save, commit, and rollback
 
@@ -648,6 +655,7 @@ bytes, while runtime mapping grows by only four pages, `0x4000` (16 KiB).
 | `0x002A5860`, `0x002A588C`, 4 bytes each | Native state-18 result test and state-23 success branch | Unlock Mode reconstructs state 10 after confirmed mismatch and latches successful official forced rollback; native controller, construction and cleanup remain intact. |
 | `0x002B0444`, `0x002B0464`, `0x002B1994`, 4 bytes each | State 15 job initialization, polling and unbinding | Call added-page wrappers; all other state-15 bytes and native jobs stay intact. |
 | `0x001D887C`, `0x001D96E4`, `0x002B9DC4`, 4 bytes each | Date calls in Bank-slot writes, clears and group moves | Offline uses the current console date; other modes retain the native network-clock query. Slot-operation bodies are not reclaimed. |
+| `0x002AEB9C`, 4 bytes | Native state 19 no-save remote rollback update prologue | Offline reports local completion without a remote job; other modes replay the native push and resume the original body. Initialization, callbacks and timed finalization are not reclaimed. |
 | `0x002B1B98`, `0x002B1BDC`, 4 bytes each | Title-exit UI-root load and completion return | Wait for native shared-prompt release before native title destruction, then reload the selected record and language; cleanup bodies remain intact. |
 | `[0x00313910, 0x00313A40)` | Original last text-page padding | `0x130` bytes reserved for Luma LayeredFS; untouched. |
 | `[0x00313A40, 0x00313B1C)` | Original last text-page padding | Startup assembly and `code_expansion.o`, `0xDC` bytes. |
@@ -663,22 +671,22 @@ eShop entries without consuming their function bodies. Original Mode restores
 their native routes. Title, feature, language and Turtle hooks select the
 appropriate behavior without replacing the native storage implementation.
 
-Added-page placements total `0x2B94` (11156 bytes), leaving `0x46C` (1132 bytes):
+Added-page placements total `0x2BBC` (11196 bytes), leaving `0x444` (1092 bytes):
 
 | Content | Actual range | Size |
 | --- | --- | --- |
 | Text, save and language assembly wrappers | `[0x003FC000, 0x003FC414)` | `0x414` |
 | `patch_paths.o` | `[0x003FC414, 0x003FC4C7)` | `0xB3`, then one alignment byte |
-| Mode, title, connection, unlock and slot-date branch wrappers | `[0x003FC4C8, 0x003FCEA0)` | `0x9D8` |
-| `turtle_redirect.o` | `[0x003FCEA0, 0x003FD3E4)` | `0x544` |
-| `fs_helpers.o` | `[0x003FD3E4, 0x003FD9B4)` | `0x5D0` |
-| `bankdata_redirect.o` | `[0x003FD9B4, 0x003FE08C)` | `0x6D8` |
-| `offline_flow.o` | `[0x003FE08C, 0x003FE1AC)` | `0x120` |
-| `local_mileage.o` | `[0x003FE1AC, 0x003FE5D8)` | `0x42C` |
-| `local_ticket.o` | `[0x003FE5D8, 0x003FE97C)` | `0x3A4` |
-| `unlock_mode.o` | `[0x003FE97C, 0x003FEB38)` | `0x1BC` |
-| Ticket assembly wrappers, literal pool and policy byte | `[0x003FEB38, 0x003FEB94)` | `0x5C` |
-| Unused added-page space | `[0x003FEB94, 0x003FF000)` | `0x46C` |
+| Mode, title, connection, unlock, exit and slot-date branch wrappers | `[0x003FC4C8, 0x003FCEBC)` | `0x9F4` |
+| `turtle_redirect.o` | `[0x003FCEBC, 0x003FD400)` | `0x544` |
+| `fs_helpers.o` | `[0x003FD400, 0x003FD9D0)` | `0x5D0` |
+| `bankdata_redirect.o` | `[0x003FD9D0, 0x003FE0A8)` | `0x6D8` |
+| `offline_flow.o` | `[0x003FE0A8, 0x003FE1D8)` | `0x130` |
+| `local_mileage.o` | `[0x003FE1D8, 0x003FE600)` | `0x428` |
+| `local_ticket.o` | `[0x003FE600, 0x003FE9A4)` | `0x3A4` |
+| `unlock_mode.o` | `[0x003FE9A4, 0x003FEB60)` | `0x1BC` |
+| Ticket assembly wrappers, literal pool and policy byte | `[0x003FEB60, 0x003FEBBC)` | `0x5C` |
+| Unused added-page space | `[0x003FEBBC, 0x003FF000)` | `0x444` |
 
 Native text's actual size stays fixed, preserving Luma LayeredFS placement.
 Its path still uses the rodata tail at `[0x00369370, 0x00369397)`, which this
