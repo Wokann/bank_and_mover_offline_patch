@@ -124,7 +124,8 @@ create `.bak` or `.break` files.
 
 Before mode selection, common startup/title handling uses the SD backend as
 before, including read-only migration from a valid stock record if needed.
-After the title view is destroyed, the chosen backend is checked and reloaded:
+After the native asynchronous release of the shared prompt view and destruction
+of the title view, the chosen backend is checked and reloaded:
 
 | Selected mode | Record for subsequent checks, loads, formatting and saves |
 | --- | --- |
@@ -132,8 +133,10 @@ After the title view is destroyed, the chosen backend is checked and reloaded:
 | Download / Unlock / Original | Stock logical `data:/turtle`; native archive, commit and transaction handling |
 
 Reloading clears the previous record's loaded flag and pending language.
-A valid record supplies its own language and Kanji setting; missing/invalid
-records enter native language selection, then resume game checking and its
+A valid record supplies its own language and Kanji setting. Subsequent native
+states recreate the prompt/menu view using the same language archive and font,
+so different SD/native save languages do not reuse the previous view's resources.
+Missing/invalid records enter native language selection, then resume game checking and its
 initialization chain in the selected mode. The SD record is never imported
 into the stock save. Returning to the title reloads the SD preview before
 creating its UI. Native-mode saves are not mirrored to `sav.bin`; save failures
@@ -270,7 +273,7 @@ It is therefore kept only in the personal test branch and will not be submitted
 to Azahar's official main branch.
 
 Both paths remain in the same code. This definition changes only the policy
-byte at `[0x003FE810, 0x003FE811)`. State 15 retains its original entry and
+byte at `[0x003FE828, 0x003FE829)`. State 15 retains its original entry and
 state transitions. Only three calls are redirected: job initialization at
 `0x002B0444`, result polling at `0x002B0464`, and unbinding at `0x002B1994`.
 The initialization wrapper passes job, shared data, session mode and policy to
@@ -543,6 +546,7 @@ bytes, while runtime mapping grows by only four pages, `0x4000` (16 KiB).
 | `[0x002A7BF0, 0x002A8404)` | Native state 27 HOME flow and companions | Original bytes preserved throughout; not reclaimed. |
 | `[0x002A8404, 0x002A8760)` | Native state 14 eShop flow and companions | Original bytes preserved; subsequent transaction recovery is intact. |
 | `0x002B0444`, `0x002B0464`, `0x002B1994`, 4 bytes each | State 15 job initialization, polling and unbinding | Call added-page wrappers; all other state-15 bytes and native jobs stay intact. |
+| `0x002B1B98`, `0x002B1BDC`, 4 bytes each | Title-exit UI-root load and completion return | Wait for native shared-prompt release before native title destruction, then reload the selected record and language; cleanup bodies remain intact. |
 | `[0x00313910, 0x00313A40)` | Original last text-page padding | `0x130` bytes reserved for Luma LayeredFS; untouched. |
 | `[0x00313A40, 0x00313B1C)` | Original last text-page padding | Startup assembly and `code_expansion.o`, `0xDC` bytes. |
 | `[0x00313B1C, 0x00313FC0)` | Original last text-page padding | Unused executable padding, `0x4A4` bytes. |
@@ -557,22 +561,22 @@ eShop entries without consuming their function bodies. Original Mode restores
 their native routes. Title, feature, language and Turtle hooks select the
 appropriate behavior without replacing the native storage implementation.
 
-Added-page placements total `0x2814` (10260 bytes), leaving `0x7EC` (2028 bytes):
+Added-page placements total `0x282C` (10284 bytes), leaving `0x7D4` (2004 bytes):
 
 | Content | Actual range | Size |
 | --- | --- | --- |
 | Text, save and language assembly wrappers | `[0x003FC000, 0x003FC418)` | `0x418` |
 | `patch_paths.o` | `[0x003FC418, 0x003FC4CB)` | `0xB3`, then one alignment byte |
-| Mode, title and connection wrappers | `[0x003FC4CC, 0x003FCDA4)` | `0x8D8` |
-| `turtle_redirect.o` | `[0x003FCDA4, 0x003FD2E8)` | `0x544` |
-| `fs_helpers.o` | `[0x003FD2E8, 0x003FD8B8)` | `0x5D0` |
-| `bankdata_redirect.o` | `[0x003FD8B8, 0x003FDF14)` | `0x65C` |
-| `offline_flow.o` | `[0x003FDF14, 0x003FE034)` | `0x120` |
-| `local_mileage.o` | `[0x003FE034, 0x003FE458)` | `0x424` |
-| `local_ticket.o` | `[0x003FE458, 0x003FE768)` | `0x310` |
-| `unlock_mode.o` | `[0x003FE768, 0x003FE7B8)` | `0x50` |
-| Ticket assembly wrappers, literal pool and policy byte | `[0x003FE7B8, 0x003FE814)` | `0x5C` |
-| Unused added-page space | `[0x003FE814, 0x003FF000)` | `0x7EC` |
+| Mode, title and connection wrappers | `[0x003FC4CC, 0x003FCDBC)` | `0x8F0` |
+| `turtle_redirect.o` | `[0x003FCDBC, 0x003FD300)` | `0x544` |
+| `fs_helpers.o` | `[0x003FD300, 0x003FD8D0)` | `0x5D0` |
+| `bankdata_redirect.o` | `[0x003FD8D0, 0x003FDF2C)` | `0x65C` |
+| `offline_flow.o` | `[0x003FDF2C, 0x003FE04C)` | `0x120` |
+| `local_mileage.o` | `[0x003FE04C, 0x003FE470)` | `0x424` |
+| `local_ticket.o` | `[0x003FE470, 0x003FE780)` | `0x310` |
+| `unlock_mode.o` | `[0x003FE780, 0x003FE7D0)` | `0x50` |
+| Ticket assembly wrappers, literal pool and policy byte | `[0x003FE7D0, 0x003FE82C)` | `0x5C` |
+| Unused added-page space | `[0x003FE82C, 0x003FF000)` | `0x7D4` |
 
 Native text's actual size stays fixed, preserving Luma LayeredFS placement.
 Its path still uses the rodata tail at `[0x00369370, 0x00369397)`, which this

@@ -5,11 +5,11 @@
 /* Redirect the logical Turtle record to the raw SD file used by offline mode. */
 /* 将 Turtle 逻辑记录重定向到离线模式使用的 SD 原始文件。 */
 
-/* Rebind after the title view has been destroyed. The selected storage supplies
+/* Rebind after the title and shared prompt views have been released. The selected storage supplies
    the whole record, including its language and transaction fields. A missing
    language returns to native language selection and subsequent initialization; no SD record
    is copied into native storage. */
-/* 在标题视图销毁后重新绑定。所选存储提供完整记录，包括语言及事务字段。缺少语言
+/* 在标题及公共提示视图清理后重新绑定。所选存储提供完整记录，包括语言及事务字段。缺少语言
    时返回原版语言选择及后续初始化链；不会把 SD 记录复制进原存档。 */
 __attribute__((used,noinline))
 int TurtleRedirect_PrepareSession(TurtleGameDataView *gameData,void *heap,u32 mode)

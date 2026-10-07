@@ -609,6 +609,7 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
         raise ValueError("Turtle redirect payload exceeds the added executable pages")
 
     metadata_wrapper_symbols = (
+        "combinepatch_titlereleasewaitingview",
         "combinepatch_redirecthometolanguage",
         "combinepatch_showmodegreeting",
         "combinepatch_selectgameselectionmessage",
@@ -685,6 +686,7 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
         (0x002B1AD0, "combinepatch_titlescreenupdate", False, ARM_COND_AL, "title input and session latch"),
         (0x002B4974, "combinepatch_titlemodetextinitialize", True, ARM_COND_AL, "title mode text"),
         (0x002B1C2C, "combinepatch_titlepreview", False, ARM_COND_AL, "title SD preview"),
+        (0x002B1B98, "combinepatch_titlereleasewaitingview", False, ARM_COND_AL, "release cached prompt UI before language reload"),
         (0x002B1BDC, "combinepatch_titlebindsession", False, ARM_COND_AL, "session record reload after title teardown"),
         (0x002A5680, "combinepatch_titleresult", False, ARM_COND_EQ, "selected backend language check"),
         (0x002A5648, "combinepatch_titleorresume", False, ARM_COND_AL, "resume selected mode after first language save"),
@@ -786,6 +788,23 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
                       f"Turtle {operation} offline route")
         expect_branch(image, wrapper + 16, symbols[native_target], False, ARM_COND_AL,
                       f"Turtle {operation} native route")
+    release = symbols["combinepatch_titlereleasewaitingview"]
+    expect_word(base_image, 0x002B1B98, 0xE595402C, "native title exit UI root load")
+    expect_word(image, release, 0xE595402C, "title exit UI root load")
+    expect_word(image, release + 4, 0xE1A00004, "cached prompt release argument")
+    expect_branch(image, release + 8, symbols["bankui_releasewaitingview"],
+                  True, ARM_COND_AL, "native asynchronous prompt release")
+    expect_word(image, release + 12, 0xE3500000, "wait for cached prompt release")
+    expect_branch(image, release + 16, 0x002B1BE4, False, ARM_COND_EQ,
+                  "pending release keeps title view alive")
+    expect_branch(image, release + 20, 0x002B1B9C, False, ARM_COND_AL,
+                  "released prompt resumes native title destruction")
+    for begin, end, name in (
+        (0x001D6A34, 0x001D6AAC, "native prompt release lifecycle"),
+        (0x002B1B5C, 0x002B1B98, "native title exit animation wait"),
+        (0x002B1B9C, 0x002B1BDC, "native title view destruction"),
+    ):
+        expect_bytes(image, begin, base_image[image_offset(begin):image_offset(end)], name)
     for address in (0x002B1BD8, 0x002B1BE0, 0x002B1BF0, 0x002B1C28):
         expect_word(image, address, read_word(base_image, address), "stock title lifecycle")
     expect_word(base_image, 0x002AC958, 0xE5945040, "native no-game choice view")

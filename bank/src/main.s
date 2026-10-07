@@ -103,6 +103,8 @@
     bl CombinePatch_TitleModeTextInitialize
 .org TitleScreenState_Initialize + 0x3C
     b CombinePatch_TitlePreview
+.org TitleScreenState_ExitUiCleanup
+    b CombinePatch_TitleReleaseWaitingView
 .org TitleScreenState_ExitComplete
     b CombinePatch_TitleBindSession
 .org BankFlow_SelectNextState + 0x100
@@ -772,6 +774,19 @@ CombinePatch_TitlePreview:
 // continues to game checking without choosing the mode for a second time.
 // 仅在标题销毁后切换记录与语言资源。新后端走原版语言选择及后续初始化状态，之后继续
 // 检查游戏，不要求重新选择模式。
+// The shared prompt view holds the language archive and font from startup.
+// Finish its native asynchronous release while the title view is still alive;
+// subsequent states recreate it after the selected record's language is applied.
+// 公共提示视图保留启动时的文本包及字体。在标题视图仍有效时等待原版异步清理完成，
+// 后续状态会在应用所选记录的语言后重新创建它。
+CombinePatch_TitleReleaseWaitingView:
+    ldr r4,[r5,#0x2C]
+    mov r0,r4
+    bl BankUi_ReleaseWaitingView
+    cmp r0,#0
+    beq TitleScreenState_ExitComplete + 8
+    b TitleScreenState_ExitUiCleanup + 4
+
 CombinePatch_TitleBindSession:
     ldr r0,[r5,#8]
     ldr r1,[r5,#0x0C]

@@ -161,7 +161,9 @@
 ; 标题更新会显示两层标题 UI，并通过 state+0x3C 的字节报告标题退出。
 .definelabel TitleScreenState_Update,           0x002B1AD0
 .definelabel TitleScreenState_Initialize,       0x002B1BF0
+.definelabel TitleScreenState_ExitUiCleanup,    0x002B1B98
 .definelabel TitleScreenState_ExitComplete,     0x002B1BDC
+.definelabel BankUi_ReleaseWaitingView,         0x001D6A34
 ; This initializer binds BMG line 78 to pane 0x24 through Ui_SetMessageLine.
 ; 此初始化器通过 Ui_SetMessageLine 将 BMG 第 78 行绑定到文字框 0x24。
 .definelabel TitleScreenUi_Create,              0x002B48D4

@@ -247,9 +247,11 @@ It does not capture or load local Bankdata. Tickets share Download/Unlock's
 public/test policy: `0` requires native results; `1` permits local results only
 for the confirmed missing Azahar interface. The title mode hint is still shown.
 
-Common startup/title handling uses the SD preview. Once the title view has
-been destroyed, the selected record is checked and reloaded, clearing its
-predecessor's loaded flag and pending language. Missing or invalid records go
+Common startup/title handling uses the SD preview. After title exit animations,
+the native shared-prompt view is released asynchronously before title destruction.
+The selected record is then checked and reloaded, clearing its predecessor's
+loaded flag and pending language. After applying its language and font, subsequent
+states recreate the prompt/menu view with the matching archive. Missing or invalid records go
 through language selection (state 1), disconnect cleanup (state 21), and game
 checking (state 3), whose native chain initializes the selected backend.
 Download/Unlock's added language-menu operation saves its choice to the stock
@@ -274,7 +276,7 @@ console time and an expiry 999 days later. Purchase counts stay
 provided. Native getters and exit cleanup copy the resulting entitlement and
 date. Local unbinding does not access a nonexistent network client; native
 destruction still runs. No system eShop applet or loading-animation simulation
-is used. Both paths remain present, and only the policy byte at `0x003FE810`
+is used. Both paths remain present, and only the policy byte at `0x003FE828`
 changes between builds. Initialization records this job's backend at `0x003FAFF4`;
 polling and cleanup keep that selection. The policy does not alter other networking,
 transaction recovery, mileage calculations, or post-download exit branches.
