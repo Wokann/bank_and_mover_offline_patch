@@ -24,7 +24,7 @@ The patches never upload offline changes to the official server. An upload patch
 - Bank Unlock Mode preserves the stock online transaction-recovery flow and exposes one server-returned unlock candidate on the official challenge-code screen.
 - Bank Original Mode restores the official menus, messages, HOME/eShop operations, ticket checks, and normal online Bank flow. After confirming the mode, only Offline uses `sav.bin`; Download, Unlock, and Original use the stock save.
 - Poke Mover Offline Mode retains stock game reading, filtering, conversion, Transport Box checks, and source-game saving while replacing server Bank I/O with local transactions.
-- Both Poke Mover modes can scan Gen 5 ROM/save pairs on the SD card in addition to a physical cartridge and redirect subsequent I/O for the selected digital save back to the SD card.
+- Both Poke Mover modes support Gen5 digital compatibility: they scan Gen 5 ROM/save pairs on the SD card in addition to a physical cartridge and read or write the SD save paired with the selected digital source.
 - Added messages cover all ten language archives shipped with both applications.
 
 ## Download and installation
@@ -79,7 +79,7 @@ On a fresh launch, the title screen defaults to **Offline Mode**. Press **R** to
 - Online Mode follows the official network path and does not read, write, rename, or remove local Bank files under `SD:/3ds/Bank/`.
 - If the offline Bank file is invalid or its Transport Box is occupied, Mover preserves the file and follows the corresponding error path.
 
-Gen 5 source redirection is shared by both modes: Online Mode and Offline
+Gen5 digital compatibility is shared by both modes: Online Mode and Offline
 Mode both scan the following directory and read or write the paired `.sav` when
 a digital source is selected. A ROM and save must have the same base filename:
 
@@ -115,7 +115,7 @@ python .\gui\bank_viewer.py
 - Poke Mover's server Bank in Online Mode and the local offline Bank remain
   independent. Gen 5 source discovery and selected digital-save I/O are shared
   by both modes.
-- Mover now includes its own Gen 5 SD-source redirect. Do not merge or install it together with DreamRadarCartRedirect's external Transporter Redirect Patch.
+- Mover includes Gen5 digital compatibility. Do not merge or install it together with DreamRadarCartRedirect's external Transporter Redirect Patch.
 
 ## Unofficial-project disclaimer
 

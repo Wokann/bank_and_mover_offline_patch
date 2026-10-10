@@ -11,7 +11,7 @@
 初始化区的回退路径。静态检查不能替代实机或模拟器全流程测试，具体边界见分析文档。
 
 这是 Poke Mover v5.5.0 本体 `00040000000C9C00` 当前维护的补丁。它把已经验证的
-独立离线功能与官方联网银行／事务流程合并在一起；第五世代来源重定向由两种模式共用。
+独立离线功能与官方联网银行／事务流程合并在一起；Gen5 数字化兼容功能由两种模式共用。
 
 Poke Mover 没有下载模式。它既不会创建新的本地银行，也不会下载本工程所用的本地
 文件。请先使用 Pokemon Bank 合并补丁的下载模式取得
@@ -42,7 +42,7 @@ Poke Mover 的离线模式。已经废弃的 Mover 独立下载实验不属于�
                   └── 在线 ─► 官方联网与服务器流程
 ```
 
-## 银行与联网流程严格隔离，来源重定向共用
+## 银行与联网流程严格隔离，Gen5 数字化兼容功能共用
 
 各个运行时钩子都会先读取已经锁定的会话标志。离线模式进入本地实现；
 在线模式则精确重放被覆盖指令，或恢复原函数后续路线，包括：
@@ -60,7 +60,7 @@ Poke Mover 的离线模式。已经废弃的 Mover 独立下载实验不属于�
 因此，在线模式不会读取、写入、创建、改名或删除本地的 `bankdata.bin`、`bankdata.tmp`
 或 `bankdata.bak`，
 并保留官方服务器流程及对应联网提示；但若用户选择 SD 上的第五世代来源，在线模式会
-按同一套重定向逻辑读写 `sd:/roms/nds/saves/` 中对应的 `.sav`。
+按同一套 Gen5 数字化兼容逻辑读写 `sd:/roms/nds/saves/` 中对应的 `.sav`。
 
 公开版票务策略应为 `0`：在线模式必须使用原版票务，缺接口时按原版报错。测试
 策略 `1` 仅在确认 Azahar 缺少票务接口时自动使用本地结果；已有实现、实机和未知
@@ -103,9 +103,9 @@ sd:/3ds/Bank/bankdata.bin
 开始新一次传送前，本地传送盒必须为空。补丁绝不会覆盖已有的传送盒内容。上实机测试
 前请备份 `bankdata.bin`。
 
-## 共用来源发现与离线传送路线
+## 共用 Gen5 数字化兼容功能与离线传送路线
 
-### 两种模式共用的第五世代来源发现
+### 两种模式共用的 Gen5 数字化兼容功能
 
 在线模式和离线模式都会在原版实体卡带检测与校验结束后，逐帧枚举
 `sd:/roms/nds/` 中的普通文件。
@@ -350,7 +350,7 @@ ROM `sd:/roms/nds/<name>.nds` 对应
 | `src/code_expansion.c` / `include/code_expansion.h` | 识别 Azahar、取得真实进程句柄，仅为新增页启用执行权限 |
 | `src/fs_helpers.c` / `include/fs_helpers.h` | 共用带检查 SD 操作；TLS／SVC 原语保留 ARM |
 | `src/nds_fs.c` / `include/nds_fs.h` | UTF-16 目录枚举与分段文件读写 |
-| `src/nds_sources.c` / `include/nds_sources.h` | 逐帧第五世代来源扫描、原生校验、优先级选择、ROM 语言游戏名与存档 I/O 分派 |
+| `src/nds_sources.c` / `include/nds_sources.h` | Gen5 数字化兼容功能：逐帧来源扫描、原生校验、优先级选择、ROM 语言游戏名与存档 I/O 分派 |
 | `src/bankdata_redirect.c` | 本地 Bankdata 载入、传送槽保留、资格状态，以及防崩溃临时写入、提交与回滚 |
 | `src/local_ticket.c` | 作业后端选择、Azahar 缺接口探测、本地票务／活动结果与主机日历计算 |
 | `src/local_validation.c` | 只读分类第五世代记录完整性与空槽，并隔离第五世代／VC 的逐槽服务器结果 |
@@ -465,7 +465,7 @@ SD 卡和来源游戏存档。
 
 ## 与其他卡带重定向补丁的关系
 
-本补丁现在直接接管原版的三处 NDS 卡带 I/O 入口，并内置更完整的多 ROM 扫描、来源
+本补丁的 Gen5 数字化兼容功能接管原版的三处 NDS 卡带 I/O 入口，提供多 ROM 扫描、来源
 优先级和原版存档校验。因此，原先为
 [DreamRadarCartRedirect 的 Transporter Redirect Patch](https://github.com/zaksabeast/DreamRadarCartRedirect/blob/b518a9868c23c69fe94c2818a9e600fd09c24a92/transporter.s)
 保留的 `0xE0` 载荷区已经取消。两份补丁会修改相同入口，**不能再用 IPS 合并器直接

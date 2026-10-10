@@ -16,7 +16,7 @@ or emulator end-to-end testing; exact boundaries are documented in the analysis.
 
 This is the maintained Poke Mover v5.5.0 patch for base title
 `00040000000C9C00`. It combines the verified standalone offline behavior with
-native online Bank/network transactions. Gen 5 source redirection is shared
+native online Bank/network transactions. Gen5 digital compatibility is shared
 by both modes.
 
 Poke Mover has no download mode. It neither creates a new local Bank nor
@@ -52,7 +52,7 @@ Title screen (default: Offline)
                   └── Online ─► official network and server flow
 ```
 
-## Mode-specific Bank/network flow, shared source redirection
+## Mode-specific Bank/network flow, shared Gen5 digital compatibility
 
 Every hook inherited from the offline patch reads the latched session flag.
 Offline Mode enters the local implementation. Online Mode replays the exact
@@ -73,7 +73,7 @@ Mode to the local Bank backend.
 Online Mode therefore does not read, write, create, rename, or delete local
 `bankdata.bin`, `bankdata.tmp`, or `bankdata.bak`. It keeps the official server flow and its network
 messages. If an SD-backed Gen 5 source is selected, however, Online Mode uses
-the same redirect to read and write its paired `.sav` under
+the same Gen5 digital compatibility layer to read and write its paired `.sav` under
 `sd:/roms/nds/saves/`.
 
 Public ticket policy should be `0`: Online Mode requires native tickets
@@ -127,9 +127,9 @@ The local Transfer Box must be empty before a new transfer. Existing Transfer
 Box contents are never overwritten. Back up `bankdata.bin` before testing on
 hardware.
 
-## Shared source discovery and the offline transfer route
+## Shared Gen5 digital compatibility and the offline transfer route
 
-### Gen 5 source discovery shared by both modes
+### Gen5 digital compatibility shared by both modes
 
 After the native physical-cartridge detection and validation finish, Online
 Mode and Offline Mode both enumerate one regular file per frame from
@@ -427,7 +427,7 @@ state object; the native state exit path performs cleanup.
 | `src/code_expansion.c` / `include/code_expansion.h` | Identify Azahar, obtain a real process handle, and enable execution only on the added pages |
 | `src/fs_helpers.c` / `include/fs_helpers.h` | Shared checked SD operations; TLS/SVC primitives remain ARM |
 | `src/nds_fs.c` / `include/nds_fs.h` | UTF-16 directory enumeration and ranged file I/O |
-| `src/nds_sources.c` / `include/nds_sources.h` | Per-frame Gen 5 source discovery, native validation, ranking, ROM-language titles, and save-I/O dispatch |
+| `src/nds_sources.c` / `include/nds_sources.h` | Gen5 digital compatibility: per-frame source discovery, native validation, ranking, ROM-language titles, and save-I/O dispatch |
 | `src/bankdata_redirect.c` | Local Bankdata loading, transfer-slot preservation, eligibility update, and crash-safe temporary write, commit, and rollback |
 | `src/local_ticket.c` | Job-backend selection, Azahar missing-interface probe, local job/campaign results and console-calendar calculation |
 | `src/local_validation.c` | Read-only Gen 5 integrity/empty-slot classification and Gen 5/VC per-slot result isolation |
@@ -559,7 +559,7 @@ patching. Back up the SD card and source-game saves before real-console use.
 
 ## Relationship to other cartridge-redirect patches
 
-This patch now owns the three native NDS cartridge-I/O entries and includes
+The Gen5 digital compatibility feature owns the three native NDS cartridge-I/O entries and includes
 multi-ROM scanning, source ranking, and native save validation. The former
 `0xE0` reservation for the
 [DreamRadarCartRedirect Transporter Redirect Patch](https://github.com/zaksabeast/DreamRadarCartRedirect/blob/b518a9868c23c69fe94c2818a9e600fd09c24a92/transporter.s)
