@@ -683,7 +683,7 @@ bytes, while runtime mapping grows by only four pages, `0x4000` (16 KiB).
 | `[0x00313910, 0x00313A40)` | Original last text-page padding | `0x130` bytes reserved for Luma LayeredFS; untouched. |
 | `[0x00313A40, 0x00313B1C)` | Original last text-page padding | Startup assembly and `code_expansion.o`, `0xDC` bytes. |
 | `[0x00313B1C, 0x00313FC0)` | Original last text-page padding | Unused executable padding, `0x4A4` bytes. |
-| `[0x00313FC0, 0x00314000)` | Original last text-page padding | Zero-padded 64-byte `offline_patch_v1.0.0` identifier. |
+| `[0x00313FC0, 0x00314000)` | Original last text-page padding | Zero-padded 64-byte `offline_patch_v0.9.1` identifier. |
 | `[0x003ABACC, 0x003FA904)` | Native logical BSS | Explicit zeros; native variables and startup clearing retained. No payload. |
 | `[0x003FAFF0, 0x003FB000)` | Final 16 bytes of original RW mapping, after logical BSS | First four bytes hold session mode, capture status (`0` not attempted, `1` saved, `2` failed), R-key history and title selection; `+4` stores this ticket job's backend, `+5` records pending first-language selection, `+6` stores session recovery result (`0` none, `1` successful official forced unlock, `2` successful native automatic recovery); nine bytes reserved. |
 | `[0x003FB000, 0x003FC000)` | Added RW mapping | Zero-filled separator, not an unmapped guard page. |

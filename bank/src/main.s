@@ -1636,7 +1636,7 @@ CodeExpansion_LoaderEnd:
 .org OfflinePatch_VersionStorageStart
 .area OfflinePatch_VersionStorageSize, 0
 OfflinePatch_VersionIdentifier:
-    .asciiz "offline_patch_v1.0.0"
+    .asciiz "offline_patch_v0.9.1"
 .endarea
 
 .close
