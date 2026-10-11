@@ -21,6 +21,8 @@
 ### Shared features
 
 - Retain the selected mode when returning to the title screen. A fresh launch still defaults to Offline; mode selection is not saved.
+- Fixed errors and crashes occurring on actual Luma3DS hardware
+- Some other improvements
 
 ## v0.9.0
 
