@@ -2,6 +2,8 @@
 
 [English](README.md) · [下载最新版](../../releases/latest) · [所有发行版本](../../releases)
 
+> **AI 使用声明：** 本项目使用 AI 工具（包括 OpenAI Codex）辅助分析反编译结果、设计补丁、编写代码及审查修改。如果你介意使用 AI 参与反编译分析或代码开发的补丁，请在使用前了解这一点，并自行决定是否使用。
+
 本项目为 Nintendo 3DS 上的 Pokemon Bank 和 Poke Mover 提供 Luma3DS 补丁，使银行数据可以保存在 SD 卡并离线读写。两款软件共用：
 
 ```text

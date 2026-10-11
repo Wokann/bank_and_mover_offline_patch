@@ -2,6 +2,8 @@
 
 [简体中文](README.zh-cn.md) · [Download latest release](../../releases/latest) · [All releases](../../releases)
 
+> **AI usage statement:** This project uses AI tools, including OpenAI Codex, to help analyze decompiled output, design patches, write code, and review changes. If you have concerns about using patches developed with AI-assisted reverse-engineering analysis or coding, please take this into account before deciding whether to use them.
+
 This project provides Luma3DS patches for Pokemon Bank and Poke Mover on Nintendo 3DS. Bank data can be stored on the SD card and used without a server connection. Both applications share:
 
 ```text
