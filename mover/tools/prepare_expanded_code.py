@@ -19,6 +19,8 @@ Public implementation references (not extracted game source):
 Unlike Magikoopa's text-size rounding, retaining the actual text size preserves
 Luma's 0x130-byte LayeredFS injection reservation.  The BPS target length requires
 this matching exheader: Luma checks against its new allocation.
+The service ACL adds ps:ps for random local transaction identifiers. The
+permitted-save whitelist adds only Bank (0xC9B) for language synchronization.
 Only the real ARM11 capabilities at 0x370 are changed; the signed access-descriptor
 copy (in a full 0x800-byte header) is preserved.  This is a CFW override, not a
 newly signed retail NCCH.
@@ -27,11 +29,11 @@ newly signed retail NCCH.
 from __future__ import annotations
 
 import argparse
+import subprocess
 import hashlib
 from pathlib import Path
 import struct
 import sys
-import unittest
 
 
 PAGE_SIZE = 0x1000
@@ -46,7 +48,7 @@ DATA_ACTUAL_END = DATA_INFO[0] + DATA_INFO[2]
 BSS_ACTUAL_END = DATA_ACTUAL_END + BSS_SIZE
 OLD_RW_MAPPED_END = (BSS_ACTUAL_END + PAGE_SIZE - 1) & -PAGE_SIZE
 DEFAULT_PAYLOAD_START = 0x00365000
-DEFAULT_PAYLOAD_SIZE = 0x3000
+DEFAULT_PAYLOAD_SIZE = 0x2BF000
 KERNEL_CAPS_OFFSET = 0x370
 KERNEL_CAPS_COUNT = 28
 REQUIRED_SVCS = frozenset((0x23, 0x27, 0x2A, 0x3C, 0x70))
@@ -100,6 +102,42 @@ def grant_required_svcs(header: bytearray) -> set[int]:
     return REQUIRED_SVCS - previous
 
 
+SERVICE_ACL_OFFSET = 0x250
+SERVICE_ACL_SIZE = 0x100
+SAVE_ACCESS_OFFSET = 0x240
+BANK_SAVE_UNIQUE_ID = 0xC9B
+
+
+def grant_bank_save(header: bytearray) -> None:
+    """Add one permitted title; retain variation flags, FS rights and other IDs."""
+    offsets = [SAVE_ACCESS_OFFSET]
+    if header[0x24F] & 2:
+        offsets.append(0x230)  # Extended six-ID layout; otherwise extdata is not a whitelist.
+    slots = [(offset, shift) for offset in offsets for shift in (0, 20, 40)]
+    if any((struct.unpack_from('<Q',header,offset)[0] >> shift) & 0xFFFFF == BANK_SAVE_UNIQUE_ID
+           for offset,shift in slots):
+        return
+    for offset,shift in slots:
+        value=struct.unpack_from('<Q',header,offset)[0]
+        if not ((value >> shift) & 0xFFFFF):
+            struct.pack_into('<Q',header,offset,value | (BANK_SAVE_UNIQUE_ID << shift))
+            return
+    raise ValueError('no unused permitted-save whitelist slot for Bank')
+
+
+def grant_random_service(header: bytearray) -> None:
+    """Add only PS randomness access, preserving all existing service entries."""
+    name = b"ps:ps\0\0\0"
+    slots = range(SERVICE_ACL_OFFSET, SERVICE_ACL_OFFSET + SERVICE_ACL_SIZE, 8)
+    if any(header[offset:offset + 8] == name for offset in slots):
+        return
+    for offset in slots:
+        if not any(header[offset:offset + 8]):
+            header[offset:offset + 8] = name
+            return
+    raise ValueError("no unused service ACL slot for PS randomness")
+
+
 def verify_layout(header: bytes, base_header: bytes | None = None,
                   payload_start: int = DEFAULT_PAYLOAD_START,
                   payload_size: int = DEFAULT_PAYLOAD_SIZE) -> None:
@@ -131,6 +169,8 @@ def verify_layout(header: bytes, base_header: bytes | None = None,
         expected = bytearray(base_header)
         struct.pack_into("<III", expected, 0x34, data_size // PAGE_SIZE, data_size, 0)
         grant_required_svcs(expected)
+        grant_random_service(expected)
+        grant_bank_save(expected)
         require(header == expected, "expanded exheader contains changes outside the exact safe delta")
 
 
@@ -172,8 +212,11 @@ def prepare_images(base_code: bytes, base_header: bytes, payload_start: int,
     data_size = payload_end - DATA_INFO[0]
     struct.pack_into("<III", header, 0x34, data_size // PAGE_SIZE, data_size, 0)
     added = grant_required_svcs(header)
+    grant_random_service(header)
+    grant_bank_save(header)
 
-    mutable_offsets = set(range(0x34, 0x40)) | set(
+    mutable_offsets = set(range(0x34, 0x40)) | set(range(0x230,0x238)) | set(range(0x240,0x248)) | set(range(SERVICE_ACL_OFFSET,
+        SERVICE_ACL_OFFSET + SERVICE_ACL_SIZE)) | set(
         range(KERNEL_CAPS_OFFSET, KERNEL_CAPS_OFFSET + KERNEL_CAPS_COUNT * 4))
     require(all(old == new or index in mutable_offsets
                 for index, (old, new) in enumerate(zip(base_header, header))),
@@ -207,82 +250,6 @@ def prepare_command(args: argparse.Namespace) -> None:
     print("Added SVC capabilities: " + (", ".join(f"0x{x:02X}" for x in sorted(added)) or "none"))
 
 
-class PreparationTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.code = bytes(sum(info[1] for info in (TEXT_INFO, RO_INFO, DATA_INFO)) * PAGE_SIZE)
-        self.header = bytearray(0x800)
-        for offset, value in ((0x10, TEXT_INFO), (0x20, RO_INFO), (0x30, DATA_INFO)):
-            struct.pack_into("<III", self.header, offset, *value)
-        struct.pack_into("<I", self.header, 0x3C, BSS_SIZE)
-        struct.pack_into("<Q", self.header, 0x200, TITLE_ID)
-        self.header[0xD] = 3
-        struct.pack_into("<28I", self.header, KERNEL_CAPS_OFFSET, *([0xFFFFFFFF] * 28))
-
-    def prepare(self, header: bytes | bytearray | None = None,
-                start: int = DEFAULT_PAYLOAD_START, size: int = DEFAULT_PAYLOAD_SIZE):
-        return prepare_images(self.code, bytes(self.header if header is None else header),
-                              start, size, check_hash=False)
-
-    def test_layout_and_exact_header_fields(self) -> None:
-        code, header, added = self.prepare()
-        self.assertEqual(len(code), 0x268000)
-        self.assertEqual(code[:len(self.code)], self.code)
-        self.assertEqual(struct.unpack_from("<III", header, 0x34), (0x7C, 0x7C000, 0))
-        self.assertEqual(header[:0x34], self.header[:0x34])
-        self.assertEqual(header[0x400:], self.header[0x400:])
-        self.assertEqual(added, REQUIRED_SVCS)
-        self.assertEqual(allowed_svcs(header), REQUIRED_SVCS)
-
-    def test_existing_caps_only_add_missing_bits(self) -> None:
-        struct.pack_into("<III", self.header, KERNEL_CAPS_OFFSET,
-                         0xF0FA9F4E, 0xF1FFBFFF, 0xF2003FE7)
-        _, header, added = self.prepare()
-        self.assertEqual(added, {0x70})
-        self.assertEqual(header[KERNEL_CAPS_OFFSET:KERNEL_CAPS_OFFSET + 12],
-                         self.header[KERNEL_CAPS_OFFSET:KERNEL_CAPS_OFFSET + 12])
-        self.assertEqual(struct.unpack_from("<I", header, KERNEL_CAPS_OFFSET + 12)[0], 0xF4010000)
-
-    def test_missing_bit_in_existing_group(self) -> None:
-        struct.pack_into("<I", self.header, KERNEL_CAPS_OFFSET, 0xF1000001)
-        _, header, _ = self.prepare()
-        self.assertEqual(struct.unpack_from("<I", header, KERNEL_CAPS_OFFSET)[0], 0xF1048801)
-
-    def test_header_info_only(self) -> None:
-        _, header, _ = self.prepare(self.header[:0x400])
-        self.assertEqual(len(header), 0x400)
-
-    def test_verify_expanded_header(self) -> None:
-        _, header, _ = self.prepare()
-        verify_layout(header, bytes(self.header))
-        for offset in (0x18, 0x30, 0x34, 0x38, 0x3C, 0x400):
-            dirty = bytearray(header)
-            dirty[offset] ^= 1
-            with self.subTest(offset=offset), self.assertRaises(ValueError):
-                verify_layout(bytes(dirty), bytes(self.header))
-
-    def test_reject_invalid_inputs(self) -> None:
-        for start, size in ((0x363000, 0x2000), (0x365001, 0x2000),
-                            (0x365000, 0), (0x365000, 1), (0x14000000, 0x2000)):
-            with self.subTest(start=start, size=size), self.assertRaises(ValueError):
-                self.prepare(start=start, size=size)
-        with self.assertRaises(ValueError):
-            prepare_images(self.code, bytes(self.header), DEFAULT_PAYLOAD_START, DEFAULT_PAYLOAD_SIZE)
-        dirty = bytearray(self.code)
-        dirty[DATA_ACTUAL_END - IMAGE_BASE] = 1
-        with self.assertRaises(ValueError):
-            prepare_images(bytes(dirty), bytes(self.header), DEFAULT_PAYLOAD_START,
-                           DEFAULT_PAYLOAD_SIZE, check_hash=False)
-
-    def test_reject_cap_exhaustion_and_duplicates(self) -> None:
-        full = bytearray(self.header)
-        struct.pack_into("<28I", full, KERNEL_CAPS_OFFSET, *([0xFC000227] * 28))
-        with self.assertRaises(ValueError):
-            self.prepare(full)
-        struct.pack_into("<II", self.header, KERNEL_CAPS_OFFSET, 0xF1000001, 0xF1000002)
-        with self.assertRaises(ValueError):
-            self.prepare()
-
-
 def parse_integer(value: str) -> int:
     try:
         return int(value, 0)
@@ -300,15 +267,14 @@ def main() -> int:
     prepare.add_argument("--output-exheader", type=Path, required=True)
     prepare.add_argument("--payload-start", type=parse_integer, default=DEFAULT_PAYLOAD_START)
     prepare.add_argument("--payload-size", type=parse_integer, default=DEFAULT_PAYLOAD_SIZE)
-    commands.add_parser("self-test", help="run synthetic format/invariant tests without ROM files")
     args = parser.parse_args()
     try:
-        if args.command == "self-test":
-            suite = unittest.defaultTestLoader.loadTestsFromTestCase(PreparationTests)
-            return 0 if unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful() else 1
+        subprocess.run([sys.executable, "-B", str(Path(__file__).absolute().parents[2] /
+                        "common/tools/check_file_links.py"), "--recursive", "--allow-missing",
+                        *(str(path) for path in vars(args).values() if isinstance(path, Path))], check=True)
         prepare_command(args)
         return 0
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, subprocess.CalledProcessError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 

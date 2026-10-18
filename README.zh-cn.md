@@ -1,194 +1,113 @@
 # Pokemon Bank 与 Poke Mover 离线补丁
 
-[English](README.md) · [下载最新版](../../releases/latest) · [所有发行版本](../../releases)
+[English](README.md) · [下载](../../releases/latest) · [更新记录](CHANGELOG.zh-cn.md)
 
-> **AI 使用声明：** 本项目使用 AI 工具（包括 OpenAI Codex）辅助分析反编译结果、设计补丁、编写代码及审查修改。如果你介意使用 AI 参与反编译分析或代码开发的补丁，请在使用前了解这一点，并自行决定是否使用。
+让 Nintendo 3DS 上的 Pokemon Bank 和 Poke Mover 使用保存在 SD 卡上的银行数据。保留熟悉的盒子管理与传送界面，并提供彼此独立的离线和官方联网模式。
 
-本项目为 Nintendo 3DS 上的 Pokemon Bank 和 Poke Mover 提供 Luma3DS 补丁，使银行数据可以保存在 SD 卡并离线读写。两款软件共用：
+## 主要功能
 
-```text
-sd:/3ds/Bank/bankdata.bin
-```
+- 无需连接官方服务器，即可管理本地银行并接收 Mover 传送。
+- 下载已有官方银行供离线使用，或创建新的本地银行。
+- 支持多个本地用户，各自保存银行、设置、余额及主机区域信息。
+- 通过文本配置调整礼物、姓名词表与宝可梦筛选规则。
+- Mover 除卡带与 VC 来源外，也支持 SD 卡上的第五世代 ROM／存档组合。
+- 标题界面按 **R** 切换模式、按 **L** 选择语言，并可选择本地用户；新增文本覆盖原软件的十套语言资源。
 
-补丁不会把离线修改上传回官方服务器。上传补丁已因服务端身份、版本、时间戳、事务状态和冲突校验无法得到充分保证而永久废止。
+本地服务器与官方服务器的数据彼此独立；本项目不提供将离线修改上传回官方服务器的功能。
 
-## 功能
+## 安装
 
-| 软件 | 标题界面模式 | 功能 |
-|---|---|---|
-| Pokemon Bank | 离线模式／下载模式／解锁模式／原版模式 | 离线使用本地银行、下载官方银行、显示解锁候选值，或使用完整官方银行界面 |
-| Poke Mover | 离线模式／在线模式 | 离线把 Pokemon 写入同一份本地银行的传送盒，或按原版方式连接官方服务器 |
+操作前请备份银行数据及游戏存档；Bank 与 Mover 补丁需要一起更新。
 
-- 在标题界面按实体 **R** 键切换模式；按 **A**、**START** 或触摸下屏进入后，本次会话的模式固定。
-- Bank 离线模式可以在没有可用文件时调用原版首次使用流程创建新的本地银行。
-- Bank 会验证主文件、尝试从 `bankdata.bak` 恢复，并通过 `bankdata.tmp`、完整写入检查和上一版本备份保护保存过程。
-- Bank 下载模式无需选择游戏即可下载完整服务器银行；没有可用游戏存档时也可确认直接下载。首次账户仍先由官方创建银行；下载到本地后返回标题，不进入盒子或上传离线修改。
-- Bank 解锁模式保留原版联网事务恢复流程，并在官方挑战码界面显示服务器返回的一个解锁候选值。
-- Bank 原版模式恢复官方菜单、文本、HOME/eShop 操作、票务检查及正常联网银行流程。确认模式后，仅离线模式使用 `sav.bin`；下载、解锁、原版模式使用原存档。
-- Poke Mover 离线模式保留原版游戏读取、筛选、转换、传送盒检查和来源游戏保存，只把服务器银行读写替换成本地事务。
-- Poke Mover 的两种模式都支持 Gen5 数字化兼容功能：在实体卡带之外扫描 SD 卡上的第五世代 ROM／存档组合，并读写所选数字版对应的 SD 存档。
-- 两款软件的新增文本均覆盖原软件自带的十套语言资源。
+### 1. 安装补丁
 
-## 下载与安装
+下载[最新发行版](../../releases/latest)。使用 Luma3DS 的主机，将所需的完整 Title ID 文件夹复制到 `SD:/luma/titles/`：
 
-普通玩家不需要原始 `.code`、RomFS 或本地编译环境。
+| 软件 | 补丁目录 |
+| --- | --- |
+| Pokemon Bank | `SD:/luma/titles/00040000000C9B00/` |
+| Poke Mover | `SD:/luma/titles/00040000000C9C00/` |
 
-1. 从 [GitHub Releases](../../releases/latest) 下载最新发行压缩包并解压。
-2. 把所需的完整 Title ID 目录复制到 `SD:/luma/titles/`：
+每个目录都必须包含 `code.bps`、`exheader.bin` 和 `romfs/`。移除对应补丁目录里的旧 `code.ips` 或 `code.bin`。按住 `SELECT` 开机，在 Luma 配置中启用 `Enable game patching`，保存并重启。
 
-   | 软件 | Title ID | 安装后路径 |
-   |---|---|---|
-   | Pokemon Bank | `00040000000C9B00` | `SD:/luma/titles/00040000000C9B00/` |
-   | Poke Mover | `00040000000C9C00` | `SD:/luma/titles/00040000000C9C00/` |
+这里使用软件本体的 Title ID，不是更新数据的 ID。使用发行补丁不需要提取可执行文件或配置编译环境。
 
-   Bank 与 Mover 均包含 `code.bps`、`exheader.bin` 和 `romfs/`，必须成套复制。
-   移除对应补丁目录里旧的 `code.ips` 或 `code.bin`，避免混装。
-3. 按住 `SELECT` 开机进入 Luma3DS 配置，启用 `Enable game patching`，保存并重启。
-4. 使用前备份 SD 卡以及已有的 `SD:/3ds/Bank/` 目录。
+### 2. 复制配置模板
 
-本项目针对软件本体，而不是更新数据：
+全新安装时，将 [configTemplate/templateForCopy](configTemplate/templateForCopy) 中的 **Bank** 文件夹复制到 `SD:/3ds/`，形成：
 
 ```text
-Pokemon Bank: 00040000000C9B00
-Poke Mover:   00040000000C9C00
+SD:/3ds/Bank/
+├── client/
+│   └── client.conf
+└── fakeServers/
+    └── shared/
+        ├── server.conf
+        ├── gifts/
+        └── mover/
 ```
 
-## 使用方法
+请完整复制模板，包括 `gifts/` 和 `mover/` 内的文件。缺失的客户端、服务器及用户基础配置可以自动生成，但礼物素材、Mover 姓名词表及宝可梦筛选配置需要手动放入 SD 卡才能使用。银行及用户的运行数据会按需创建，不要自行创建空白二进制文件。
 
-### Pokemon Bank
+已有数据时，请保留个人文件与设置，不要整目录覆盖；按照[配置与迁移说明](configTemplate/templateForCopy/Bank/readme_fakeServer.zh-cn.md)更新。`configTemplate/examples/` 是带演示用户的独立示例，不是安装模板。
 
-首次启动时标题界面默认是**离线模式**，按 **R** 可依次切换到**下载模式**、**解锁模式**、**原版模式**，再回到离线模式。返回标题时保留刚才使用的模式；重新启动软件才恢复默认离线，不把模式选择写入存档。
+**Azahar：** 补丁目录放在模拟器用户目录的 `load/mods/`，而不是虚拟 SD 卡内；同一套 Bank 配置放在该用户目录的 `sdmc/3ds/Bank/`。
 
-如果官方服务器中已有自己的银行数据，建议先进入下载模式，完成原版账户检查后选择“下载银行数据到本地”，无需选择游戏。没有可用游戏存档时，确认直接下载即可；服务器银行尚未建立时，会先完成官方首次创建再下载。看到下载完成并返回标题界面后，切回离线模式，即可按原版 Bank 流程管理盒子并保存到本地。
+## 开始使用
 
-下载模式会覆盖当前本地银行，执行前请备份。如果不需要保留服务器数据，也可以直接进入离线模式；本地没有有效主文件或备份时，补丁会走原版首次使用流程创建新的本地银行。
+1. 先启动 **Bank**。在标题界面按 **R** 选择模式；显示用户信息时，确认目标本地用户。
+2. 若要保留已有官方银行，先使用**下载模式**；它会覆盖所选用户的本地银行，务必先备份。不需要下载时，直接进入**离线模式**创建本地银行。
+3. 使用 **Mover 离线模式**将宝可梦送入该用户银行的传送盒，再用 **Bank 离线模式**取出。Mover 要求 Bank 已完成银行初始化或迁移。
 
-解锁模式只用于原版的“存档不匹配”锁定。进入第一项并选择对应游戏，在确认游戏的同时按住 **L + A + START**，即可进入官方强制解锁界面。服务器若返回可接受的候选值，补丁会在第三行显示其中第一个值的八位形式；后续回滚、验证和服务器处理全部保持原版流程。该模式不会捕获 `bankdata.bin`，也不会套用下载模式的提前退出路线。
+| 软件 | 模式 | 用途 |
+| --- | --- | --- |
+| Bank | 离线 | 管理并保存所选本地银行。 |
+| Bank | 下载 | 将官方银行复制到所选本地用户，完成后返回标题。 |
+| Bank | 解锁 | 使用官方事务恢复流程；强制恢复可能丢失中断传输中的宝可梦。 |
+| Bank | 原版 | 使用官方银行界面及联网服务。 |
+| Mover | 离线 | 向所选本地银行传送。 |
+| Mover | 在线 | 通过官方服务传送。 |
 
-原版模式使用完整官方菜单及联网流程，包括 HOME、支持代码与 Mover/eShop 项目，不载入或捕获本地 `bankdata.bin`。
+软件启动时默认离线模式。按 **A**、**START** 或触摸下屏确认当前选择。Bank 离线／下载模式及 Mover 离线模式可用 **↑/↓** 或左摇杆选择用户；**auto** 按当前账号环境自动选择。标题界面的 **L** 键用于选择两款软件共用的语言。
 
-公共启动／标题阶段仍预览重定向记录。确认模式后重载相应记录：离线使用 `SD:/3ds/Bank/sav.bin`，其他模式使用原版 `data:/turtle`，各自使用对应记录的语言和事务状态。原存档缺失或无效时走原版语言选择与初始化，不把 SD 数据灌回原存档，也不把原存档保存同步到 SD。前三个模式不进入无游戏时的 HOME 转移界面；下载模式提供直接下载询问，离线／解锁提示后返回，原版模式保留官方 HOME 询问。
+恢复、语言及来源存档的详细说明见 [Bank 使用说明](bank/README.zh-cn.md)与 [Mover 使用说明](mover/README.zh-cn.md)。第五世代数字来源需将 `sd:/roms/nds/name.nds` 与 `sd:/roms/nds/saves/name.sav` 同名配对。
 
-> **隐私提醒：** 下载模式取得的 `bankdata.bin` 可能包含与账户有关的私人标识、玩家及训练家信息和时间记录。从原版内部存档拷贝、用于本地离线使用的 `sav.bin` 也可能包含个人或账户相关信息。请勿公开上传或随意分享这两个文件。
+## 配置与文档
 
-### Poke Mover
-
-首次启动时标题界面默认是**离线模式**，按 **R** 可切换到**在线模式**。返回标题时保留刚才使用的模式；重新启动软件才恢复默认离线，不把模式选择写入存档。
-
-- 离线模式使用 Bank 已下载或首次初始化生成的 `bankdata.bin`；Mover 自身不会下载或创建这个文件。
-- 传送成功后，Pokemon 会写入同一份本地银行的传送盒，可用 Bank 离线模式取出。
-- 在线模式完整使用官方联网路线，不会读取、写入或整理 `SD:/3ds/Bank/` 下的本地银行文件。
-- 离线银行文件无效或传送盒已被占用时，Mover 会保留原文件并进入相应错误路线。
-
-Gen5 数字化兼容功能由两种模式共用：在线模式和离线模式都会动态扫描以下目录，并在
-选中数字版来源后从对应 `.sav` 读写；ROM 与存档必须使用相同的基本文件名：
-
-```text
-sd:/roms/nds/
-├── 任意文件名.nds
-└── saves/
-    └── 任意文件名.sav
-```
-
-扫描器只接受 Black、White、Black 2、White 2，并且 `.sav` 必须可读、可写且通过 Mover
-原版存档校验。每个游戏最多显示一个来源：可用的实体卡带优先于数字版；数字版按
-`J > O > F > I > D > S > K` 选择语言优先级最高的有效存档，同语言有多个副本时保留
-最先扫描到且有效的一个。无效候选会被跳过，不会阻止继续检查后面的文件。
-
-### bankdata 查看器
-
-项目附带的 [bankdata 查看器](ViewerForBankdata/README.zh-cn.md) 可用于查看本地 `bankdata.bin`。使用 Python 3 运行后，选择需要打开的文件即可：
-
-```powershell
-cd ViewerForBankdata
-python .\gui\bank_viewer.py
-```
+- [SD 目录及文件保护](configTemplate/templateForCopy/Bank/readme_fakeServer.zh-cn.md)
+- [用户选择与迁移](configTemplate/templateForCopy/Bank/client/readme_client.zh-cn.md)
+- [服务器政策与可选转换](configTemplate/templateForCopy/Bank/fakeServers/shared/readme_server.zh-cn.md)
+- [个人地区、币种与使用券](configTemplate/templateForCopy/Bank/fakeServers/users/readme_user.zh-cn.md)
+- [礼物配置](configTemplate/templateForCopy/Bank/fakeServers/shared/gifts/readme_gift.zh-cn.md)
+- [宝可梦筛选及规则来源](configTemplate/templateForCopy/Bank/fakeServers/shared/mover/readme_checkPokemon.zh-cn.md)
+- [姓名词表、白名单及来源](configTemplate/templateForCopy/Bank/fakeServers/shared/mover/readme_checkName.zh-cn.md)
+- [银行数据查看器](ViewerForBankdata/README.zh-cn.md)
 
 ## 数据安全与限制
 
-- 在实机使用前备份 SD 卡、来源游戏存档和 `SD:/3ds/Bank/`。
-- 不要在不同账户之间混用银行文件。
-- 下载模式只负责“服务器到本地”，离线模式只操作本地文件，不存在“本地到服务器”的上传功能。
-- 解锁模式使用官方联网恢复路线，可能改变官方事务状态，但不会上传本地离线 `bankdata.bin`。
-- Poke Mover 在线模式的服务器银行与本地离线银行相互独立；第五世代来源扫描和所选
-  数字版 `.sav` 的读写则由两种模式共用。
-- Mover 已内置 Gen5 数字化兼容功能；不要再与 DreamRadarCartRedirect 的外部 Transporter Redirect Patch 合并或同时安装。
+- 保留独立的 SD 卡及来源游戏存档备份。不要混用不同用户的文件，也不要删除事务记录来绕过保存中断错误。
+- 手动修改或替换银行文件前，请停止两款软件。无法确定匹配版本时，保留全部相关文件。
+- 下载模式覆盖本地数据；解锁模式会改变官方事务状态，并可能放弃中断的传输。两者都不会上传本地银行。
+- 本地检测及配置规则不是官方服务器私有规则的完整复现。CRC32 用于发现意外变化，不提供密码学认证。
+- 银行及设置文件含私人标识与训练家信息，请勿公开上传。
+- 已内置第五世代数字来源支持，不要再叠加外部 Transporter Redirect Patch。
+
+## 从源码构建
+
+Bank 与 Mover 分别使用 GNU Make、Python 3、devkitARM、armips 和 Floating IPS 构建。原始解密／解压代码、ExHeader 及 RomFS 必须自行从合法持有的软件中提取，本仓库不分发这些输入。
+
+- [Bank 构建与实现说明](bank/README.zh-cn.md#独立编译)
+- [Mover 构建与实现说明](mover/README.zh-cn.md#独立编译)
+- [共用服务与存储](common/README.zh-cn.md)
+
+## 鸣谢
+
+本项目使用 [Luma3DS](https://github.com/LumaTeam/Luma3DS)、[devkitPro/libctru](https://github.com/devkitPro/libctru)、[armips](https://github.com/Kingcom/armips) 和 [Floating IPS](https://github.com/Sir-Walrus/Flips)。[GodMode9](https://github.com/d0k3/GodMode9) 用于软件数据提取；词表、筛选规则和礼物素材的来源及许可证列在对应配置说明中。
+
+## AI 使用声明
+
+本项目使用 AI 工具（包括 OpenAI Codex）辅助分析反编译结果、设计补丁、编写代码及审查修改。如果你介意使用 AI 参与反编译分析或代码开发的补丁，请在使用前了解这一点，并自行决定是否使用。
 
 ## 非官方声明
 
-本项目是独立制作的非官方社区补丁，与 Nintendo、The Pokemon Company、Creatures Inc.
-及 GAME FREAK inc. 没有从属或合作关系，也未获得这些公司赞助、认可或授权。Nintendo
-3DS、Pokemon、Pokemon Bank、Poke Mover，以及相关游戏、软件、角色、名称、标志、
-图像、文本、音乐和其他原作内容的商标、著作权及其他知识产权均归各自权利人所有。
-本项目仅用于技术研究、软件保存与互操作性，不主张拥有任何相关原作内容。
-
-## 开发者本地编译
-
-Bank 与 Mover 可以分别独立构建。各子项目的实现原理、内存与状态机、文件事务、输入提取、编译、验证和参考资料见：
-
-- [Pokemon Bank 开发文档](bank/README.zh-cn.md)
-- [Poke Mover 开发文档](mover/README.zh-cn.md)
-
-### 基本工具
-
-- GNU Make、兼容 POSIX 的 shell 和 Python 3。
-- [devkitARM](https://devkitpro.org/wiki/Getting_Started)，并设置 `DEVKITARM` 环境变量。
-- 仓库自带 Windows 版 [armips](https://github.com/Kingcom/armips) 与 [Floating IPS](https://github.com/Sir-Walrus/Flips)。其他平台需从官方项目下载或编译，并通过 `ARMIPS` 和 `IPS_TOOL` 指定路径。
-- [GodMode9](https://github.com/d0k3/GodMode9)，用于从用户自己的软件中提取已解密、已解压的 `.code` 与完整 RomFS。
-
-请勿提交或传播提取出的代码和资源。本工程只支持以下本体镜像：
-
-| 软件 | 工程内路径 | 大小 | SHA-1 |
-|---|---|---:|---|
-| Pokemon Bank | `bank/rom/exefs/00040000000C9B00.dec.code` | 2,801,664 字节 | `5AB630856835DCF2DBDF9A62244DD19E46AE1C7C` |
-| Poke Mover | `mover/rom/exefs/00040000000C9C00.dec.code` | 2,269,184 字节 | `583859C1E874D11650EFBDDE51F470ECF96900C4` |
-
-对应的完整 RomFS 分别放入 `bank/rom/romfs/` 和 `mover/rom/romfs/`。两个子项目都需要
-各自同一本体的完整 `0x800` 字节 ExHeader：复制 GodMode9 挂载根目录的 `extheader.bin`，
-分别放入 `bank/rom/exheader.bin` 或 `mover/rom/exheader.bin`。两个头部不能互换。
-具体输入与 Luma／Azahar 共用加载器见对应子项目开发文档。
-准备输入后，在仓库根目录运行：
-
-```sh
-make -C bank clean
-make -C bank
-
-make -C mover clean
-make -C mover
-```
-
-其他平台可覆盖工具路径：
-
-```sh
-make -C bank ARMIPS=/path/to/armips IPS_TOOL=/path/to/flips
-make -C mover ARMIPS=/path/to/armips IPS_TOOL=/path/to/flips
-```
-
-输出位于：
-
-```text
-release/00040000000C9B00/
-├── code.bps
-├── exheader.bin
-└── romfs/
-
-release/00040000000C9C00/
-├── code.bps
-├── exheader.bin
-└── romfs/
-```
-
-## 引用与鸣谢
-
-- [Luma3DS](https://github.com/LumaTeam/Luma3DS)：提供按 Title ID 加载 IPS／BPS 与 LayeredFS 资源的运行环境。
-- [GodMode9](https://github.com/d0k3/GodMode9)：用于从用户自己的软件中提取可执行代码与 RomFS。
-- [devkitPro / libctru](https://github.com/devkitPro/libctru)：devkitARM 工具链及公开的 3DS FSUSER／FSFILE 接口参考。
-- [armips](https://github.com/Kingcom/armips)：ARM 汇编、对象导入和代码注入。
-- [Magikoopa 扩容实现](https://github.com/RicBent/Magikoopa/blob/master/MagikoopaUI/patchmaker.cpp)：将新增代码放在原 BSS 后，配合 ExHeader 与 SVC 启用执行权限的公开方法参考。
-- [oot3d_practice_menu](https://github.com/gamestabled/oot3d_practice_menu)：实机与 Citra 双 ExHeader 布局及加载器处理的公开参考。
-- [Floating IPS](https://github.com/Sir-Walrus/Flips)：生成 IPS／BPS 补丁。
-- [pkNX TextFile](https://github.com/kwsch/pkNX/blob/master/pkNX.Structures/Text/TextFile.cs)：消息文件编码与行表格式参考。
-- [zaksabeast/Transporter-Offline-Patch](https://github.com/zaksabeast/Transporter-Offline-Patch)：Poke Mover 联网状态替换的公开先例。
-- [Transporter-PKSM-Bank-Patch 状态机笔记](https://github.com/zaksabeast/Transporter-PKSM-Bank-Patch/blob/master/TRANSPORTER_DOCS.md)：用于交叉核对 Poke Mover 的高层状态顺序。
-
-程序地址、状态转换、对象布局、文件偏移和补丁位置均以本项目支持版本的实际二进制分析与测试为准；外部项目只用于核对公开接口、格式和高层行为。
+本项目是独立制作的非官方社区补丁，与 Nintendo、The Pokemon Company、Creatures Inc. 及 GAME FREAK inc. 没有从属或合作关系，也未获得其赞助、认可或授权。原软件、角色、名称及素材的知识产权归各自权利人所有。本项目用于软件保存、技术研究与互操作性。

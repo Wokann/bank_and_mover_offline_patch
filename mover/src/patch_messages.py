@@ -7,14 +7,20 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
+import sys
 from pathlib import Path
 
 from tools import message_archive as message_codec
+from tools.title_layout import build_title_archive
+from title_font import build_title_fonts
+from title_messages import L_BUTTON, language_hint, mode_messages, mode_switch_hint, USER_LABEL_MESSAGES, USER_SWITCH_HINTS
 
 
 ARCHIVES = ("0/0/4", "0/0/5", "0/0/6", "0/0/7", "0/0/8", "0/0/9",
             "0/1/0", "0/1/1", "0/1/2", "0/1/3")
 MESSAGE_FILE_INDEX = 23
+
 GAME_TITLE_FILE_INDEX = 24
 GAME_TITLE_MESSAGE_BASE = 54
 # Same order as languageRank() in nds_sources.c: J / O / F / I / D / S / K.
@@ -22,6 +28,10 @@ GAME_TITLE_MESSAGE_BASE = 54
 GAME_TITLE_ARCHIVES = ("0/0/5", "0/0/6", "0/0/7", "0/0/8", "0/0/9",
                        "0/1/0", "0/1/1")
 TITLE_HOME_LINE = 39
+TITLE_LANGUAGE_LINE = 40
+TITLE_SWITCH_LINE = 73
+TITLE_USER_LABEL_LINE, TITLE_USER_HINT_LINE = 75, 76
+TITLE_SWITCH_MESSAGES = {archive: mode_switch_hint(archive) for archive in ARCHIVES}
 TITLE_OFFLINE_LINE = 67
 TITLE_ONLINE_LINE = 68
 STOCK_INITIAL_CONNECT_LINE = 13
@@ -32,8 +42,7 @@ INITIAL_CONNECT_LINE = 69
 BANK_CONNECT_LINE = 70
 SAVE_LINE = 71
 DISCONNECT_LINE = 72
-TITLE_TEXT_BUFFER_LENGTH = 54
-R_BUTTON = "\ue005"
+MISSING_BANK_DISCONNECT_LINE = 74
 
 INTERNET_MESSAGES = {
     "0/0/4": "せつぞくしています……",
@@ -49,29 +58,29 @@ INTERNET_MESSAGES = {
 }
 
 BANK_CONNECTION_MESSAGES = {
-    "0/0/4": "ローカル オフラインデータに\nせつぞくしています……",
-    "0/0/5": "ローカルオフラインデータに\n接続しています……",
-    "0/0/6": "Communicating with the local offline\nPokemon Bank data...",
-    "0/0/7": "Connexion aux données locales hors ligne\nde Banque Pokémon…",
-    "0/0/8": "Connessione ai dati locali offline\ndella Banca Pokémon...",
-    "0/0/9": "Verbindung mit den lokalen Offline-Daten\nder Pokémon Bank...",
-    "0/1/0": "Conectando con los datos locales sin conexión\ndel Banco de Pokémon...",
-    "0/1/1": "로컬 오프라인 포켓몬 뱅크 데이터에\n연결 중입니다…",
-    "0/1/2": "正在和宝可梦虚拟银行的\n本地离线数据进行连接……",
-    "0/1/3": "正在和寶可夢虛擬銀行的\n本機離線資料進行連線……",
+    "0/0/4": "ポケモンバンクの　ローカルサーバーと\nつうしん　しています",
+    "0/0/5": "ポケモンバンクの　ローカルサーバーと\n通信しています",
+    "0/0/6": "Communicating with the local\nPokémon Bank server...",
+    "0/0/7": "Connexion au serveur local de Banque Pokémon…",
+    "0/0/8": "Comunicazione col server locale\ndella Banca Pokémon in corso.",
+    "0/0/9": "Datenübertragung über den lokalen Server\nvon Pokémon Bank läuft...",
+    "0/1/0": "Conectando con el servidor local\ndel Banco de Pokémon...",
+    "0/1/1": "포켓몬 뱅크의 로컬 서버와\n통신하고 있습니다",
+    "0/1/2": "正在和宝可梦虚拟银行的\n本地服务器进行连接……",
+    "0/1/3": "正在連線到\n寶可夢虛擬銀行的本機伺服器……",
 }
 
 SAVE_MESSAGES = {
-    "0/0/4": "レポートを　かいて\nポケモンを　ローカル オフラインデータに\nほぞん　しています\nでんげんを　きらないで　ください",
-    "0/0/5": "レポートを　書いて\nポケモンをローカルオフラインデータに\n保存しています\n電源を　切らないで　ください",
-    "0/0/6": "Your game is being saved and your Pokémon moved\nto the local offline Bank data.\nDon’t turn off the power.",
-    "0/0/7": "Sauvegarde du jeu et transfert des Pokémon\nvers les données locales hors ligne…\nNe pas éteindre la console.",
-    "0/0/8": "Salvataggio del gioco e dei Pokémon\nnei dati offline locali in corso.\nNon spegnere la console.",
-    "0/0/9": "Spielstand und Pokémon werden in den lokalen\nOffline-Bankdaten gespeichert...\nBitte das System nicht ausschalten.",
-    "0/1/0": "Guardando la partida y los Pokémon en los datos\nlocales sin conexión del Banco...\nNo apagues la consola.",
-    "0/1/1": "리포트를 기록하고 포켓몬을\n로컬 오프라인 데이터에 저장하고 있습니다\n전원을 끄지 않도록 해주십시오",
-    "0/1/2": "正在写入记录，\n并将宝可梦写入本地离线数据。\n请勿切断电源。",
-    "0/1/3": "正在寫入記錄，\n並將寶可夢寫入本機離線資料。\n請勿關閉電源。",
+    "0/0/4": "レポートを　かいて　ポケモンを\nローカルサーバーに　てんそうしています\nでんげんを　きらないで　ください",
+    "0/0/5": "レポートを　書いて　ポケモンを\nローカルサーバーに　転送しています\n電源を　切らないで　ください",
+    "0/0/6": "Your game is being saved and your Pokémon moved\nto the local server.\nDon’t turn off the power.",
+    "0/0/7": "Sauvegarde du jeu et transfert des Pokémon\nvers le serveur local…\nNe pas éteindre la console.",
+    "0/0/8": "Salvataggio del gioco e dei Pokémon\nsul server locale in corso.\nNon spegnere la console.",
+    "0/0/9": "Spielstand und Pokémon werden auf dem\nlokalen Server gespeichert...\nBitte das System nicht ausschalten.",
+    "0/1/0": "Guardando la partida y los Pokémon\nen el servidor local...\nNo apagues la consola.",
+    "0/1/1": "리포트를 기록하고 포켓몬을\n로컬 서버에 전송하고 있습니다\n전원을 끄지 않도록 해주십시오",
+    "0/1/2": "正在写入记录，\n并将宝可梦传送到本地服务器。\n请勿切断电源。",
+    "0/1/3": "正在寫入記錄，\n並將寶可夢傳送到本機伺服器。\n請勿關閉電源。",
 }
 
 DISCONNECT_MESSAGES = {
@@ -87,44 +96,23 @@ DISCONNECT_MESSAGES = {
     "0/1/3": "正在中斷連線……",
 }
 
-TITLE_HOME_SHORT = {
-    "0/0/4": "\ue073を押すとHOMEメニューに戻ります",
-    "0/0/5": "\ue073を押すとHOMEメニューに戻ります",
-    "0/0/6": "Press \ue073 to HOME Menu",
-    "0/0/7": "\ue073 : menu HOME",
-    "0/0/8": "\ue073: menu HOME",
-    "0/0/9": "\ue073: HOME-Menü",
-    "0/1/0": "\ue073: menú HOME",
-    "0/1/1": "\ue073을 누르면 HOME 메뉴로 돌아갑니다",
-    "0/1/2": "如果按\ue073，就会返回HOME菜单。",
-    "0/1/3": "按\ue073可返回HOME選單",
+# Only FS_MISSING from the offline Bank download selects this extra line.
+# 仅离线银行下载明确返回 FS_MISSING 时选择此提示，其他断开及在线原文不变。
+MISSING_BANK_DISCONNECT_MESSAGES = {
+    "0/0/4": "さきに　ポケモンバンクで　しょきかしてから\nポケムーバーを　ごりようください。\nせつだん　しています……",
+    "0/0/5": "先にポケモンバンクでデータを初期化してから\nポケムーバーをご利用ください。\n接続を切っています……",
+    "0/0/6": "Please initialize your data in Pokémon Bank\nbefore using Poké Transporter.\nDisconnecting...",
+    "0/0/7": "Initialisez vos données dans Banque Pokémon\navant d’utiliser Poké Transfert.\nDéconnexion…",
+    "0/0/8": "Inizializza i dati nella Banca Pokémon\nprima di usare il Pokétrasferitore.\nDisconnessione…",
+    "0/0/9": "Initialisiere deine Daten in Pokémon Bank,\nbevor du den PokéMover verwendest.\nVerbindung wird getrennt...",
+    "0/1/0": "Inicializa tus datos en el Banco de Pokémon\nantes de usar el Poké Trasladador.\nDesconectando...",
+    "0/1/1": "먼저 포켓몬 뱅크에서 데이터를 초기화한 후\n포켓무버를 이용해 주십시오.\n연결을 종료하는 중입니다…",
+    "0/1/2": "请先登录宝可梦虚拟银行完成数据初始化，\n再使用宝可梦虚拟传送。\n正在断开连接……",
+    "0/1/3": "請先登入寶可夢虛擬銀行完成資料初始化，\n再使用寶可夢虛擬傳送。\n正在中斷連線……",
 }
 
-TITLE_OFFLINE = {
-    "0/0/4": f"現在のモード：オフライン（{R_BUTTON}で切替）",
-    "0/0/5": f"現在のモード：オフライン（{R_BUTTON}で切替）",
-    "0/0/6": f"Current: Offline ({R_BUTTON}:switch mode)",
-    "0/0/7": f"Mode : hors ligne ({R_BUTTON} : changer)",
-    "0/0/8": f"Modalità: offline ({R_BUTTON}: cambia modo)",
-    "0/0/9": f"Modus: Offline ({R_BUTTON}: Modus wechseln)",
-    "0/1/0": f"Modo: sin conexión ({R_BUTTON}: cambiar modo)",
-    "0/1/1": f"현재 모드: 오프라인 ({R_BUTTON}로 전환)",
-    "0/1/2": f"当前模式：离线模式（按{R_BUTTON}键切换模式）",
-    "0/1/3": f"目前模式：離線模式（按{R_BUTTON}鍵切換模式）",
-}
-
-TITLE_ONLINE = {
-    "0/0/4": f"現在のモード：オンライン（{R_BUTTON}で切替）",
-    "0/0/5": f"現在のモード：オンライン（{R_BUTTON}で切替）",
-    "0/0/6": f"Current: Online ({R_BUTTON}:switch mode)",
-    "0/0/7": f"Mode : en ligne ({R_BUTTON} : changer)",
-    "0/0/8": f"Modalità: online ({R_BUTTON}: cambia modo)",
-    "0/0/9": f"Modus: Online ({R_BUTTON}: Modus wechseln)",
-    "0/1/0": f"Modo: en línea ({R_BUTTON}: cambiar modo)",
-    "0/1/1": f"현재 모드: 온라인 ({R_BUTTON}로 전환)",
-    "0/1/2": f"当前模式：在线模式（按{R_BUTTON}键切换模式）",
-    "0/1/3": f"目前模式：在線模式（按{R_BUTTON}鍵切換模式）",
-}
+TITLE_OFFLINE = mode_messages("offline")
+TITLE_ONLINE = mode_messages("online")
 
 
 def read_game_titles(source_romfs: Path) -> tuple[tuple[list[int], int], ...]:
@@ -143,6 +131,9 @@ def main() -> None:
     parser.add_argument("--source-romfs", required=True, type=Path)
     parser.add_argument("--output-romfs", required=True, type=Path)
     args = parser.parse_args()
+    subprocess.run([sys.executable, "-B", str(Path(__file__).absolute().parents[2] /
+                    "common/tools/check_file_links.py"), "--recursive", "--allow-missing",
+                    *(str(path) for path in vars(args).values() if isinstance(path, Path))], check=True)
 
     game_titles = read_game_titles(args.source_romfs)
     for archive in ARCHIVES:
@@ -159,13 +150,13 @@ def main() -> None:
         def flags(line: int) -> int:
             return message_codec.u16(original, section_offset + 4 + line * 8 + 6)
 
-        offline_title = f"{TITLE_HOME_SHORT[archive]}\n{TITLE_OFFLINE[archive]}"
-        online_title = f"{TITLE_HOME_SHORT[archive]}\n{TITLE_ONLINE[archive]}"
+        offline_title = TITLE_OFFLINE[archive]
+        online_title = TITLE_ONLINE[archive]
         for mode, text in (("offline", offline_title), ("online", online_title)):
-            if len(text) > TITLE_TEXT_BUFFER_LENGTH:
+            if len(text.encode("utf-16le")) > 254 or len(text.splitlines()) != 1:
                 raise ValueError(
                     f"{archive} {mode} title text exceeds "
-                    f"{TITLE_TEXT_BUFFER_LENGTH} characters: {len(text)}"
+                    f"127 UTF-16 units or is not one line: {len(text)}"
                 )
 
         entry.files[0] = message_codec.patch_message_file(
@@ -178,7 +169,18 @@ def main() -> None:
                 (BANK_CONNECTION_MESSAGES[archive], flags(STOCK_BANK_CONNECT_LINE)),
                 (SAVE_MESSAGES[archive], flags(STOCK_SAVE_LINE)),
                 (DISCONNECT_MESSAGES[archive], flags(STOCK_DISCONNECT_LINE)),
+                (TITLE_SWITCH_MESSAGES[archive], flags(TITLE_HOME_LINE)),
+                (MISSING_BANK_DISCONNECT_MESSAGES[archive], flags(STOCK_DISCONNECT_LINE)),
+                (USER_LABEL_MESSAGES[archive], flags(TITLE_HOME_LINE)),
+                (USER_SWITCH_HINTS[archive], flags(TITLE_HOME_LINE)),
             ),
+            # Preserve the original entry's zero padding and flags. Only the
+            # one button code unit changes; do not re-encode the displayed string.
+            # 保留原条目的零填充和标志，只改 L 字形，不重新编码整条可见字符串。
+            replacement_values={TITLE_LANGUAGE_LINE: [
+                ord(L_BUTTON) if unit == ord("L") else unit
+                for unit in message_codec.read_message_values(original)[TITLE_LANGUAGE_LINE][0]
+            ]},
         )
         title_entry = entries[GAME_TITLE_FILE_INDEX]
         original_titles = message_codec.read_message_values(title_entry.files[0])
@@ -199,19 +201,32 @@ def main() -> None:
             raise ValueError(f"game-title verification failed for {archive}")
         expected = {
             TITLE_HOME_LINE: original_lines[TITLE_HOME_LINE],
+            TITLE_LANGUAGE_LINE: language_hint(original_lines[TITLE_LANGUAGE_LINE]),
             TITLE_OFFLINE_LINE: offline_title,
             TITLE_ONLINE_LINE: online_title,
+            TITLE_SWITCH_LINE: TITLE_SWITCH_MESSAGES[archive],
             INITIAL_CONNECT_LINE: INTERNET_MESSAGES[archive],
             BANK_CONNECT_LINE: BANK_CONNECTION_MESSAGES[archive],
             SAVE_LINE: SAVE_MESSAGES[archive],
             DISCONNECT_LINE: DISCONNECT_MESSAGES[archive],
+            MISSING_BANK_DISCONNECT_LINE: MISSING_BANK_DISCONNECT_MESSAGES[archive],
         }
         for line, value in expected.items():
             if rebuilt_lines[line] != value:
                 raise ValueError(f"message verification failed for {archive}, line {line}")
+        for table in (BANK_CONNECTION_MESSAGES,SAVE_MESSAGES):
+            if set(table)!=set(ARCHIVES) or not 1<=len(table[archive].splitlines())<=3:
+                raise ValueError(f"local-server text must cover every language within three rows: {archive}")
+        notice=MISSING_BANK_DISCONNECT_MESSAGES[archive]
+        if len(notice.splitlines())!=3 or notice.splitlines()[-1]!=DISCONNECT_MESSAGES[archive] or \
+                max(len(line.encode("utf-16le"))//2 for line in notice.splitlines())>48:
+            raise ValueError(f"missing-Bank disconnect text exceeds three lines/48 units in {archive}")
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(rebuilt)
         print(f"patched {archive} -> {destination}")
+
+    build_title_archive(args.source_romfs, args.output_romfs)
+    build_title_fonts(args.source_romfs, args.output_romfs)
 
 
 if __name__ == "__main__":

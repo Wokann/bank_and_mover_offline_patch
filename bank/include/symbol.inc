@@ -19,6 +19,9 @@
 .definelabel ReadWriteMappedEnd,                0x003FB000
 .definelabel BankStartup_ConstructorCall,       0x00100010
 .definelabel BankStartup_RunConstructors,       0x00102BA4
+.definelabel NetworkMonitor_Update,            0x0010D67C
+.definelabel NetworkMonitor_Worker,            0x0029D908
+.definelabel NetworkMonitor_WorkerAccountLoad, 0x0029D944
 
 ; -----------------------------------------------------------------------------
 ; Bank object and fixed-size serialized file
@@ -53,6 +56,7 @@
 ; 主业务状态
 ; -----------------------------------------------------------------------------
 .definelabel BankFlow_SelectNextState,          0x002A5580
+.definelabel TitleScreenState_Confirm,          0x002D139C
 .definelabel BankFlow_CreateStateObject,        0x002A5A7C
 .definelabel BankMenuState_Update,              0x002A6750
 .definelabel BankMenuState_SelectionCallback,   0x002A6C8C
@@ -70,32 +74,37 @@
 .definelabel DisconnectCleanupState_Update,      0x002ABC24
 .definelabel ReturnToTitleState_Update,         0x002ABC24
 .definelabel DisconnectCleanupState_Initialize, 0x002ABD38
-.definelabel DisconnectCleanup_SkipRemoteJob,   0x002ABD94
 .definelabel InitialRemoteRecordState_Update,   0x002ACBDC
 .definelabel InitialRemoteRecord_MessageIdLoad, 0x002ACE14
 .definelabel RewardEligibilityState_Update,     0x002AD1BC
 .definelabel PostSelectionConnectionState_Update,0x002A93F4
 .definelabel PostSelectionConnectionState_Initialize,0x002A9700
 .definelabel RewardReceiveState_Update,         0x002A9750
+.definelabel RewardReceive_ConnectionMessageIdLoad, 0x002A9824
+; These select portrait/mileage table 37, line 14, NOT connection table 39.
+; 这两处选择人物／里程文本表 37 的第 14 条，不是连接提示表 39。
+.definelabel RewardReceive_FirstMileageMessageIdLoad,0x002AA990
+.definelabel RewardReceive_SecondMileageMessageIdLoad,0x002AAEC8
 .definelabel RewardReceive_FirstPresentBranch,   0x002A981C
 .definelabel RewardReceive_FirstPresentPath,     0x002A9878
+.definelabel RewardReceive_SecondPresentBranch,  0x002AAC7C
+.definelabel RewardReceive_SecondPresentPath,    0x002AAEE0
+.definelabel RewardReceive_UnbindCall,           0x002ABA1C
+.definelabel RewardReceive_DestroyCall,          0x002ABA28
+.definelabel GiftJob_Unbind,                     0x0029F74C
+.definelabel GiftJob_Destroy,                    0x0029F594
 ; Substate 25 performs the stock UI/asynchronous cleanup before a callback
 ; advances the state to 27, where local mileage is calculated.
 ; 子状态 25 执行原版 UI／异步清理，随后由回调推进到子状态 27
 ; 进行本地里程计算。
 .definelabel RewardReceive_PostRemoteCleanupSubstate,0x002AAB88
-.definelabel RewardReceive_LocalMileageSubstate, 0x002AABFC
-.definelabel RewardReceive_UpdateReturnPending,  0x002AB104
 .definelabel BankUserData_GetFirstPresentFlag,   0x002BA590
 .definelabel BankCreateState_Update,            0x002AE568
-.definelabel BankCreate_InitializeEmptyObject,   0x002AE8B0
-.definelabel BankCreate_SuccessReturn,           0x002AE878
 .definelabel BankCreateConnection_MessageIdLoad,0x002AED3C
 .definelabel BankNoSaveRollbackState_Update,     0x002AEB9C
 .definelabel NetworkConnectionState_Initialize, 0x002AF34C
 .definelabel NetworkConnectionState_Update,     0x002AF1FC
 .definelabel NetworkConnection_AvailabilityCall,0x002AF37C
-.definelabel NetworkConnection_SkipRemoteJob,    0x002AF38C
 .definelabel NetworkConnection_StateTimerInitCall,0x002AF3D0
 .definelabel NetworkConnection_MessageIdLoad,      0x002AF3B4
 .definelabel NetworkPreparation_MessageIdLoad,     0x002AF1D0
@@ -103,6 +112,11 @@
 .definelabel BankFlow_RecoveryResult,           0x002A5860
 .definelabel BankFlow_ForceRollbackSuccess,     0x002A588C
 .definelabel TransactionRecoveryState_Update,  0x002A8760
+; Only this message-ID load changes; native matching/pagination/cleanup remain intact.
+; 仅替换不匹配提示的消息编号，原版匹配、翻页及收尾保持不变。
+.definelabel TransactionRecovery_MismatchMessageIdLoad, 0x002A8C98
+.definelabel ForceRollbackState_Update,        0x002AD7BC
+.definelabel BankGame_GetSelected,             0x00233A6C
 .definelabel MessageView_GetResult,             0x001D6600
 .definelabel Ui_SetPaneVisible,                 0x001E7084
 .definelabel Ui_ApplyAnimation,                 0x001E69AC
@@ -121,6 +135,10 @@
 .definelabel TurtleStorage_SaveBackendCall,        0x0015DC40
 .definelabel Title_TurtleStorageCheckCall,         0x002A484C
 .definelabel Initial_TurtleStorageCheckCall,       0x002AC578
+.definelabel Initial_TurtleStorageLoadCall,        0x002AC5A0
+.definelabel InitialGameCheck_Update,              0x002ABE08
+.definelabel InitialGameCheck_UpdateWaiting,       0x002ACA98
+.definelabel InitialGameCheck_Destruct,             0x002ACB10
 .definelabel Initial_TurtleStorageFormatCall,      0x002AC678
 .definelabel Initial_TurtleStorageFormatPollCall,  0x002AC68C
 .definelabel TurtleStorage_FormatPoll,              0x002BB16C
@@ -139,6 +157,7 @@
 .definelabel WaitingUi_Hide,                    0x001D5F50
 .definelabel BankDataSyncState_Update,          0x002AF460
 .definelabel BankDataSyncState_Initialize,      0x002AFE38
+.definelabel BankDataSyncState_Destruct,        0x002AFE70
 ; Native transaction-descriptor copy sites inside the Bankdata-sync and save
 ; state machines. Offline mode preserves the existing descriptor fields and
 ; changes only the transaction-state byte.
@@ -152,14 +171,23 @@
 ; 状态 ID 15：0x50 字节控制器持有一个 0x158 字节使用权作业。它不同于状态 ID 12
 ; （奖励资格）和 ID 25（Bank 盒子）。
 .definelabel OptionalRewardState_Update,         0x002B0270
+.definelabel OptionalRewardState_TicketUiPrepare,0x002B0374
+.definelabel OptionalRewardState_TicketUiAdvance,0x002B03F0
+.definelabel OptionalRewardState_TicketFadeBeginCall,0x002B0404
+.definelabel OptionalRewardState_TicketFadeEndCall,0x002B0438
+.definelabel OptionalRewardState_TicketUiCleanupCall,0x002B19D0
+.definelabel Ui_SetAppletFade,                   0x001D4B5C
+.definelabel MessageUi_Animate,                 0x001D67C8
 .definelabel OptionalRewardState_TicketInitializeCall, 0x002B0444
 .definelabel OptionalRewardState_TicketPollCall,  0x002B0464
 .definelabel OptionalRewardState_TicketUnbindCall,0x002B1994
 .definelabel TicketJob_Initialize,               0x002A04C0
 .definelabel TicketJob_Poll,                     0x002A1CAC
+.definelabel TicketJob_PollPurchase,             0x002A0ADC
 .definelabel TicketJob_Unbind,                   0x002A20B8
 .definelabel SRV_GetServiceHandle,               0x0023514C
-.definelabel LocalTicket_BackendStorage,         0x003FAFF4
+.definelabel ServerTicket_BackendStorage,         0x003FAFF4
+.definelabel TurtleRedirect_SaveActiveStorage,  0x003FAFF8
 .definelabel BankSaveState_Update,              0x002B1CF8
 .definelabel BankSave_SerializeAndStage,        0x002B2320
 .definelabel BankSaveState_Initialize,           0x002B2520
@@ -172,6 +200,15 @@
 ; 标题更新会显示两层标题 UI，并通过 state+0x3C 的字节报告标题退出。
 .definelabel TitleScreenState_Update,           0x002B1AD0
 .definelabel TitleScreenState_Initialize,       0x002B1BF0
+.definelabel TitleScreenState_Exit,             0x002B1B5C
+.definelabel TitleScreenState_Destruct,         0x002B1CD4
+.definelabel StartupPreview_UpdateInitialize,  0x002A46E0
+.definelabel StartupPreview_UpdateWaiting,     0x002A47EC
+.definelabel StartupPreview_Initialize,        0x002A47F4
+.definelabel StartupPreview_ReadSettings,      0x002A4838
+.definelabel StartupPreview_SettingsReady,     0x002A489C
+.definelabel StartupPreview_SettingsAbsent,    0x002A4940
+.definelabel StartupPreview_Destruct,          0x002A4958
 .definelabel TitleScreenState_ExitUiCleanup,    0x002B1B98
 .definelabel TitleScreenState_ExitComplete,     0x002B1BDC
 .definelabel BankUi_ReleaseWaitingView,         0x001D6A34
@@ -201,6 +238,11 @@
 .definelabel BankRemote_UpdateMetadata,         0x002A2AD8
 .definelabel BankRemote_CreateFile,             0x002A2E40
 .definelabel BankRemote_RequestFile,            0x002A2F68
+.definelabel BankRemote_RecordProvider,         0x002A2FB0
+.definelabel BankRemote_RecordProviderResult,   0x002A2FCC
+.definelabel BankRemote_QueryProvider,          0x002A3198
+.definelabel BankRemote_QueryProviderResult,    0x002A31B4
+.definelabel BankInitialRecord_CampaignRequest, 0x002ACEB4
 .definelabel BankRemote_QueryTransaction,       0x002A3144
 .definelabel BankRemote_CreateSerializedFile,   0x002A37E0
 .definelabel BankRemote_RollbackStagedUpdate,   0x001D5C28

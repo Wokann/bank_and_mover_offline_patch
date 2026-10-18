@@ -2,6 +2,7 @@
 #define BANK_OFFLINE_PATCH_TURTLE_REDIRECT_H
 
 #include "patch_types.h"
+#include <stdint.h>
 
 enum TurtleRecordConstant {
     TURTLE_RECORD_KNOWN_FIELDS_SIZE = 0x2C,
@@ -39,22 +40,26 @@ enum TurtleBackendResult {
     TURTLE_BACKEND_IO_ERROR = 6
 };
 
-enum TurtlePathStatus {
-    TURTLE_PATH_UNUSABLE = -1,
-    TURTLE_PATH_MISSING = 0,
-    TURTLE_PATH_VALID = 1
-};
-
 enum TurtleStorageConstant {
     TURTLE_OBJECT_VALID = 1,
     TURTLE_APPLICATION_CONDITION_ID = 4,
     TURTLE_MODE_OFFLINE = 0
 };
 
+enum TurtlePrepareResult {
+    TURTLE_PREPARE_WAIT = 0,
+    TURTLE_PREPARE_READY = 1,
+    TURTLE_PREPARE_MISSING_SETTINGS = 2,
+    TURTLE_PREPARE_FAILED = 3
+};
+
 typedef s32 (*TurtleStorage_LoadAtOnceFn)(void *,void *,void *);
 typedef s32 (*TurtleStorage_CheckArchiveStatusFn)(void *,void *);
+typedef void (*TurtleStorage_FormatStartFn)(void *,void *heap);
+typedef s32 (*TurtleStorage_FormatPollFn)(void *,u8 *);
 typedef void (*TurtleStorage_FinishSaveFn)(void *,u32,u32,u32);
 typedef void (*ApplicationConditionFn)(u32);
+typedef void (*StateLocalSave_CompleteFn)(void *,u32);
 typedef void (*TurtleRecord_SetTransactionStateFn)(void *,u8);
 typedef void *(*ObjectCreateBufferFn)(void *,u32);
 typedef u32 (*ObjectGetSizeFn)(void *);
@@ -110,8 +115,18 @@ typedef struct TurtleFormatStateView {
     TurtleStorageView *storage;
 } TurtleFormatStateView;
 
+typedef struct TurtleLocalSaveStateView {
+    u8 reserved00[0x08];
+    struct TurtleGameDataView *gameData;
+    u8 reserved0C[0x18];
+    u8 kind;
+} TurtleLocalSaveStateView;
+
 typedef struct TurtleLanguageSelectionView {
     void *vtable;
+    /* Pending native language-save action; zero after it is consumed.
+       Applied interface language lives in the original language manager. */
+    /* 原版待保存语言请求，消费后清零；已生效语言位于原语言管理器，不在此处。 */
     u32 languageId;
     u8 useJapaneseKanji;
 } TurtleLanguageSelectionView;
@@ -126,6 +141,11 @@ typedef struct TurtleGameDataView {
 
 #define TurtleStorage_LoadAtOnce \
     ((TurtleStorage_LoadAtOnceFn)0x002BB1A8u)
+#define TurtleStorage_SaveAtOnce \
+    ((TurtleStorage_LoadAtOnceFn)0x002BB260u)
+#define TurtleStorage_FormatStart ((TurtleStorage_FormatStartFn)0x002BB380u)
+#define TurtleStorage_FormatPoll ((TurtleStorage_FormatPollFn)0x002BB16Cu)
+#define TurtleRedirect_SaveActiveStorage ((volatile u8 *)0x003FAFF8u)
 #define TurtleStorage_CheckArchiveStatus \
     ((TurtleStorage_CheckArchiveStatusFn)0x002BB6E8u)
 #define TurtleStorage_FinishSave \
@@ -134,6 +154,7 @@ typedef struct TurtleGameDataView {
     ((ApplicationConditionFn)0x001D4D90u)
 #define ApplicationCondition_Remove \
     ((ApplicationConditionFn)0x00229EB4u)
+#define StateLocalSave_Complete ((StateLocalSave_CompleteFn)0x0025C3E8u)
 #define TurtleRecord_SetTransactionState \
     ((TurtleRecord_SetTransactionStateFn)0x001D4D84u)
 #define GameData_LoadTurtle ((GameData_LoadTurtleFn)0x0015DBF0u)
@@ -144,10 +165,24 @@ typedef struct TurtleGameDataView {
 
 s32 TurtleRedirect_LoadBackend(void *storage,void *path,void *object);
 s32 TurtleRedirect_SaveBackend(void *storage,void *path,void *object);
-s32 TurtleRedirect_CheckBackend(void *storage,void *path);
 s32 TurtleRedirect_FormatBackend(void *state);
 s32 TurtleRedirect_FormatPoll(void *state,u8 *result);
-int TurtleRedirect_ClearTransactionAndSave(void *storage,void *object);
-int TurtleRedirect_PrepareSession(TurtleGameDataView *gameData,void *heap,u32 mode);
+void TurtleRedirect_StateSaveBegin(void *state,u32 kind);
+s32 TurtleRedirect_StateSavePoll(void *state);
+void TurtleRedirect_OriginalStateSaveBegin(void *state,u32 kind);
+s32 TurtleRedirect_OriginalStateSavePoll(void *state);
+/* Wait, native-validated settings, genuinely missing settings/language, or
+   failure. Failure never authorizes initialization or import. The worker owns
+   only serialized bytes, not these UI pointers. */
+/* 等待、原版校验及设置完成、确实缺少设置／语言，或失败。失败不允许初始化或导入。
+   后台仅持有序列化字节，不保存这些界面指针。 */
+int TurtleRedirect_PrepareSessionPoll(uintptr_t peer,TurtleGameDataView *,void *heap,u32 mode);
+int TurtleRedirect_PrepareSessionPending(uintptr_t peer);
+void TurtleRedirect_CancelPrepareSession(uintptr_t peer);
+/* -1 waits at the original call site; other results retain native meanings.
+   Initial load may publish a missing record only after native validation. */
+/* -1 在原调用点等待；其他结果沿用原定义。缺失记录仅在原校验通过后后台发布。 */
+s32 TurtleRedirect_InitialCheckPoll(uintptr_t peer,void *storage,void *path);
+s32 TurtleRedirect_InitialLoadPoll(uintptr_t peer,TurtleGameDataView *,void *heap);
 
 #endif

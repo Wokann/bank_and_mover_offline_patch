@@ -7,7 +7,7 @@ for build instructions and transaction rules.
 ## Target and memory layout
 
 - Title ID: `00040000000C9C00`
-- Version: v5.5.0
+- Version: v1.5
 - Image base: `0x00100000`
 - Decompressed code SHA-256: `001C20ADA74016507C969BB44A0A50F8EDF803EC06A3FC46834263BA8DF0FD2F`
 
@@ -37,7 +37,7 @@ identifier. The integrated Gen 5 source redirect owns the native cartridge I/O
 hooks, so the external Transporter Redirect Patch's `0xE0` reservation is
 removed. Assembly limits and static verification still protect LayeredFS and
 the version marker. All feature objects use the added-page layout below.
-The loader and ticket test policy share the environment-identification helper;
+The loader and ticket compatibility policy share the environment-identification helper;
 the latter also checks ticket-interface replies rather than assuming that the
 environment alone establishes ticket support.
 
@@ -51,20 +51,27 @@ byte for byte. No native ticket-job or free-campaign function is reclaimed.
 
 | Payload area | Modules | Used end / remaining space |
 |---|---|---|
-| Text tail `0x0028D2E0–0x0028DFC0`: mapped executable padding | Startup trampoline and automatic-environment `code_expansion.o` | `0x0028D3C0` / `0xC00` bytes |
-| Added pages `0x00365000–0x00368000`: extended data, executable after startup | All mode wrappers, native trampolines, and feature objects | `0x00367090` / `0xF70` bytes |
+| Text tail `0x0028D2E0–0x0028DFC0`: mapped executable padding | Startup trampoline and automatic-environment `common/fs_system/runtime_environment.o` | `0x0028D56C` / `0xA54` bytes |
+| Original RW-page padding `0x00363FE0–0x00363FF0`, after logical BSS | Environment/SVC/ticket capability and ticket-result cache | 16 bytes; does not overlap native objects or mode storage |
+| Added code `0x00365000–0x0038E000`: extended data, executable after startup | Wrappers, native trampolines, features, fakeServer and async transport | Used end varies by build; check `CombinePatch_OfflinePayloadUsedEnd` against `CombinePatch_CodeEnd` |
+| Context `0x0038E000–0x00492000` | Service data and separate 1 MiB I/O workspace | `0x104000` reserved, ARM object `0x101660`, rules, word pools and parsing workspaces allocated on demand; final byte is a ticket-job marker, RW |
+| Worker control `0x00492000–0x00493000` | Platform, task and UI-side request registry | ARM size `0x9D8`, RW |
+| Task body `0x00493000–0x00593000` | Upload/download and NDS path copies | 1 MiB, RW; independent of SDK object destruction |
+| Worker stack `0x00593000–0x005A3000` | Service thread entered through native SDK TLS trampoline | 64 KiB, RW; main-thread stack unchanged |
+| Local source control `0x005A3000–0x005A4000` | Original tail holds `FsLocalSource` | ARM object `0xAE8`, RW, not an unmapped guard page |
+| Local Gen5 image `0x005A4000–0x00624000` | Independent complete working image | 512 KiB RW; no Bank/task-buffer alias |
 
 The startup hook redirects only the call at `0x00100010` to the small loader.
 It preserves `r0–r12/LR`, duplicates the current-process pseudo-handle with SVC
 `0x27`, queries SVC `0x2A` for the environment, and uses the real handle for
 SVC `0x70` (operation `6`, permission `7`) on
-the three added pages, closes the handle, restores registers, and continues the
+only the 41 code-reservation pages, leaving the service and worker runtime RW; it closes the handle, restores registers, and continues the
 native constructor walker at `0x00102ADC` in Thumb state. Hardware errors stop
 through SVC Break. Only the identified-Azahar compatibility case below may
 continue without a successful permission change.
 
 The matching ExHeader retains all original segment bases and text/rodata sizes.
-It extends data to `0x7C` pages, ending at `0x00368000`, sets BSS size to zero,
+It extends data to `0x338` pages, ending at `0x00624000`, sets BSS size to zero,
 and grants only required SVC bits while preserving existing descriptors.
 Original BSS is explicit zero-filled image data at unchanged addresses;
 `0x00364000–0x00365000` is also a zero-filled RW separator, not an unmapped
@@ -72,16 +79,18 @@ guard page. This title already allows `0x23/0x27/0x2A/0x3C`, so only `0x70`
 is added. The design follows
 [Magikoopa's data-tail expansion](https://github.com/RicBent/Magikoopa/blob/master/MagikoopaUI/patchmaker.cpp),
 but retains the actual text size so Luma's LayeredFS injection point does not move.
-The added pages load as RW data and alone become executable; old data/BSS and
+The added pages load as RW data; only 41 code pages become executable. The service/worker runtime, old data/BSS and
 the rest of the process are not globally made executable.
 
 ### Shared BPS loading and automatic environment handling
 
-The BPS source length is `0x22A000`, target length is `0x268000`, and metadata
+The BPS source length is `0x22A000`, target length is `0x524000`, and metadata
 length is zero. Luma allocates the target range from the expanded ExHeader before
 patching; unmodified Azahar's BPS implementation resizes its image to the target
 length before reconstructing it. Both obtain the same bytes and map data through
-`0x00368000`. The original BSS-clear bounds `0x003293FC–0x003638A4` remain intact.
+`0x00624000`. The 1 MiB I/O workspace and task body have separate ownership;
+the worker has its own stack. Main-thread stack size and original BSS-clear
+bounds `0x003293FC–0x003638A4` remain intact.
 See [Luma's BPS decoder](https://github.com/LumaTeam/Luma3DS/blob/master/sysmodules/loader/source/bps_patcher.cpp)
 and [Azahar's BPS resizing](https://github.com/azahar-emu/azahar/blob/9e6f523a57fac9564ac0bf8286db3c3702d301ec/src/core/file_sys/patch.cpp#L260-L280).
 
@@ -107,7 +116,7 @@ and source-selection comparison are in-place hooks; their native bodies remain
 available through trampolines rather than holding new payloads. Native data/BSS
 addresses do not move.
 
-The scanner allocates a `0xE60`-byte context from the native heap on demand.
+The scanner allocates a `0xF40`-byte context from the native heap on demand.
 Its pointer uses `0x00363FF0`, and the three mode bytes begin at `0x00363FF4`.
 The current ticket-job backend is stored at `0x00363FF8`.
 These addresses are after the logical BSS end `0x003638A4` and before the RW
@@ -115,8 +124,9 @@ page end `0x00364000`, rather than in the native resource-pointer table at
 `0x00329FF8/0x00329FFC`. Source scanning ignores the mode bytes and is shared
 by Online and Offline Mode.
 
-The four ticket hooks replace existing four-byte `BL` instructions in place.
-The remaining native ticket-state and job bytes are unchanged.
+Ticket initialization, resources, system binding/unbinding and send hooks replace
+four-byte `BL` instructions in place. Native polling, parsers, consumers and
+destruction remain; job bodies do not hold new payloads.
 
 The zero-filled tails in `.rodata` (`0x002EBA58–0x002EC000`, `0x5A8` bytes)
 and the code image padding at `0x003293FC–0x0032A000` (`0xC04` bytes) are
@@ -126,159 +136,88 @@ the existing `.rodata` mapping. The SVC layout instead extends data, materialize
 BSS, and pairs its BPS with an ExHeader and startup permission change, without
 relocating the original program.
 
-## Expansion development and approach comparison
-
-### Development sequence
-
-1. **Magikoopa-based hardware expansion.** Materialize original BSS as zeros,
-   extend the loaded data pages, place a small bootstrap in the original text
-   padding, and make the added pages executable through SVC `0x70`. Existing
-   variables stay at their addresses without relocating rodata, data, or stock
-   code. The initial IPS failed to load in unmodified Azahar before reaching SVC.
-   Reference: [Magikoopa's image/ExHeader preparation](https://github.com/RicBent/Magikoopa/blob/master/MagikoopaUI/patchmaker.cpp).
-2. **Implement both missing emulator capabilities.** The personal
-   [`svc112` branch](https://github.com/Wokann/azahar/tree/svc112) addresses two
-   separate problems: its
-   [loader](https://github.com/Wokann/azahar/blob/svc112/src/core/loader/ncch.cpp)
-   allocates the complete segment-layout buffer before patching; its
-   [SVC dispatch](https://github.com/Wokann/azahar/blob/svc112/src/core/hle/kernel/svc.cpp)
-   and [process-memory implementation](https://github.com/Wokann/azahar/blob/svc112/src/core/hle/kernel/process.cpp)
-   validate the real process handle, perform the Protect operation needed here,
-   and invalidate the code cache. This is not a success-return stub: the loader
-   enables IPS placement, while SVC implements the permission change.
-3. **Try a separate Citra layout.**
-   [oot3d_practice_menu's instructions](https://github.com/gamestabled/oot3d_practice_menu/blob/master/README.md)
-   distribute separate patches and ExHeaders for hardware and Citra. Its
-   [hardware header](https://github.com/gamestabled/oot3d_practice_menu/blob/master/exheader.bin)
-   extends data with zero BSS; its
-   [Citra header](https://github.com/gamestabled/oot3d_practice_menu/blob/master/exheader_citra.bin)
-   retains original data and enlarges BSS. The resulting experiment here added
-   `0x3D000` BSS to the `0x22A000` image, giving the old emulator a `0x267000`
-   patch buffer, and used a compile-time permission bypass. The reference's
-   [shared loader](https://github.com/gamestabled/oot3d_practice_menu/blob/master/src/loader.c)
-   still calls SVC `0x70` but rejects only negative results, so an unhandled
-   call retaining a positive handle can continue. This neither implements SVC
-   nor means its Citra build macro removes that call.
-4. **Unify loading and permission handling.** BPS now reconstructs an image of
-   the target length without using additional BSS as an emulator buffer trick.
-   Hardware and SVC-capable Azahar perform the permission change normally;
-   missing-SVC Azahar continues only under the identity/result conditions above.
-   The initializer overwrite and platform-layout switches are removed. Every
-   environment uses the same ExHeader and payload layout.
-
-### Why the earlier approaches are not interchangeable
-
-| Project approach | Image loading | Execution of added pages | Applicable environment |
-|---|---|---|---|
-| Initial hardware IPS | Extended data, zero BSS | SVC `0x70` must succeed | Hardware or `svc112` with both loader and SVC fixes |
-| Citra-style IPS experiment | Original data, enlarged BSS for emulator patch buffering | Compile-time bypass; permissive instruction fetching | Emulator only, not hardware |
-| Final unified BPS | Extended data, zero BSS; target-length reconstruction | Normal SVC, or narrowly identified Azahar unhandled-call compatibility | Same files for hardware and the two tested Azahar configurations |
-
-Loading and execution are separate gates. Before patching, the old Azahar
-[loader](https://github.com/azahar-emu/azahar/blob/9e6f523a57fac9564ac0bf8286db3c3702d301ec/src/core/loader/ncch.cpp)
-extends the original image only by BSS, not by the enlarged data-page count;
-its [IPS decoder](https://github.com/azahar-emu/azahar/blob/9e6f523a57fac9564ac0bf8286db3c3702d301ec/src/core/file_sys/patch.cpp)
-rejects out-of-buffer records. With zero BSS, the hardware IPS therefore fails
-to apply before startup. Even after resolving that gate, an unimplemented SVC
-does not return normal success and fails the earlier strict startup check.
-
-Conversely, [Luma's loader](https://github.com/LumaTeam/Luma3DS/blob/master/sysmodules/loader/source/loader.c)
-allocates the patch buffer from loaded text/rodata/data pages, **excluding extra
-BSS**. Enlarged BSS neither provides hardware IPS with that buffer nor loads
-file payloads as data; it denotes zero-initialized memory. Hardware also needs
-real execute permission, so an emulator bypass remains insufficient even if
-loading is solved separately. The headers differ in loading and permissions,
-not machine performance, and cannot simply be exchanged.
-
-The final approach handles both gates: BPS reconstructs the full target image,
-the expanded-data ExHeader specifies its mapping, and the bootstrap handles
-permissions and environment detection. Hardware errors are not ignored, and
-the missing-SVC Azahar route does not actually grant execute permission. Exact
-result checks and memory boundaries are documented above.
-
-### Operation and scope of the new approach
-
-Build with `make -C mover` and install `code.bps`, `exheader.bin`, and `romfs/`
-together. Use `SD:/luma/titles/00040000000C9C00/` with Luma game patching enabled
-on hardware, or the user directory's `load/mods/00040000000C9C00/` with a full
-`0x800`-byte ExHeader in Azahar. Remove stale `code.ips` and `code.bin` from that
-directory. No expansion macro or platform-specific layout is required. The
-ticket policy separately enables missing-interface fallback. Its test setting
-reuses environment detection but probes ticket replies, not permission results.
-
-This project's new contribution is the unified combination of fixed-address
-data-tail expansion, BPS target-length loading, and Azahar identity/unhandled-SVC
-result detection, not a new kernel expansion primitive. The underlying mechanisms
-have public precedents. This investigation did not establish whether the exact
-combination already exists elsewhere, so it does not claim worldwide novelty.
-Comparisons of the reference projects come from their public source and ExHeader
-fields; they were not run during this investigation. Missing-SVC compatibility
-is limited to the tested Azahar behavior, not every Citra fork or a future emulator
-that strictly enforces instruction-fetch permissions. An implemented SVC should
-continue to use the normal success path.
-
 ## Shared Bank language settings
 
-Two call-site hooks share the SD language settings in both modes:
+Bank's existing console save is the language authority; Mover does not initialize
+a separate native record. Startup reads Bank's valid `0x200`-byte record before
+binding resources. Missing or invalid native records retain the original fallback.
 
-| Hook | Original operation | Replacement |
-|---|---|---|
-| `0x00240D7C` | Load cached language from game data `+0xD0` before constructing startup views | Read the language fields from an exact-size `sav.bin`, update cached language and kanji flag `+0xD4`, then return the selected ID in `r1` |
-| `0x0025C618` | `LanguageSelection_SetSettings` (`0x0022C06C`) after the native language-confirmation callback has rebound resources | Retain that setter, then update the existing SD record through `sav.tmp` |
+| Hook | Current operation |
+| --- | --- |
+| `0x00240F38` | Poll the task-owned native settings snapshot before startup initialization. |
+| `0x00241024` | Cancel undelivered startup results before native destruction. |
+| `0x0025C618` | Apply the original language setter and retain numerical language fields only. |
+| `0x002470F4` | During the animated title-return state, save Bank-native language, then synchronize SD. |
+| `0x002472E8` | Cancel outstanding delivery before the return state's original destruction. |
 
-The startup wrapper preserves `r0`, `r2`, `r3` and the return address. Its native
-continuation still calls `0x0022AF28`, which selects both the message archive and
-font, and sets the controller's language-ready flag. Missing/unreadable files,
-wrong file lengths and IDs outside `1/2/3/4/5/7/8/9/10` leave the cached settings
-unchanged; the normal console-language/selection fallback remains reachable.
-The Japanese preference is normalized to boolean. The resource-binding function
-and the native setter remain intact.
+The language view closes before file I/O. The worker opens Bank's permitted
+save archive `0x567890B4`, path `[1, 0xC9B, 0]`, and `/turtle`. It checks the
+native marker and CRC16, modifies only the two 16-bit fields at `0x28/0x2A`,
+commits, closes, reopens and verifies the complete record. Only then may it update
+the selected user's `sav.bin`. Genuine SD absence permits copying the full native
+record; an existing SD record receives language fields only.
 
-`language_settings.c/.h` describes the two 16-bit fields at `0x28` and `0x2A` in
-the serialized `0x200`-byte Bank record. Bank's original checksum validation
-(`0x002CB920`) covers only `0x00–0x1F`; its checksum update at `0x002BAF38` uses
-the same input. Both exclude language settings. The Mover update changes only
-`0x28–0x2B`, retaining `0x00–0x27` and `0x2C–0x1FF` exactly, without rebuilding
-transaction metadata or recalculating its checksum.
+The native CRC16 covers the first `0x20` bytes, using initial `0xFFFF` and polynomial
+`0x1021`, without reflection or final xor. Language is outside that covered region.
+The ExHeader adds only Bank's packed save ID to the permitted-save list, preserving
+other entries and permissions. I/O errors do not authorize initialization or formatting.
+Native/SD saves are not a cross-storage atomic operation; a failed SD sync does not
+undo a successful native commit. Identical values require no write.
 
-Startup only reads. A confirmed selection retains the native in-memory setter,
-then reads the entire existing file; missing/wrong-size records are not created
-or replaced. Identical settings require no write. Updates use the existing
-`readCompleteFile`, `writeCompleteFile`, `openArchive`, `pathCommand`,
-`renamePath` and `closeArchive` helpers. The order is delete stale `sav.tmp`,
-write/flush/close the complete temporary record, delete `sav.bin`, then rename.
-Read/archive/delete-temporary/write failures cannot delete the original;
-delete-original failure cannot proceed to rename. A failed final rename leaves
-the complete temporary record for Bank's existing missing-file recovery.
-No original Bank archive is opened, and the Bankdata transaction hooks are
-unrelated to these language operations.
+## Title mode help and native hints
+
+The current mode is a single-line label immediately above START. R-mode,
+L-language and HOME hints remain three independent lines below it, centered at
+lower-screen Y `156/182/208`; mode and START are at `88/120`.
+All positions are integer pixels with native `15×19` font sizing. START and
+copyright stay in place. The original HOME wording is not shortened.
+
+Offline title user selection follows the shared registry: auto first, then
+ascending actual numbers, without wrapping. D-pad/Circle Pad up/down supports
+hold/repeat acceleration, not C-stick. Browsing is in memory; the final selection
+is published in the background before entering. Mover never provisions a missing
+Bank or user directory that would prevent Bank's first migration.
+
+The native name-warning flag is independent of this title layout and of name
+screening; see [per-slot decisions](#per-slot-transfer-decisions).
 
 ## Ticket state and local results
 
 The native ticket state is `0x00249600`; its local substate is at state `+0x10`.
 Both modes retain this function, callback `0x0024991C` and cleanup `0x00249CD8`.
-Only these interfaces are routed:
+These job interfaces are routed:
 
-| Call site | Native function | Selected local backend: Offline, or test policy `1` with a confirmed missing Azahar interface | Selected native backend: public policy `0`, or other online cases |
+| Call site | Native function | Selected local backend: Offline, or automatic policy `1` with a confirmed missing Azahar interface | Selected native backend: native-only policy `0`, or other online cases |
 |---|---|---|---|
-| `0x00249754` | `0x0023D3C0` initialization | Populate local job fields; return `0` on failure | Original call and arguments |
-| `0x00249774` | `0x0023E230` polling | Report completion and successful result | Original call and arguments |
+| `0x00249754` | `0x0023D3C0` initialization | Record backend selection; both backends run original initialization | Original call and arguments |
+| `0x00249774` | `0x0023E230` polling | Original call retained; SDK parsing and polling decide completion/failure | Original call and arguments |
 | `0x00249818` | `0x0023BE4C` free-campaign request | Deliver the local window through the original campaign callback | Original request and asynchronous callback |
-| `0x00249CEC` | `0x0023E63C` unbind | No client was bound; proceed with destruction | Original unbind |
+| `0x00249CEC` | `0x0023E63C` unbind | Outer call retained; internal system unbind selects backend; destruction remains | Original unbind |
+
+Three additional UI branches check only whether the session is Offline:
+`0x00249650` skips applet screen clearing, `0x002496CC` skips its fade, and
+`0x00249704` skips repeated clearing/fade preparation. Offline substates still
+advance, construct the job and retain callback removal, destruction and resource
+release. Online Mode replays the original instructions and calls at all three
+sites, even when compatibility policy selects local ticket replies. Other ticket-state
+bytes remain native outside backend selection, resource/unbind calls and three UI
+hooks. Inside the job, only system binding/unbinding and send provider `0x001D17E0`
+adapt the backend. Native SDK construction, operation 10/1/5/6 parsers, polling
+and destruction remain.
 
 Initialization keeps the job in `r0`, loads shared state `+0x28` into `r1`,
 passes mode/policy in `r2/r3`, and tail-calls the C selector. Its native route
 passes only the job to native initialization. The backend is selected once and
-stored at `0x00363FF8`. Polling, campaign and unbinding use only volatile `r12`
+stored at `0x00363FF8`. Sending, campaign and unbinding use only volatile `r12`
 to read that flag; local campaign completion passes the state in `r0`, while
 native routes preserve their original arguments. The original `BL` return
 address, stack alignment and callee-saved registers are preserved.
 
 | Substate / node | Native flow | Local-result flow |
 |---|---|---|
-| `0` | Update UI and wait for the next stage | Unchanged |
-| `1` | Wait for UI, allocate/construct the `0x158`-byte job, initialize its client | Keep waiting, allocation and construction; replace client initialization only |
-| `2` | Poll; on success compute entitlement, copy account/purchase values, set validity and register the campaign callback | Same result consumer and registration; replace polling and campaign request only |
+| `0` | Update UI and wait for the next stage | Offline skips applet clearing but advances the native substate; online ticket compatibility keeps native UI |
+| `1` | Wait for UI, allocate/construct the `0x158`-byte job, initialize its client | Offline skips applet fades; allocation, construction and initialization remain; only system provider binding is adapted |
+| `2` | Poll; on success compute entitlement, copy account/purchase values, set validity and register the campaign callback | Original SDK parsing/polling; replace only send provider and campaign-body source |
 | `6` | Wait for the campaign callback, which advances to `3` | A local window record invokes the same callback synchronously, advancing to `3` |
 | `3` | Check expiry/campaign; available advances to `7`, unavailable to `4` | Same decision; valid local dates and the free flag advance to `7` |
 | `4/5` | Show unavailable message and wait for confirmation, then error exit | Retained, not forcibly approved |
@@ -286,53 +225,91 @@ address, stack alignment and callee-saved registers are preserved.
 | `8` | Set error phase `2` and finish | Out-of-range local dates or failed allocation also use this route |
 | Cleanup | Unbind, virtual destruction, clear job pointer, remove callback and release campaign resources | Omit only unbinding an uncreated client; retain all remaining cleanup |
 
-Local values populate the native job, not the shared entitlement outputs:
+Original parsers consume service response bytes; the adapter does not populate job
+or shared entitlement fields. The table describes native consumption with a valid
+default configuration, not a client-side assignment list:
 
 | Job field | Local value and meaning |
 |---|---|
 | `+0xB8` current date | Console-current time in the native eight-byte packed layout |
-| `+0x70` expiry date | Current date plus `999` days, retaining time of day; not a substitute current time |
+| `+0x70` expiry date | Configured expiry, default `2050-12-31 23:59:59`; not a substitute current time |
 | `+0xB0` account fields | Preserve shared `+0x30`; do not generate an account ID |
-| `+0x78–0x8B` five purchase counts | `-1`, no local purchase history |
+| `+0x78–0x8B` five purchase counts | Trial/annual counts from the shared service, default `0`; other three are `-1` |
 | `+0x04`, `+0xA0` | System-shop result and matched catalog count: `0` |
 | `+0xA4` job substate | `0` at initialization, `10` after successful polling |
-| `+0xA8/+0xA9/+0xAA` | First-shop flag `0`, expiry-known flag `0→1`, cancellation flag `0` |
-| SDK pointers, containers and strings | Keep native constructed values; no ticket network client is created |
+| `+0xA8/+0xA9/+0xAA` | Set by native catalog/expiry/cancellation handling, not the adapter |
+| SDK pointers, containers and strings | Native initialization/request construction/consumption/destruction; only real network-client binding is omitted |
 
-Native getters `0x001DB83C` and `0x0023DFA8` consume current/expiry dates and
-calculate `999` days and `23976` total hours. The native state writes shared
+Native getters `0x001DB83C` and `0x0023DFA8` consume actual current time and
+configured expiry to calculate remaining days and total hours. The native state writes shared
 `+0x3C/+0x40`, and its original validity decision sets `+0x44 = 1`. Annual
-purchase count remains `-1`. Local campaign completion encodes the same
-current-to-expiry window in the native 20-byte record: four reserved bytes,
-two seven-byte calendar dates, and a two-byte CRC. It reuses native CRC
-`0x0019BD88` with seed `0xFFFF` and a callback source whose request ID matches
+purchase count comes from the service, default `0`. Local campaign completion encodes the configured
+window as the native 20-byte `FREE` body: four identifier bytes,
+two seven-byte calendar dates and a two-byte CRC, all encoded by the independent
+server. The client requests the resource and supplies a source whose request ID matches
 state `+0x44`, then calls unchanged callback `0x0024991C`. The callback retains
 request-ID, length, CRC and inclusive date-window validation; it calculates
 remaining days/hours and sets shared valid `+0x44` and free `+0x335` to `1`.
 No request is sent and no output flag or remaining-time field is manually assigned.
-This is the same current-to-`999`-days-later window supplied by Bank, using the
-representation required by each native consumer. Each local initialization
-rebuilds it from console time without using fixed server campaign dates.
+Both titles share a policy whose default window is `2023-02-14 00:00:00` through
+`2050-12-31 23:59:59`, matching the verified official `FREE` resource.
+Actual current time is retained separately. The automatically created `server.conf`
+can set fixed dates and free/purchased status, preserving existing values;
+no separate SD campaign body is read. No entitlement is a normal response with a
+zero expiry date. Mover passes minimum days `0` to polling, so request completion
+alone does not establish entitlement; its later state checks native expiry/campaign
+results without client validity overrides. Basic configuration damage repairs to defaults;
+missing/malformed optional checks, words and gifts add no extension. Real file I/O failures
+and invalid existing transaction/claim records still use native request failure.
+Bank retains its 15-day minimum and original shop branch for
+insufficient entitlement. Its local replacement publishes the shared purchase configuration
+and then retains native expiry re-query; no actual eShop purchase occurs. Mover has no
+new purchase UI: its native minimum-0 path consumes the shared updated configuration.
+Local pass dates use `paid_periods`; `purchased=false` ignores residue. Independent boolean switches
+are `free_enable`/`trial_enable`; date tables contain only comma-separated ranges without `mode`.
+Matching regional keys replace the common key; legacy date toggles are removed after migration.
+Bank retains the native first-use conditions for its one-time 30-day trial;
+`trial_claimed` is boolean and annual counts stay numeric. Annual passes remain available.
+Free campaigns and passes coexist without extending passes. `shop.$currency` tuples retain manual
+price/credit amounts; only balances change. Automatic currency updates `currentCurrency`, manual
+mode uses its configured value, and unsupported locations are not guessed.
+Known missing/empty/invalid settings are repaired in schema order; misplaced valid fields return
+to that order without changing their values. Four bilingual blocks with blank separators share
+one `[ticket]` section; valid manual components remain.
+Existing BIN formats stay unchanged. Mode changes preserve local pass dates and counts. Confirmation
+publishes dates/counts, then the original consumer re-queries history and expiry, without assigning validity.
 This does not calculate Poke Miles or change Bankdata transactions or Pokemon
 validation.
 
-Public releases set `ONLINE_TICKET_CHECK_BYPASS` to `0`: Online Mode uses native
+Native-only builds set `ONLINE_FAKE_SERVER_TICKET_FALLBACK` to `0`: Online Mode uses native
 tickets, retaining errors for missing interfaces or failed checks rather than
-fabricating results. Policy `1` allows a read-only probe only in identified
+fabricating results. Source-default policy `1` permits fallback only in identified
 Azahar. Only the exact short-success unimplemented reply and successful handle
 closure select local results. Full replies, missing tickets, service/transport
 errors and unknown responses stay native. Offline Mode is unaffected.
-The subproject README documents the request/reply criteria; the probe adds no
-ExHeader service permissions.
+Online fallback uses an independent read-only backend-2 policy, with the fixed window
+`2000-01-01 00:00:00..2099-12-30 23:59:59` shared by ticket expiry and campaign responses.
+Offline defaults and native expiry checks are unchanged, ignoring offline configuration,
+pass dates, purchase counts and custom campaigns. Catalog/history vectors are empty and native
+count slots stay `-1`. The campaign uses the fixed free window; purchases and configuration
+writes are unsupported. Backend bytes `0/1/2` denote native, configured offline and fixed-free online.
+The shared runtime module caches environment/SVC capabilities at startup and
+ticket capability once at title initialization after services/TLS are ready.
+The 16-byte cache is `[0x00363FE0, 0x00363FF0)`, outside native BSS; later jobs
+only read it. Detection is independent of policy; `0` never selects local online
+results. Shared `FakeServerClient_Ticket` observes console time and requests
+the server response; the adapter only copies that response into native fields.
+There is no separate Mover calendar or fabricated entitlement policy.
+The subproject README documents the criteria; no ExHeader service permissions are added.
 
-Policy `1` is for the author's tests, not an online-safety promise. Native cleanup
+Automatic fallback is not an online-safety promise. Native cleanup
 does not copy the job's current date into Bank's shared-date/mileage path.
 Download callback `0x0025C978` loads the server Bankdata body and transaction
 descriptor. Commit state `0x0024A0C4` serializes that body; no path was identified
 that writes local ticket dates or entitlement display fields into it. Local
 results still change entitlement/campaign decisions. NNID, other requests and
-server permission are not replaced. Public builds default to `0`, accepting
-native errors rather than continuing real online operations with local results.
+server permission are not replaced. Policy `0` remains available to require
+native tickets rather than continuing real online operations with local results.
 
 ## Main flow and function addresses
 
@@ -377,6 +354,24 @@ enter the VC route. The native list first detects, reads, and validates the
 current physical cartridge, then appends VC sources in states 3/4. Its total
 capacity is fixed at 40. The selection branch at `0x00244870` distinguishes
 Gen 5 from VC with `sourceId < 5`.
+
+Selection update `0x002445A4` is distinct from enumeration `0x00244D2C`.
+For an SD selection, substate 9 submits a copied path to background `ObserveSource`.
+CRC32 observation of the complete `0x80000`-byte save runs alongside the native
+fade. Only the native fade-completion call at `0x0024483C` waits for observation
+before the existing ID dispatch at `0x00244870`; the entire UI update is no longer
+held. Native tables, results and subsequent loading remain. Fade retries do not repeat observation;
+cancellation cannot deliver into a new selection, and failure cannot authorize
+staging. Physical cartridges and VC do not gain this file observation.
+
+Native NDS I/O runs inside a save-job thread. Constructor `0x001C181C` installs
+vtable `0x002E654C`, whose `+0x0C` entry is `0x00243510`.
+`0x001E39D4 → 0x001E3F58 → 0x0010E250` creates a thread (SVC `0x08`);
+TLS trampoline `0x0011F100` calls job body `0x0011C678`, which invokes vtable
+`+0x0C` at `0x0011C6F8`. That job calls `0x0021A7E0/0x0021AB50`. A blocking
+lock in those synchronous range APIs therefore does not establish UI-thread I/O,
+nor permit changing their return ABI to asynchronous polling. This evidence is
+the original binary call chain, not hardware scheduling or disk timing.
 
 The shared scanner can emit up to four Gen 5 sources before VC enumeration.
 The hook at the native VC count store `0x0024149C` therefore replays
@@ -484,15 +479,49 @@ other nonzero results reject. The “remote information” here is therefore a
 per-slot decision code, not another Pokemon record and not the Gen 5 local
 14-check failure mask.
 
-In Offline Mode, this patch replaces only the unavailable layer-2 array: Gen 5
-records are read-only classified for integrity: valid empty records receive
-`20`, nonempty candidates receive `0`, and explicit failures receive generic
-rejection result `1`; VC writes `0`
-after its earlier null-object skip. Layers 1, 3, and 4 retain their native flows.
-Local validation therefore still runs, but server-only rejections and name
-normalizations cannot be reproduced.
+In Offline Mode, the fake server supplies the layer-2 response array. The client
+observes records and names without editing them; the service classifies structure,
+empty slots and species range, then applies optional Boolean-expression rules and name words.
+Valid empty slots receive `20`, structural/rule failures receive `1`, and other
+records receive `0` or a native name-normalization code. Missing optional
+configuration adds no rule/word hits. Layers 1, 3 and 4 remain native. These optional
+policies do not reconstruct the official server's complete checks or word list.
+
+### General name warning versus a detected name violation
+
+Native prompt state `0x00247304` first displays message-file 23, line `7`, explaining
+transfer and held items. Substate `2` checks runtime Bank-object byte `+0x182`.
+Its serialized body starts at object `+8`, so this is file offset `0x17A` in
+`bankdata.bin`, not file offset `0x182`. When the warning has not been shown,
+it sets that byte to `1` and displays line `16`, the
+general warning that names will change **if** they contain prohibited words. This
+branch does not inspect words, per-slot decisions or name-change flags. The byte
+means the warning has been shown, not that a prohibited name was detected.
+
+Native full-body serialization includes this flag. The fake server stages that
+same body in `bankdata.tmp` and publishes it as `bankdata.bin` on commit.
+The Bank backup remains the pre-write generation after transaction completion.
+Download/reload, display-metadata updates and configuration reload do not rewrite
+this byte. Bank's native download callback also preserves it while adjusting
+neighboring session flags. A normal completed save therefore suppresses message
+`16` on the next use of the same Bank. A memory-only warning, cancellation before
+commit, rollback to a pre-warning version, or importing another Bank with the flag
+at `0` may show it again; hiding a prompt must not publish an extra Bank update.
+
+Actual detection notifications are later, in substate `10` (`0x00247884`): shared
+byte `+0x1C7` triggers line `24` about a detected nickname, and `+0x1C8` triggers
+line `25` about an Original Trainer name. Each flag is consumed once. The native
+Gen 5 postprocessor still consumes `250–252` and its fourteen local checks; the
+patch does not force or suppress name flags in the UI. This prompt state's machine
+code and all three message lines remain unchanged.
 
 ### Gen 5 remote and local results
+
+With the optional name policy enabled and Han not permitted, a Gen5 nickname or
+OT containing a restricted Han character returns per-slot rejection `1` before
+word/exception matching, not `250–252`. `allowFanTranslationCHN` implicitly permits
+Han. This follows the user's hardware observation; `1` is a native-recognized
+generic rejection, not a claim about an exact proprietary server reason code.
 
 State 4 of decompiled function `0x002455D0` iterates over 30 fixed `0x88`-byte
 records. The shared flow object stores signed per-slot results at `+0x48`. Its
@@ -611,10 +640,17 @@ read-only classification:
    are independent; the patch does not repair either checksum.
 5. Use `(PID >> 13) & 31` with native block-order table `0x002B42E4` to locate
    the species. A checksum-valid species `0` receives `20`; species `1–649`
-   receive `0`; other species receive `1`. An empty slot need not match a
+   continue to optional policy; other species receive `1`. An empty slot need not match a
    complete byte template or have every remaining field zero. Level, language,
    origin-version, and name rules are not applied before the empty-slot skip.
-6. Replace all 30 results before resuming native processing at `0x00245800`.
+6. Valid nonempty records supply form, native level, moves, shiny status, OT/TID/SID,
+   language, origin, nickname flag, met/transfer level and fateful-encounter flag
+   to CheckPokemon. PK5 met level is `0x84 & 0x7F`, and fateful encounter is
+   bit 0 of `0x40`. These are read-only observations, not client-side rule decisions.
+   Combined rules reject
+   with `1`; otherwise word hits return native `250–252` name fixes or `0`.
+   Missing configuration adds no policy.
+7. Replace all 30 results before resuming native processing at `0x00245800`.
    Result `1` is only a local generic rejection value; it does not reproduce
    a specific server error code or the server's complete legality algorithm.
 
@@ -624,10 +660,10 @@ read-only classification:
 |---|---|---|
 | Load source | Native read, save-block validation, redundant-side selection | Unchanged |
 | Prepare 30 slots | Copy raw `0x88`-byte records, including empty slots | Read-only integrity and species classification of the same buffer |
-| Obtain per-slot results | Send request, wait for and validate reply, consume 30 results | Fill `0`, `20`, or `1`; source failure follows the native error path |
+| Obtain per-slot results | Send request, wait for and validate reply, consume 30 results | Integrity/empty classification, then optional rules/words; source failure follows native errors |
 | Begin postprocessing | Clear in-memory candidate slots, warnings, and source-slot mapping | Resume the same native entry |
 | Consume results | Skip `20` without warning; reject failures; continue allowed records | Same branches |
-| Prepare nonempty record | Copy to temporary storage, apply remote name fixes, ensure decoding and block locations | Native copying/decoding retained; no name-fix codes generated |
+| Prepare nonempty record | Copy to temporary storage, apply remote name fixes, ensure decoding and block locations | Same native name-fix branch consumes local codes; source records are not directly renamed |
 | Local decisions | Run all 14 checks and interpret the combined failure mask | Unchanged; see the complete table above |
 | Convert and enqueue | Convert successful records, write in-memory transfer slots and source mapping | Unchanged |
 | Confirm and save | Display warnings/confirmation, then run the native save transaction | Retain the existing local bankdata transaction; classification never edits source records |
@@ -640,9 +676,12 @@ flow.
 
 The remaining adaptations are:
 
-- At the VC remote-request site `0x002460B8`, Offline Mode writes `0` to all 30
-  results and resumes at `0x002461D0`. VC already skips null candidates before
-  consulting the result, so a synthetic result `20` is unnecessary.
+- At the VC remote-request site `0x002460B8`, native accessors inspect converted
+  records: empty `20`, integrity/exclusion/policy rejection `1`, otherwise `0`
+  or native `253–255` name-fix codes. Resume at `0x002461D0`; native null and
+  local-decision branches remain. Converted species `1–255` may enter policy,
+  avoiding an extra ban on Gen 2 `252–255`; Gen 1 native conversion/local limits
+  remain effective. PK7 met level is `0xDD & 0x7F`; fateful encounter is bit 0 of `0x1D`.
 - Both offline paths replace all 30 entries every time, preventing values from
   an Online Mode attempt in the same process from surviving a title-screen
   mode switch.
@@ -652,9 +691,37 @@ The remaining adaptations are:
 
 Offline Mode retains every native local check and adds locally verifiable
 record integrity and empty-slot classification. Unknown server-only rejection
-rules and name normalization are not recreated. Clearing stale remote
+rules are not recreated. Optional combined rules and words are administrator
+policy, not a complete official v1.5 implementation; word hits request native
+name correction/prompts, not rejection. Clearing stale remote
 transaction parameters is session-state isolation, not a Pokemon legality
 check.
+
+Service rules use only enabled/action/condition fields, semicolon terminators,
+multiline whitespace and # comments. Cross-field &&/|| and parentheses compile to
+an iterative RAM program at load. Require applies within the species-only projection
+of its own expression; unrelated species skip it. Rules cannot bypass integrity or
+the 14 checks above. Group/allow and standalone predicate keys are removed. Words use
+heap-backed variable records with no fixed length/count/pool cap, defaulting to all 4016 public 3DS v18 expressions plus documented exceptions
+and exact ten-language species-name nickname presets (NDS 001–649, VC 001–251).
+Groups are Japanese, English, French, Italian, German, Spanish, Latin American Spanish, Korean,
+Simplified Chinese and Traditional Chinese, then National Dex within each. Official previous game
+spellings remain, not regional old translations; the stock nickname flag is unchanged.
+OT and legality are not exempt; both sources merge to 9268 records / 226572 logical bytes.
+The ARM policy header is 84 bytes; words, hash slots, dynamic lines and iterative parse/evaluation buffers
+are separately heap-allocated. Invalid/unsupported entries are skipped individually without discarding valid ones.
+Rules are separately allocated at 40 bytes each on ARM, plus dynamic expression programs
+and reusable evaluation space, without a fixed section cap. Observations remain 76 bytes. No binary configuration
+snapshot is read/written. New loads use current text, while delivered results and staged
+bodies are not reevaluated; the journal uses v5. VC names are observed as UTF-16 from
+stock-converted PK7 candidates, not raw legacy bytes. Gen5 uses raw 16-bit PK5 fields.
+The load-only dynamic index/line/parser scratch is released on success/error; matching workspace
+is reused until reload/release. Disabled/missing lists allocate no word pool/index.
+Native name/view field boundaries and 32-bit overflow checks remain; real I/O/heap failures are errors. See
+[templates, license and evidence limits](../../common/docs/fakeServer/architecture.zh-cn.md#mover-可选判定和词表).
+Compiled ARM checks cover 32 block-order rows, encrypted/decoded records and VC
+observation APIs; they do not prove final transfer of actual glitch saves or
+complete official legality behavior.
 
 ## BankObject and bankdata
 
@@ -698,3 +765,204 @@ No separate per-record server ID or signature generator was identified for the T
 | `0x0024A420` | Start remote rollback after the game save fails |
 
 All three branches advance the outer state machine through asynchronous completion flags. Mover serializes and uploads the same complete file format used by Bank.
+
+### Offline local transaction journal
+
+Independent common/src/fakeServer/transaction.c coordinates
+Bank, NDS source and SD Turtle through `sd:/3ds/Bank/fakeServers/users/<userID>/transaction.bin`. fs_helpers.c uses
+Mover SDK addresses. See [Bank format](../../bank/docs/code-analysis.md#local-journal-format-and-recovery-evidence).
+
+`0x0024A0C4` routes both modes through save accounting, then replays the native
+prologue/resumes `0x0024A0C8`. Offline must Finish before substate 16 success
+text; Online never substitutes local Bank. Native begin `0x0024B92C` and poll
+`0x0024B868` each replace one entry instruction; trampolines replay
+`push {r4-r6,lr}`/`push {r3-r5,lr}` and resume untouched bodies.
+
+Physical/VC save begin/poll no longer request local file permission. Only a real
+first-save success (`5→10`) hands off one durable SOURCE_SAVED acknowledgement,
+before the original substate-10 commit request. Failure cannot advance commit.
+SD publication already supplied that acknowledgement; online stays native.
+An online SD save may not overwrite a pending offline Bank reservation. Existing
+cleanup-start/success/Finish checkpoints remain.
+
+The local backend loads a complete selection image; the native loader then uses
+RAM. Save begin rechecks readable/writable access and identity. x.bak retains
+the old image; native segmented I/O modifies separate RAM. Save completion writes
+and reads back the complete x.tmp. Both first/cleanup saves require
+complete-image native redundant-face validation, expected Box 1/decoded
+transaction contents, and matching memory/file CRC32 before sealing.
+Native job success alone does not publish unverified work.
+
+Those local decisions belong to `common/src/fs_system/source_image.c`, not a
+remote endpoint. It shares scheduling/durable checkpoints with the server, never
+opening policy or scanning Bank for segmented I/O. Staging compares its captured
+before-image with that selection before persisting preparation. The client
+retains native decoding, redundant-face checks and expected-edit validation.
+Native clients instead query descriptors and display metadata through
+`QueryRemoteStatus`/`QueryMetadata`, then send the result of their existing
+transaction branches to `RequestTransaction`. No custom resume permission or
+native transaction-block fingerprint is added.
+
+`SettledSource` returning no matching completed history is not a failed
+observation of the current selection. Native zero-token recovery also reaches
+this completion boundary. On `FS_MISSING`, retain any already-validated SD
+selection fingerprint and its valid marker; do not fabricate an observation
+if none exists. Only a successful complete `0x80000`-byte source fingerprint
+replaces it. Journal read/validation failures and incomplete successful replies
+still take the error route. Each new selection resets the settlement-query
+marker rather than reusing another game's completion. `BeginSourceSave` still
+rechecks the file against the selected fingerprint, and native saving,
+whole-work-image validation and publication order remain required.
+
+An ended transaction at the same `.sav` path must not overwrite a fresh selection
+after a normal game save or manual import. `SettledSource` confirms only a
+completed image matching the supplied fingerprint; mismatched or absent
+observations return `FS_MISSING`, without changing files or rebuilding a
+transaction. After an actual successful save, completion queries use this save's
+validated working-image fingerprint. New selections and save starts clear the
+old working-image marker. This compares existing fingerprints without another
+whole-save read/hash; pre-write rechecks and pending-transaction protection remain.
+
+Offline seals first-save work, records STAGED and publishes the validated NDS
+source so native loading can observe state 2. Bank stays old until the client's
+commit request records COMMIT_DECIDED and publishes it as PUBLISHED.
+Cleanup recopies the first image, uses native setters/
+saving, seals CLEANUP_READY, publishes/verifies cleanup, retires NDS sibling recovery files and persists COMPLETED before
+success. Online SOURCE_ONLY validates the complete image and records
+COMMIT_DECIDED before publishing/verifying original .sav, then returns native
+success for later cloud operations. Restarts resume that acknowledged single-file
+decision. Publication failure cannot mistakenly invoke first-save failure's
+remote rollback.
+
+Title adds no recovery prompt or X/Y controls. Metadata recovery state 14
+(`0x00243AF4`) keeps native ID/current-version comparisons and mismatch UI;
+its commit, rollback and existing forced-rollback requests use the local service
+only in Offline Mode. Forced recovery retains the native two confirmations,
+without Bank's numeric keyboard. The service
+requires the complete descriptor of a live nonzero reservation; post-commit
+rollback and stale replay fail. Bank-only rollback does not rewrite another
+game save. The shared service uses CRC32, reduces reads with a 1 MiB
+workspace and hashes a complete Bank body's already-loaded memory snapshot.
+The volatile loaded view reuses observations across read-only requests within
+the native load; it is not persisted or journal authority. Exact source path/game
+code keys prevent mixing sources. Journals/settings/configuration remain fresh.
+Reentrant reads use a 1 KiB fallback. Mutations invalidate affected views and
+failures clear them; a new load, reselection, reconnect or restart refreshes inputs.
+Actual uploads/source-save preparation recheck primaries, and publication checks
+physical existence/length. Pre-entry SD preparation reuses an identical verified
+`x.bak`; whole-image copying uses the verified buffer or authenticates actual
+read bytes before writing, with one complete post-write destination verification.
+The SD `BeginSourceSave` branch relies on Stage's existing full guard rather
+than scanning Bank immediately before it. SOURCE_ONLY SourceSaved already
+persists the decision and publishes the source, so the reply proceeds to
+verified Finish without a duplicate Commit. Publication classifies the primary
+with one observation; temp/backup checks and native CRC16/save polling remain.
+Source recovery state 13 (`0x00246B68`) keeps native
+transaction reading: token absent continues; state 1 rolls back; state 2 commits.
+Success or expired/not-found replies tolerated by the native callback permit
+token-only clearing and save kind 2. Other errors retain native messages/results
+and do not clear tokens. Source loading,
+VC validation and NDS redundant-face checks remain native, not a separate
+selection-time recovery route. Recovery never repeats conversion/removal.
+
+The Offline shared service registers a valid untracked primary and may adopt a
+primary differing from both pending images through recorded `ADOPT_BANK=6`.
+It retires the old reservation, assigns a new ID and removes the old Bank
+backup, without rewriting the actual source .sav or claiming paired rollback.
+A normal recorded pending image still uses native recovery. All Bank images
+missing with valid old authority may reset the baseline; Mover retains its
+native download-failure route and never creates a Bank. Missing settings recover an
+exact recorded image, or reinitialize after settled complete deletion, without
+changing Bank ID/metadata. Pending settings loss and damaged authority still stop;
+configuration loads use current text without reevaluating staged bodies. With no published history,
+checked Bank backup-only data may become a new baseline; pure tmp is explicitly
+abandoned, including unbound local settings/source staging, not promoted to a
+committed save. Mover reloads the real selected .sav, never creates a blank one.
+See [combination rules and import risks](../../common/docs/fakeServer/architecture.zh-cn.md#删除损坏和手动换入的处理边界).
+
+For settled and unregistered existing Banks, group/order inspection and full
+hashing share one stream and supply the loaded view. A loaded Bank's transfer
+permission no longer reloads an unused header after source work replaces the
+I/O buffer; the native client still determines transfer-box occupancy.
+External same-size changes become visible on a new load and cannot overwrite
+the primary through an old actual upload. Pending/recovery decisions remain.
+Native ticket subrequests share
+policy/time only within a job; a new job, reload/edit, purchase/recharge or location
+change invalidates it. Staged transfer bodies and commit/rollback decisions are
+retained without freezing the whole configuration, and batched
+configuration output still verifies source and temporary files. Bank's unchanged-download snapshot
+optimization is internal to the shared service; Mover still receives its complete
+Bank body through the existing read API, without creating a Bank download reservation.
+
+Cartridge/VC staging records the SDK-layout descriptor and 36-byte display
+metadata, not before/after/cleaned native-block fingerprints. The server matches
+ID, versions, size and nonzero token, ignoring the SDK's uninitialized alignment
+word at +0x14. A known last-settled request may acknowledge only the same decision;
+unknown history or mismatched requests never receive fake commit/rollback success.
+Native callbacks decide residual-token cleanup for definitive business errors. Native source saves
+use their original result handling; Online cartridge/VC writes have no local
+journal-based cross-mode restriction. NDS file paths, complete images, working
+files and SOURCE_ONLY coordination remain at the file backend. R switching stays
+available. Complete native snapshots/paired rollback are not implemented.
+Journals are not uploaded. Flush/reread are not real
+SD power-loss proof. Concurrent
+writers to one SD directory are unsupported.
+
+Offline cartridge/VC publication does not finish the journal early. Save substate
+14 matches the descriptor and records cleanup start; only actual native polling
+success on `15 → 16` acknowledges final cleanup. State 13 recovery also observes
+the original cleanup save at substates `6/8/9`. Failures keep pending evidence and
+block replacement staging; matching native descriptors allow cross-application
+Bank/Mover recovery. Digital sources retain image-validation/publication handling,
+and Online native saves do not use these local acknowledgements.
+An old Bank/Mover descriptor cannot acknowledge a newer reservation. Valid formal
+journal authority, missing-formal `.bak` recovery and non-authoritative `.tmp`
+handling also apply across applications. Settled/absent old-token cleanup is a
+guarded Bank no-op; native events cannot replace the Gen 5 file save/validation
+path or set its source/cleanup acknowledgement flags.
+
+## Native service integration
+
+The embedded service supplies offline Bank bodies, ticket/campaign replies,
+metadata, per-slot results and transaction decisions. It does not own native
+Pokemon objects or game conversion. Online requests continue to the official
+provider; an explicit emulator ticket capability fallback is separate from the
+offline account policy.
+
+Downloads retain native SDK construction, allocation, observation and file
+consumption. Results are copied in bounded chunks and released before SDK
+completion. Cancellation detaches observation without waiting for the worker,
+and late results cannot be delivered into a reused request address.
+
+Ticket operation `6` and free-campaign completion continue through native
+`0x00249600/0x0024991C` once response delivery and release finish. Synchronous
+catalog helpers do not queue work that would require a future UI frame to finish.
+Unsupported operations complete failure directly. Offline connection monitoring
+does not poll a nonexistent official session; online monitoring remains native.
+
+## Per-user locale assignment in v1.5 conversion
+
+Offline conversion uses the confirmed user's `region/language/country/state`
+values from `user.conf` for console-origin fields. These are not Pokemon's source
+language or game-of-origin fields. autoRegion refreshes only at account entry;
+autoCurrency follows the configured region. Manual settings can intentionally
+override the physical console or a Luma locale override.
+
+Bank does not rewrite these Pokemon fields after receiving them. Online Mover
+retains the original console-settings calls.
+
+## Optional offline Chinese name conversion
+
+`allowFanTranslationCHN=false;` defaults off. When enabled, the local server
+uses the configured US/Korean VC fan-translation tables and writes the existing
+BanUnicodeChinese rule as disabled. Other Pokemon and NGWord screening remains active.
+
+Gen5 names are already UTF-16. Permitted Chinese nicknames and OT names survive
+native conversion, including a default name whose nickname flag is clear.
+The per-slot name-correction result is retained: a name rejected by NGWord is not
+restored later by Chinese preservation. VC conversion uses the specified fan
+alphabet only when explicitly enabled, otherwise the native alphabet remains.
+
+`enableMoverv1.2=false;` independently controls old offline RGBY conversion;
+it does not change Gen2, Gen5 or online paths. See [version compatibility](version-compatibility.md)
+and [custom settings](../../configTemplate/templateForCopy/Bank/fakeServers/shared/readme_server.md#custom-options).

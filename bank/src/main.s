@@ -4,11 +4,17 @@
 
 .include "../include/symbol.inc"
 
-// 0: require native online tickets (public build); 1: auto-fallback only when
-// identified Azahar lacks the ticket interface (test build). Offline stays local.
-// 0：联网必须使用真实票务接口（公开版）；1：仅确认 Azahar 缺接口时自动使用
-// 本地结果（测试版）。离线模式始终使用本地结果。
-.definelabel ONLINE_TICKET_CHECK_BYPASS, 0
+// 0: require native online tickets; 1: use the server API only for a confirmed
+// missing Azahar ticket interface, with a read-only fixed free window.
+// 0：联网必须走真实票务；1：仅确认 Azahar 缺票务接口时自动使用伪服务器。
+// 联网回退固定长期免费且不提供模拟购买；离线票务才读取本地配置。
+.definelabel ONLINE_FAKE_SERVER_TICKET_FALLBACK, 1
+
+// Local EC workers parse SD configuration on their original SDK thread. The
+// native 4 KiB stack cannot hold the configuration/word-pattern call chain; keep
+// page-aligned headroom without changing native online workers or ownership.
+// 本地 EC 线程读取 SD 配置，原 4 KiB 栈不足；按整页留余量，不改变真实联网线程或生命周期。
+.definelabel LOCAL_TICKET_EC_STACK_SIZE, 0x10000
 
 // Offline behavior is the baseline. Mode wrappers branch to these native entry
 // points when Download, Unlock or Original Mode was selected on the title screen.
@@ -17,11 +23,16 @@
 .definelabel OfflinePatch_VersionStorageSize, 0x40
 .definelabel OfflinePatch_VersionStorageStart, TextMappedEnd - OfflinePatch_VersionStorageSize
 .definelabel CodeExpansion_PayloadStart, 0x003FC000
-.definelabel CODE_EXPANSION_PAYLOAD_SIZE, 0x3000
+.definelabel CODE_EXPANSION_PAYLOAD_SIZE, 0x238000
+.definelabel FakeServer_ContextSize, 0x104000
+.definelabel FakeServer_RuntimeSize, 0x216000
 .definelabel CombinePatch_CodeStart, CodeExpansion_PayloadStart
-.definelabel CombinePatch_CodeEnd, CodeExpansion_PayloadStart + CODE_EXPANSION_PAYLOAD_SIZE
+.definelabel CombinePatch_CodeEnd, CodeExpansion_PayloadStart + CODE_EXPANSION_PAYLOAD_SIZE - FakeServer_RuntimeSize
+.definelabel CodeExpansion_ExecutableSize, CombinePatch_CodeEnd - CombinePatch_CodeStart
 .definelabel OfflinePatch_RuntimeStorageStart, ReadWriteMappedEnd - 0x10
 .definelabel OfflinePatch_RuntimeStorageEnd, ReadWriteMappedEnd
+.definelabel RuntimeEnvironment_StorageStart, OfflinePatch_RuntimeStorageStart - 0x10
+.definelabel RuntimeEnvironment_StorageEnd, OfflinePatch_RuntimeStorageStart
 .definelabel CombinePatch_ModeStorage, OfflinePatch_RuntimeStorageStart
 .definelabel CombinePatch_HidManager, 0x003DC3B4
 .definelabel CombinePatch_ModeOffline, 0
@@ -30,14 +41,21 @@
 .definelabel CombinePatch_ModeOriginal, 3
 .definelabel CombinePatch_ModeCount, 4
 .definelabel CombinePatch_KeyR, 0x100
+.definelabel CombinePatch_KeyL, 0x200
 .definelabel CombinePatch_SessionModeOffset, 0
 .definelabel CombinePatch_DownloadCaptureStatusOffset, 1
 .definelabel DOWNLOAD_CAPTURE_NONE, 0
 .definelabel DOWNLOAD_CAPTURE_COMPLETE, 1
 .definelabel DOWNLOAD_CAPTURE_FAILED, 2
+.definelabel DOWNLOAD_CAPTURE_PENDING, 3
 .definelabel CombinePatch_TitleRPreviousOffset, 2
 .definelabel CombinePatch_TitleSelectedModeOffset, 3
 .definelabel CombinePatch_InitialLanguagePendingOffset, 5
+.definelabel CombinePatch_TitleLanguageOffset, 7
+.definelabel CombinePatch_TitleLanguageRequested, 1
+.definelabel CombinePatch_SettingsReady, 0
+.definelabel CombinePatch_SettingsMissing, 1
+.definelabel CombinePatch_SettingsFailed, 2
 .definelabel CombinePatch_UnlockRecoveryOffset, UnlockMode_RecoveryStorage - CombinePatch_ModeStorage
 .definelabel CombinePatch_BlankMessage, 0x60
 .definelabel CombinePatch_DownloadProgressMessage, 0x61
@@ -49,8 +67,9 @@
 .definelabel CombinePatch_OfflineDisconnectMessage, 0x67
 .definelabel CombinePatch_TitleModeOfflineMessage, 0x68
 .definelabel CombinePatch_TitleModeDownloadMessage, 0x69
-.definelabel CombinePatch_DisabledMenuMessage, 0x6A
-.definelabel CombinePatch_LanguageMenuMessage, 0x6B
+.definelabel CombinePatch_DisabledDownloadMoverMessage, 0x7C
+.definelabel CombinePatch_DisabledInstalledMoverMessage, 0x7D
+.definelabel CombinePatch_DisabledHomeMessage, 0x7E
 .definelabel CombinePatch_OfflineMenuGreeting, 0x1B
 .definelabel CombinePatch_DownloadMenuGreeting, 0x1C
 .definelabel CombinePatch_UnlockMenuGreeting, 0x1D
@@ -64,6 +83,9 @@
 .definelabel CombinePatch_DownloadNoGameMessage, 0x73
 .definelabel CombinePatch_DownloadFailedMessage, 0x74
 .definelabel CombinePatch_DownloadStartMessage, 0x75
+.definelabel CombinePatch_TitleLanguageMessage, 122
+.definelabel CombinePatch_TitleLanguagePane, 0x29
+.definelabel CombinePatch_TitleModePane, 0x2A
 
 .open INPUT_CODE, OUTPUT_CODE, 0x00100000
 
@@ -72,34 +94,100 @@
 .org BankStartup_ConstructorCall
     bl CodeExpansion_Startup
 
+// Keep native product selection, polling and purchase-result consumption.
+// Only the unavailable system-shop requests use local server adapters.
+// 保留原券种选择、轮询和购买结果处理；仅转接不可离线执行的系统商店请求。
+.org 0x002A1EE8
+    bl CombinePatch_TicketShopRequest
+.org 0x002A0560
+    b CombinePatch_TicketCreditRequest
+.org 0x002A2184
+    bl CombinePatch_TicketPurchaseRequest
+.org 0x002A1C20
+    bl CombinePatch_TicketEcCatalog
+.org 0x002A4604
+    bl CombinePatch_TicketEcBalance
+.org 0x002A214C
+    bl CombinePatch_TicketEcFormat
+.org 0x002A4660
+    bl CombinePatch_TicketEcFormat
+.org 0x002A2018
+    bl CombinePatch_TicketEcWorkerConstruct
+.org 0x002A0494
+    bl CombinePatch_TicketEcWorkerConstruct
+.org 0x002B110C
+    bl CombinePatch_TicketPurchasePoll
+.org 0x002B1248
+    bl CombinePatch_TicketPurchasePoll
+
 // Offline baseline hooks. Each site is retained so the combined project starts
 // from the tested local-data behavior rather than duplicating a second patch.
 // 离线基线钩子。保留每个位置，使合并工程从已测试的本地数据行为起步，而不是复制
 // 第二份补丁。
-.org NetworkConnectionState_Update
-    b CombinePatch_NetworkUpdate
 .org NetworkConnection_AvailabilityCall
     bl CombinePatch_NetworkAvailability
-.org NetworkConnection_SkipRemoteJob
-    b CombinePatch_NetworkSkipRemoteJob
-    nop
-    nop
+.org NetworkConnectionState_Initialize + 0x54
+    blne CombinePatch_ConnectionConstruct
+.org DisconnectCleanupState_Initialize + 0x70
+    blne CombinePatch_ConnectionConstruct
+.org 0x002A43CC
+    b CombinePatch_ConnectionPoll
+.org 0x002A44A0
+    b CombinePatch_ConnectionUnbind
+.org NetworkMonitor_Update
+    b CombinePatch_NetworkMonitorUpdate
+.org NetworkMonitor_WorkerAccountLoad
+    bl CombinePatch_NetworkMonitorWorkerAccount
 .org NetworkConnection_MessageIdLoad
     bl CombinePatch_SelectInitialConnectionMessage
 .org InitialRemoteRecordState_Update
     b CombinePatch_InitialRemoteRecordUpdate
+.org BankRemote_RecordProvider
+    b CombinePatch_RecordProvider
+.org BankRemote_QueryProvider
+    b CombinePatch_QueryProvider
+.org 0x002A3710
+    b CombinePatch_RemoteUnbind
+.org BankInitialRecord_CampaignRequest
+    bl CombinePatch_InitialCampaignRequest
 .org InitialRemoteRecord_MessageIdLoad
     bl CombinePatch_SelectPostSelectionConnectionMessage
 .org OptionalRewardState_TicketInitializeCall
     bl CombinePatch_TicketInitialize
-.org OptionalRewardState_TicketPollCall
-    bl CombinePatch_TicketPoll
-.org OptionalRewardState_TicketUnbindCall
-    bl CombinePatch_TicketUnbind
+.org TicketJob_Poll
+    b CombinePatch_TicketJobPoll
+.org 0x002A05F8
+    b CombinePatch_TicketCreditPoll
+.org 0x002A1E00
+    bl CombinePatch_TicketExpiryRequest
+.org 0x002A1F2C
+    bl CombinePatch_TicketExpiryRequest
+.org OptionalRewardState_TicketUiPrepare
+    b CombinePatch_TicketUiPrepare
+.org OptionalRewardState_TicketFadeBeginCall
+    bl CombinePatch_TicketUiFade
+.org OptionalRewardState_TicketFadeEndCall
+    bl CombinePatch_TicketUiFade
+.org OptionalRewardState_TicketUiCleanupCall
+    bl CombinePatch_TicketUiCleanup
+.org 0x002A0518
+    bl CombinePatch_TicketProviderBind
+.org 0x002A20E8
+    bl CombinePatch_TicketProviderUnbind
+.org 0x00169B00
+    bl CombinePatch_TicketSend
+.org 0x00169DE8
+    bl CombinePatch_TicketSend
+.org 0x001698E8
+    bl CombinePatch_TicketSend
+.org 0x00169C6C
+    bl CombinePatch_TicketSend
+.org 0x001699F8
+    bl CombinePatch_TicketSend
 .org BankDataSyncState_Update
     b CombinePatch_BankDataSyncDispatch
-.org BankDataSync_TurtleTransactionWrite
-    b CombinePatch_BankDataSyncTurtleState0
+.org BankDataSyncState_Destruct
+    b CombinePatch_BankDataSyncDestruct
 .org BankDataSyncState_Initialize + 0x18
     b CombinePatch_BankDataSyncInitialize
 
@@ -107,23 +195,33 @@
     b CombinePatch_TitleScreenUpdate
 .org TitleScreenUi_Create + 0xA0
     bl CombinePatch_TitleModeTextInitialize
-.org TitleScreenState_Initialize + 0x3C
-    b CombinePatch_TitlePreview
+.org TitleScreenState_Exit
+    b CombinePatch_TitleExit
+.org TitleScreenState_Destruct
+    b CombinePatch_TitleDestruct
+.org StartupPreview_UpdateInitialize
+    b CombinePatch_StartupInitializeGate
+.org StartupPreview_Initialize
+    b CombinePatch_StartupInitialize
+.org StartupPreview_SettingsReady
+    b CombinePatch_StartupSynchronizeLanguage
+.org StartupPreview_Destruct
+    b CombinePatch_StartupDestruct
 .org TitleScreenState_ExitUiCleanup
     b CombinePatch_TitleReleaseWaitingView
 .org TitleScreenState_ExitComplete
     b CombinePatch_TitleBindSession
 .org BankFlow_SelectNextState + 0x100
     beq CombinePatch_TitleResult
-.org BankFlow_SelectNextState + 0xC8
-    b CombinePatch_TitleOrResume
 
-.org BankFlow_PostSelectionMetadataPath
-    b CombinePatch_SelectPostSelectionState
 .org PostSelectionConnectionState_Update
     b CombinePatch_PostSelectionConnectionUpdate
 .org TransactionRecoveryState_Update
     b CombinePatch_TransactionRecoveryUpdate
+.org TransactionRecovery_MismatchMessageIdLoad
+    bl CombinePatch_SelectMismatchMessage
+.org ForceRollbackState_Update
+    b CombinePatch_LocalForceRollbackUpdate
 .org BankFlow_RecoveryResult
     b CombinePatch_RecoveryResult
 .org BankFlow_ForceRollbackSuccess
@@ -135,33 +233,55 @@
 .org NetworkPreparation_MessageIdLoad
     bl CombinePatch_SelectPostSelectionConnectionMessage
 
-// Keep the native first-present flag test. Offline mode bypasses only the
-// remote BOSS gift lookup after that flag is set and resumes the native local
-// mileage calculation. Download and Unlock modes preserve the stock branch.
-// 保留原版首次奖励标志判断。标志已设置后，离线模式只跳过远端 BOSS 礼物查询，
-// 并恢复原版的本地里程计算；下载模式与解锁模式保留原分支。
-.org RewardReceive_FirstPresentBranch
-    b CombinePatch_FirstPresentDispatch
+// Only Offline replaces BOSS gift retrieval. Native receiving, UI and paired
+// saving remain stock; online modes retain both gift passes and their cleanup.
+// 仅离线替换 BOSS 礼物获取；原生接收／界面／配对保存及联网两轮查询均保留。
+.org RewardReceiveState_Update
+    b CombinePatch_GiftUpdate
+.org RewardReceive_ConnectionMessageIdLoad
+    bl CombinePatch_SelectPostSelectionConnectionMessage
+// Both mileage messages retain native mov r2,#14 and table selector r1=1.
+// 两处里程对话保留原版 mov r2,#14 及文本表选择参数 r1=1，不安装连接文案钩子。
+.org 0x002A9934
+    bl CombinePatch_GiftResourceRequest
+.org 0x002AAF50
+    bl CombinePatch_GiftResourceRequest
 
 .org DisconnectCleanupState_Update
     b CombinePatch_DisconnectUpdate
+.org 0x002ABDEC
+    b CombinePatch_LanguageReturnDestruct
 .org BankNoSaveRollbackState_Update
     b CombinePatch_NoSaveRollbackUpdate
-.org DisconnectCleanup_SkipRemoteJob
-    b CombinePatch_DisconnectSkipRemoteJob
-    nop
-    nop
+.org BankSaveState_Update
+    b CombinePatch_SaveStateUpdate
+.org 0x001DF3E0
+    b CombinePatch_RemoteBind
+.org 0x002A26F8
+    b CombinePatch_MetadataProvider
+.org 0x002A25C4
+    b CombinePatch_StageProvider
+.org 0x002A3624
+    b CombinePatch_DownloadProvider
+.org 0x002A3954
+    b CombinePatch_DownloadResponse
+.org 0x002A2B24
+    b CombinePatch_MetadataUpdateProvider
+.org 0x001D5DF0
+    b CombinePatch_CommitProvider
+.org 0x001D5CA4
+    b CombinePatch_RollbackProvider
 
-.org BankCreateState_Update + 0x58
-    b CombinePatch_BankCreateState0
-    nop
-.org BankCreateState_Update + 0x1E4
-    b CombinePatch_BankCreateAfterMessages
-    nop
-.org BankCreateState_Update + 0x2F4
-    bl CombinePatch_CreateInitial
-.org BankCreateState_Update + 0x2FC
-    bne CombinePatch_BankCreateSuccess
+.org BankCreateState_Update
+    b CombinePatch_BankCreateUpdate
+.org 0x0011491C
+    b CombinePatch_AccountInitialize
+.org 0x0022DDCC
+    b CombinePatch_AccountUnbind
+.org 0x0012259C
+    bl CombinePatch_AccountSend
+.org 0x002A3868
+    b CombinePatch_CreateProvider
 
 .org BankFlow_SelectNextState + 0x248
     beq CombinePatch_RewardResult
@@ -207,6 +327,8 @@
     bl CombinePatch_SelectGameSelectionMessage
 .org ForceRollbackState_ChallengePromptCall
     bl CombinePatch_ShowUnlockPrompt
+.org 0x002A2838
+    b CombinePatch_RecoveryTokenProvider
 .org BankMenuUi_FirstLabelCall
     bl CombinePatch_SelectUseBankMenuText
 .org BankMenuUi_FirstLabelCall + 0x08
@@ -220,6 +342,16 @@
 .org BankMenuUi_FirstLabelCall + 0xA8
     bl CombinePatch_SelectHomeMenuTextR5
 
+// Keep the original regional identity sources and encoder. Only observe their
+// response validity and refresh the clickable support label after generation.
+// 保留原区域身份来源及编码器，只观察响应有效性，并更新仍可点击的支持代码标签。
+.org 0x002A6F78
+    bl SupportCode_ReadFriendPrincipal
+.org 0x002A704C
+    bl SupportCode_ReadActPrincipal
+.org 0x002A6F98
+    bl CombinePatch_FormatSupportCode
+
 // Capture only after the native current/legacy body loader has completed.
 // All modes retain the callback's metadata and completion processing.
 // 原版当前／旧格式数据装载完成后才捕获；所有模式保留回调的元数据和完成处理。
@@ -229,31 +361,6 @@
 .org ReturnToTitleState_Update + 0x168
     bl CombinePatch_SelectDisconnectMessage
 
-.org BankSaveState_Update + 0x84
-    b CombinePatch_SaveBegin
-    nop
-.org BankSaveState_Update + 0x104
-    b CombinePatch_SaveDisplayWait
-    nop
-    nop
-.org BankSave_TurtleCommitWrite
-    b CombinePatch_SaveTurtleState2
-.org BankSave_TurtleRollbackWrite
-    b CombinePatch_SaveTurtleState1
-.org BankSave_SerializeAndStage + 0x180
-    bl CombinePatch_SaveStage
-.org BankSaveState_Update + 0x3B4
-    bl CombinePatch_SaveCommit
-.org BankSaveState_Update + 0x3C8
-    b CombinePatch_SaveCommitWait
-    nop
-    nop
-.org BankSaveState_Update + 0x3F0
-    bl CombinePatch_SaveRollback
-.org BankSaveState_Update + 0x408
-    b CombinePatch_SaveRollbackWait
-    nop
-    nop
 .org BankSaveState_Initialize + 0x28
     bl CombinePatch_SelectSaveMessage
 
@@ -275,25 +382,23 @@
     bl CombinePatch_TurtleLoad
 .org TurtleStorage_SaveBackendCall
     bl CombinePatch_TurtleSave
-.org Title_TurtleStorageCheckCall
-    bl TurtleRedirect_CheckBackend
 .org Initial_TurtleStorageCheckCall
-    bl CombinePatch_TurtleCheck
+    b CombinePatch_InitialTurtleCheck
+.org Initial_TurtleStorageLoadCall
+    b CombinePatch_InitialTurtleLoad
+.org InitialGameCheck_Destruct
+    b CombinePatch_InitialTurtleDestruct
 .org Initial_TurtleStorageFormatCall
     bl CombinePatch_TurtleFormat
 .org Initial_TurtleStorageFormatPollCall
     bl CombinePatch_TurtleFormatPoll
+.org StateLocalSave_Begin
+    b CombinePatch_LocalSaveBegin
+.org StateLocalSave_Poll
+    b CombinePatch_LocalSavePoll
 
 .org CombinePatch_CodeStart
 .area CombinePatch_CodeEnd-CombinePatch_CodeStart
-
-CombinePatch_RedirectHomeToLanguage:
-    ldr r0,[r0,#0x10]
-    ldr r0,[r0,#0x38]
-    cmp r0,#0
-    blne WaitingUi_Hide
-    mov r0,#1
-    pop {r4,pc}
 
 // The stock menu's greeting uses BMG line 17. The LayeredFS archive appends
 // one explanation for each of the first three modes; Original keeps stock text.
@@ -350,19 +455,6 @@ CombinePatch_SelectUseBankMenuText:
 // Select only the labels deliberately replaced by the current patch modes.
 // Other stock menu labels remain unchanged.
 // 这里只选择当前补丁模式明确替换的标签；其余原版选单标签保持不变。
-CombinePatch_SelectSupportMenuText:
-    mrs r12,cpsr
-    push {r0,r12}
-    ldr r0,=CombinePatch_ModeStorage
-    ldrb r0,[r0]
-    cmp r0,#CombinePatch_ModeOriginal
-    moveq r8,#0x2B
-    movne r8,#CombinePatch_DisabledMenuMessage
-    pop {r0,r12}
-    msr cpsr_f,r12
-    bx lr
-    .pool
-
 CombinePatch_SelectInstalledMoverMenuText:
     mrs r12,cpsr
     push {r0,r12}
@@ -370,11 +462,30 @@ CombinePatch_SelectInstalledMoverMenuText:
     ldrb r0,[r0]
     cmp r0,#CombinePatch_ModeOriginal
     moveq r5,#0x2D
-    movne r5,#CombinePatch_DisabledMenuMessage
+    movne r5,#CombinePatch_DisabledInstalledMoverMessage
     pop {r0,r12}
     msr cpsr_f,r12
     bx lr
     .pool
+
+CombinePatch_SelectSupportMenuText:
+    push {r0-r5,r12,lr}
+    mrs r4,cpsr
+    bl SupportCode_MenuMessage
+    mov r8,r0
+    msr cpsr_f,r4
+    pop {r0-r5,r12,pc}
+
+CombinePatch_FormatSupportCode:
+    push {r0-r3,r4,lr}
+    bl SupportCode_MenuMessage
+    mov r3,r0
+    ldr r0,[r4,#0x38]
+    mov r1,#1
+    mov r2,#0x24
+    bl BankUi_SetMessageLine
+    pop {r0-r3,r4,lr}
+    b 0x002A4078
 
 CombinePatch_SelectDownloadMoverMenuText:
     mrs r12,cpsr
@@ -383,7 +494,7 @@ CombinePatch_SelectDownloadMoverMenuText:
     ldrb r0,[r0]
     cmp r0,#CombinePatch_ModeOriginal
     moveq r6,#0x2C
-    movne r6,#CombinePatch_DisabledMenuMessage
+    movne r6,#CombinePatch_DisabledDownloadMoverMessage
     pop {r0,r12}
     msr cpsr_f,r12
     bx lr
@@ -396,7 +507,7 @@ CombinePatch_SelectHomeMenuTextR6:
     ldrb r0,[r0]
     cmp r0,#CombinePatch_ModeOriginal
     moveq r6,#0x56
-    movne r6,#CombinePatch_LanguageMenuMessage
+    movne r6,#CombinePatch_DisabledHomeMessage
     pop {r0,r12}
     msr cpsr_f,r12
     bx lr
@@ -409,7 +520,7 @@ CombinePatch_SelectHomeMenuTextR5:
     ldrb r0,[r0]
     cmp r0,#CombinePatch_ModeOriginal
     moveq r5,#0x56
-    movne r5,#CombinePatch_LanguageMenuMessage
+    movne r5,#CombinePatch_DisabledHomeMessage
     pop {r0,r12}
     msr cpsr_f,r12
     bx lr
@@ -430,7 +541,10 @@ CombinePatch_ShowUnlockPrompt:
     ldr r6,=CombinePatch_ModeStorage
     ldrb r6,[r6,#CombinePatch_SessionModeOffset]
     cmp r6,#CombinePatch_ModeUnlock
+    beq @@candidate
+    cmp r6,#CombinePatch_ModeOffline
     bne @@stock
+@@candidate:
     ldr r0,[r4,#0x54]
     ldr r1,[r4,#0x58]
     mov r2,sp
@@ -483,52 +597,22 @@ CombinePatch_SelectDisconnectMessage:
     moveq r1,#CombinePatch_DownloadFailedMessage
     bx lr
 
-// Persist the patch's language-menu selection to the active backend. Native
-// modes then resume their real disconnect job; Offline uses its local delay.
-// 把补丁语言选单的选择保存至当前后端。原存档模式随后继续真实断开作业，离线模式
-// 使用本地延时。首次原存档初始化仍由原版游戏检查链提交待选语言。
+// Every language choice saves native settings first, then synchronizes SD.
+// Existing SD gets only language; missing SD gets the complete native record.
+// 语言选择先保存主机记录再同步 SD；已有 SD 仅更新语言，缺失才完整复制，不按模式分流。
 CombinePatch_DisconnectWithLanguageSave:
     push {r4,lr}
     mov r4,r0
-    ldrb r1,[r4,#0x3C]
-    cmp r1,#0
-    beq @@disconnect
-    ldr r1,[r4,#0x10]
-    cmp r1,#0
-    beq @@beginSave
-    cmp r1,#1
-    bne @@disconnect
-    bl StateLocalSave_Poll
+    ldr r1,=CombinePatch_ModeStorage
+    mov r2,#CombinePatch_TitleLanguageRequested
+    strb r2,[r1,#CombinePatch_TitleLanguageOffset]
+    bl LanguageSettings_Save
     cmp r0,#0
     beq @@pending
     cmp r0,#1
     bne @@failed
-    mov r1,#2
-    str r1,[r4,#0x10]
-    mov r0,r4
-    bl StateTimer_Reset
+    b @@disconnect
 @@pending:
-    mov r0,#0
-    pop {r4,pc}
-@@beginSave:
-    ldr r3,[r4,#8]
-    cmp r3,#0
-    beq @@disconnect
-    ldr r0,[r3,#0x74]
-    ldr r2,[r3,#0xF0]
-    cmp r0,#0
-    cmnne r2,#0
-    beq @@disconnect
-    ldr r1,[r2,#4]
-    cmp r1,#0
-    beq @@disconnect
-    ldrb r2,[r2,#8]
-    bl LocalSettings_SetLanguage
-    mov r0,r4
-    mov r1,#0
-    bl StateLocalSave_Begin
-    mov r1,#1
-    str r1,[r4,#0x10]
     mov r0,#0
     pop {r4,pc}
 @@failed:
@@ -538,110 +622,24 @@ CombinePatch_DisconnectWithLanguageSave:
     pop {r4,pc}
 @@disconnect:
     mov r0,r4
-    ldr r12,=CombinePatch_ModeStorage
-    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
-    cmp r12,#CombinePatch_ModeOffline
-    beq @@localDisconnect
     bl CombinePatch_DisconnectUpdateOfficial
     pop {r4,pc}
-@@localDisconnect:
-    bl OfflinePatch_DisconnectUpdate
-    pop {r4,pc}
     .pool
 
-// Load a local file, then resume the original metadata and selected-game
-// callbacks at substate 6.
-// 载入本地文件后，从原版子状态 6 继续元数据与所选游戏回调。
-CombinePatch_BankDataSyncEntry:
-    ldr r1,[r0,#0x10]
-    cmp r1,#6
-    bcs @@resumeNative
-    push {r4,lr}
-    mov r4,r0
-    bl OfflinePatch_LoadBankData
-    cmp r0,#0
-    beq @@loadFailed
-    mov r1,#6
-    str r1,[r4,#0x10]
-    mov r0,r4
-    pop {r4,lr}
-@@resumeNative:
-    push {r4,r5,r6,lr}
-    b BankDataSyncState_Update + 4
-@@loadFailed:
-    mov r0,r4
-    mov r1,#3
-    strb r1,[r0,#0x30]
-    mov r0,#1
-    pop {r4,pc}
+CombinePatch_LanguageReturnDestruct:
+    push {r0,lr}
+    bl LanguageSettings_Cancel
+    pop {r0,lr}
+    ldr r1,=0x00361A90
+    b 0x002ABDF0
     .pool
 
-// The server callback fills a 32-byte transaction descriptor before the
-// native state copies it into Turtle. Offline loading has no server descriptor,
-// so preserve bytes 0x00-0x1B and update only transaction state 0 before using
-// the unchanged native save callback. Download mode keeps the complete copy.
-// 服务器回调会先填充 32 字节事务描述，随后原版状态才把它复制进 Turtle。离线
-// 载入没有服务器描述，因此保留 0x00-0x1B，只把事务状态更新为 0，再沿用原版
-// 保存回调；下载模式与解锁模式仍执行完整复制。
-CombinePatch_BankDataSyncTurtleState0:
-    ldr r12,=CombinePatch_ModeStorage
-    ldrb r12,[r12]
-    cmp r12,#CombinePatch_ModeOffline
-    bne @@native
-    ldr r0,[r4,#0x08]
-    ldr r5,[r0,#0x74]
-    mov r0,r5
-    mov r1,#0
-    bl TurtleRecord_SetTransactionState
-    b BankDataSync_TurtleSaveBegin
-@@native:
-    ldr r0,[r4,#0x08]
-    b BankDataSync_TurtleTransactionWrite + 4
-    .pool
 
-// Native save substates copy the server-generated descriptor together with
-// states 2 or 1. The local stage operation deliberately has no such descriptor;
-// retain the existing online identity/version fields while preserving the
-// native intermediate state and Turtle-save sequence.
-// 原版保存子状态会连同状态 2 或 1 一起复制服务器生成的描述。本地暂存操作并不
-// 生成该描述，因此保留既有在线身份／版本字段，同时保留原版中间状态和 Turtle
-// 保存顺序。
-CombinePatch_SaveTurtleState2:
-    ldr r12,=CombinePatch_ModeStorage
-    ldrb r12,[r12]
-    cmp r12,#CombinePatch_ModeOffline
-    bne @@native
-    ldr r0,[r4,#0x08]
-    ldr r5,[r0,#0x74]
-    mov r0,r5
-    mov r1,#2
-    bl TurtleRecord_SetTransactionState
-    b BankSave_TurtleCommitSaveBegin
-@@native:
-    ldr r0,[r4,#0x08]
-    b BankSave_TurtleCommitWrite + 4
-    .pool
-
-CombinePatch_SaveTurtleState1:
-    ldr r12,=CombinePatch_ModeStorage
-    ldrb r12,[r12]
-    cmp r12,#CombinePatch_ModeOffline
-    bne @@native
-    ldr r0,[r4,#0x08]
-    ldr r5,[r0,#0x74]
-    mov r0,r5
-    mov r1,#1
-    bl TurtleRecord_SetTransactionState
-    b BankSave_TurtleRollbackSaveBegin
-@@native:
-    ldr r0,[r4,#0x08]
-    b BankSave_TurtleRollbackWrite + 4
-    .pool
 
 // C-owned paths and all feature payloads share the added pages.
 // C 路径数据与全部功能荷载共同放在新增页内。
 CombinePatch_PathDataBegin:
-    .importobj BUILD_DIRECTORY + "/patch_paths.o"
+    .importobj BUILD_DIRECTORY + "/common/fs_system/patch_paths.o"
 CombinePatch_PathDataEnd:
 
 .align 4
@@ -654,8 +652,12 @@ CombinePatch_TitleModeTextInitialize:
     mov r1,#CombinePatch_ModeOffline
     strb r1,[r12,#CombinePatch_SessionModeOffset]
     strb r1,[r12,#CombinePatch_DownloadCaptureStatusOffset]
-    strb r1,[r12,#CombinePatch_TitleRPreviousOffset]
     strb r1,[r12,#CombinePatch_InitialLanguagePendingOffset]
+    strb r1,[r12,#CombinePatch_TitleLanguageOffset]
+    // Require release before accepting a key held across title creation.
+    // 创建标题时仍按住的肩键须先松开，避免语言保存返回后再次进入。
+    mov r1,#3
+    strb r1,[r12,#CombinePatch_TitleRPreviousOffset]
     ldrb r3,[r12,#CombinePatch_TitleSelectedModeOffset]
     cmp r3,#CombinePatch_ModeDownload
     moveq r3,#CombinePatch_TitleModeDownloadMessage
@@ -669,13 +671,13 @@ CombinePatch_TitleModeTextInitialize:
 @@show:
     mov r1,#1
     mov r2,#0x10
-    b BankUi_SetMessageLine
+    b BankdataRedirect_TitleInitialize
     .pool
 
-// Reproduce the stock title-state update. R is sampled only while the title
+// Reproduce the stock title-state update. L/R are sampled only while the title
 // remains active. On the same title-exit frame produced by A or a touch input,
 // the selected value is copied to the session value used by every later hook.
-// 重现原版标题状态更新。只在标题仍处于活动状态时采样 R 键。A 键或触摸输入导致
+// 重现原版标题状态更新。只在标题仍处于活动状态时采样 L/R 键。A 键或触摸输入导致
 // 标题退出的同一帧，会将所选值复制到之后各钩子使用的会话值。
 CombinePatch_TitleScreenUpdate:
     push {r3,r4,r5,r6,r7,lr}
@@ -708,9 +710,20 @@ CombinePatch_TitleScreenUpdate:
 @@process:
     ldrb r0,[r4,#0x3C]
     cmp r0,#0
-    bne @@latch
+    bne @@check
     mov r0,r4
     bl CombinePatch_TitleProcessModeToggle
+@@check:
+    mov r0,r4
+    ldr r1,=CombinePatch_ModeStorage
+    ldrb r1,[r1,#CombinePatch_TitleSelectedModeOffset]
+    bl TitleUsers_Update
+    cmp r0,#0
+    bne @@pending
+    ldrb r0,[r4,#0x3C]
+    cmp r0,#0
+    bne @@latch
+    b @@pending
 @@pending:
     mov r0,#0
     pop {r3,r4,r5,r6,r7,pc}
@@ -724,11 +737,11 @@ CombinePatch_TitleScreenUpdate:
     pop {r3,r4,r5,r6,r7,pc}
     .pool
 
-// Advance Offline -> Download -> Unlock -> Original -> Offline on each R rising edge and
-// immediately rebind the bottom title help line. No caller after title exit
-// invokes this routine.
-// 每次 R 键上升沿按“离线→下载→解锁→原版→离线”循环切换，并立即重新绑定标题底部
-// 帮助行。标题退出后不会有调用者再执行此例程。
+// L opens native language selection through the stock title-confirm/fade
+// callback. R cycles modes. The previous-key byte holds R/L bits 0/1; L wins
+// simultaneous presses, and held keys cannot repeat.
+// L 经原版标题确认／淡出回调进入语言选择，R 切换模式。上一帧字节的位 0/1
+// 分别记录 R/L；同时按下时优先 L，持续按住不重复触发。
 CombinePatch_TitleProcessModeToggle:
     push {r4,r5,r6,lr}
     mov r4,r0
@@ -742,16 +755,23 @@ CombinePatch_TitleProcessModeToggle:
     bhi @@sample
     add r1,r0,r1,lsl #4
     ldr r1,[r1,#0x28]
-    tst r1,#CombinePatch_KeyR
-    movne r5,#1
+    mov r5,r1,lsr #8
+    and r5,r5,#3
 @@sample:
     ldr r6,=CombinePatch_ModeStorage
     ldrb r1,[r6,#CombinePatch_TitleRPreviousOffset]
     strb r5,[r6,#CombinePatch_TitleRPreviousOffset]
-    cmp r5,#0
+    bic r5,r5,r1
+    ldr r0,[r4,#0x38]
+    cmp r0,#0
     beq @@done
-    cmp r1,#0
-    bne @@done
+    ldrb r0,[r0,#0x2D]
+    cmp r0,#0
+    beq @@done
+    tst r5,#2
+    bne @@language
+    tst r5,#1
+    beq @@done
     ldrb r1,[r6,#CombinePatch_TitleSelectedModeOffset]
     add r1,r1,#1
     cmp r1,#CombinePatch_ModeCount
@@ -761,7 +781,7 @@ CombinePatch_TitleProcessModeToggle:
     cmp r0,#0
     beq @@done
     mov r1,#1
-    mov r2,#0x10
+    mov r2,#CombinePatch_TitleModePane
     ldrb r3,[r6,#CombinePatch_TitleSelectedModeOffset]
     cmp r3,#CombinePatch_ModeDownload
     moveq r3,#CombinePatch_TitleModeDownloadMessage
@@ -774,53 +794,49 @@ CombinePatch_TitleProcessModeToggle:
     movne r3,#CombinePatch_TitleModeOfflineMessage
 @@setText:
     bl BankUi_SetMessageLine
+    b @@done
+@@language:
+    mov r0,#CombinePatch_TitleLanguageRequested
+    strb r0,[r6,#CombinePatch_TitleLanguageOffset]
+    add r0,r4,#0x34
+    bl TitleScreenState_Confirm
 @@done:
     pop {r4,r5,r6,pc}
     .pool
 
-// The stock initializer has removed the previous view before this hook. Rebind
-// the common title preview to SD only when returning from a native-save mode.
-// 原版初始化器已销毁上一视图；从原存档模式返回时，将公共标题预览重新绑定到 SD。
-CombinePatch_TitlePreview:
-    ldr r12,=CombinePatch_ModeStorage
-    ldrb r0,[r12,#CombinePatch_SessionModeOffset]
-    cmp r0,#CombinePatch_ModeOffline
-    beq @@resume
-    mov r2,#CombinePatch_ModeOffline
-    strb r2,[r12,#CombinePatch_SessionModeOffset]
-    ldr r0,[r4,#8]
-    ldr r1,[r4,#0x0C]
-    bl TurtleRedirect_PrepareSession
-@@resume:
-    ldr r5,[r4,#0x2C]
-    b TitleScreenState_Initialize + 0x40
-    .pool
-
-// Only after title teardown may the record and localized resources switch.
-// A fresh backend uses stock language selection and subsequent initialization, then
-// continues to game checking without choosing the mode for a second time.
-// 仅在标题销毁后切换记录与语言资源。新后端走原版语言选择及后续初始化状态，之后继续
-// 检查游戏，不要求重新选择模式。
-// The shared prompt view holds the language archive and font from startup.
-// Finish its native asynchronous release while the title view is still alive;
-// subsequent states recreate it after the selected record's language is applied.
-// 公共提示视图保留启动时的文本包及字体。在标题视图仍有效时等待原版异步清理完成，
-// 后续状态会在应用所选记录的语言后重新创建它。
+// Mode changes bind storage only, never language. Release the cached prompt
+// before the title-L language action; ordinary START keeps its native lifetime.
+// 模式仅切换存储，不切换语言。只有标题 L 操作清理缓存提示视图；START 保留原生命周期。
 CombinePatch_TitleReleaseWaitingView:
     ldr r4,[r5,#0x2C]
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_TitleLanguageOffset]
+    cmp r12,#CombinePatch_TitleLanguageRequested
+    bne TitleScreenState_ExitUiCleanup + 4
     mov r0,r4
     bl BankUi_ReleaseWaitingView
     cmp r0,#0
     beq TitleScreenState_ExitComplete + 8
     b TitleScreenState_ExitUiCleanup + 4
+    .pool
 
 CombinePatch_TitleBindSession:
-    ldr r0,[r5,#8]
-    ldr r1,[r5,#0x0C]
+    mov r0,r5
+    ldr r1,[r5,#8]
+    ldr r2,[r5,#0x0C]
     ldr r6,=CombinePatch_ModeStorage
-    ldrb r2,[r6,#CombinePatch_SessionModeOffset]
-    bl TurtleRedirect_PrepareSession
-    eor r0,r0,#1
+    ldrb r3,[r6,#CombinePatch_TitleLanguageOffset]
+    cmp r3,#CombinePatch_TitleLanguageRequested
+    bne @@mode
+    mov r0,#1
+    b @@prepared
+@@mode:
+    ldrb r3,[r6,#CombinePatch_SessionModeOffset]
+    bl TurtleRedirect_PrepareSessionPoll
+@@prepared:
+    cmp r0,#0
+    popeq {r4,r5,r6,pc}
+    sub r0,r0,#1
     strb r0,[r6,#CombinePatch_InitialLanguagePendingOffset]
     mov r0,#0
     strb r0,[r6,#CombinePatch_UnlockRecoveryOffset]
@@ -828,28 +844,86 @@ CombinePatch_TitleBindSession:
     pop {r4,r5,r6,pc}
     .pool
 
-CombinePatch_TitleResult:
-    ldr r12,=CombinePatch_ModeStorage
-    ldrb r12,[r12,#CombinePatch_InitialLanguagePendingOffset]
-    cmp r12,#0
-    moveq r0,#3
-    movne r0,#1
-    b BankFlow_SelectNextState + 0xCC
+// A pending rebind starts only after the native UI release. On the next Exit
+// poll skip that completed release, whose old title pointer is no longer live.
+// 重新绑定只在原版 UI 释放后启动；再次轮询 Exit 时不重复访问已经释放的标题指针。
+CombinePatch_TitleExit:
+    push {r4,r5,r6,lr}
+    mov r5,r0
+    bl TurtleRedirect_PrepareSessionPending
+    cmp r0,#0
+    bne CombinePatch_TitleBindSession
+    mov r0,r5
+    b TitleScreenState_Exit + 8
+CombinePatch_TitleDestruct:
+    push {r0,lr}
+    bl TurtleRedirect_CancelPrepareSession
+    pop {r0,lr}
+    ldr r1,=0x00361FF0
+    b TitleScreenState_Destruct + 4
     .pool
 
-CombinePatch_TitleOrResume:
-    cmp r1,#21
-    bne @@title
+// Startup's helper ignores Initialize's return value. Keep its phase zero
+// while the same owned prepare request is pending; no fade/UI advancement.
+// 启动辅助流程忽略 Initialize 返回值；同一次准备未完成时保留阶段零，不提前推进渐变／界面。
+CombinePatch_StartupInitializeGate:
+    bl StartupPreview_Initialize
+    mov r0,r4
+    bl LanguageSettings_SyncPending
+    cmp r0,#0
+    bne StartupPreview_UpdateWaiting
+    b StartupPreview_UpdateInitialize + 4
+// Language is global: native startup reads the console record before any mode
+// selection. The language-action flag forces only Turtle I/O to native here.
+// 语言不分模式：启动先读主机记录，此时尚未选模式；语言标志仅让 Turtle I/O 走原后端。
+CombinePatch_StartupInitialize:
+    push {r4,r5,r6,r7,r8,lr}
+    mov r4,r0
+    sub sp,sp,#0x10
+    ldr r12,=CombinePatch_ModeStorage
+    mov r1,#CombinePatch_TitleLanguageRequested
+    strb r1,[r12,#CombinePatch_TitleLanguageOffset]
+    bl LanguageSettings_SyncPending
+    cmp r0,#0
+    bne CombinePatch_StartupSynchronizeLanguage
+    b StartupPreview_Initialize + 0x0C
+    .pool
+// Native language is already applied. Wait before constructing any localized
+// UI; retries skip heap allocation, native reload and font/message reload.
+// 主机语言已由原版应用；同步完成前不创建界面。重试跳过建堆、原档及字体／文本重载。
+CombinePatch_StartupSynchronizeLanguage:
+    mov r7,#0
+    ldr r8,=0x003AB90C
+    ldr r0,[r8]
+    ldr r1,[r0,#0x1C]
+    mov r0,r4
+    bl LanguageSettings_StartupSync
+    cmp r0,#0
+    addeq sp,sp,#0x10
+    popeq {r4,r5,r6,r7,r8,pc}
+    mov r5,#1
+    b StartupPreview_SettingsReady + 4
+    .pool
+CombinePatch_StartupDestruct:
+    push {r0,lr}
+    bl LanguageSettings_Cancel
+    pop {r0,lr}
+    ldr r1,=0x003616E8
+    b StartupPreview_Destruct + 4
+    .pool
+
+CombinePatch_TitleResult:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r2,[r12,#CombinePatch_InitialLanguagePendingOffset]
-    cmp r2,#0
-    beq @@title
-    mov r2,#0
-    strb r2,[r12,#CombinePatch_InitialLanguagePendingOffset]
+    cmp r2,#CombinePatch_SettingsFailed
+    moveq r0,#20
+    beq @@done
+    ldrb r12,[r12,#CombinePatch_TitleLanguageOffset]
+    cmp r12,#CombinePatch_TitleLanguageRequested
+    moveq r0,#1
+    beq @@done
     mov r0,#3
-    b BankFlow_SelectNextState + 0xCC
-@@title:
-    mov r0,#2
+@@done:
     b BankFlow_SelectNextState + 0xCC
     .pool
 
@@ -857,24 +931,92 @@ CombinePatch_TurtleLoad:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12,#CombinePatch_SessionModeOffset]
     cmp r12,#CombinePatch_ModeOffline
-    beq TurtleRedirect_LoadBackend
-    b TurtleStorage_LoadAtOnce
+    bne TurtleStorage_LoadAtOnce
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_TitleLanguageOffset]
+    cmp r12,#CombinePatch_TitleLanguageRequested
+    beq TurtleStorage_LoadAtOnce
+    b TurtleRedirect_LoadBackend
     .pool
 
 CombinePatch_TurtleSave:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12,#CombinePatch_SessionModeOffset]
     cmp r12,#CombinePatch_ModeOffline
-    beq TurtleRedirect_SaveBackend
-    b TurtleStorage_SaveAtOnce
+    bne TurtleStorage_SaveAtOnce
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_TitleLanguageOffset]
+    cmp r12,#CombinePatch_TitleLanguageRequested
+    beq TurtleStorage_SaveAtOnce
+    b TurtleRedirect_SaveBackend
     .pool
 
-CombinePatch_TurtleCheck:
+CombinePatch_LocalSaveBegin:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12,#CombinePatch_SessionModeOffset]
     cmp r12,#CombinePatch_ModeOffline
-    beq TurtleRedirect_CheckBackend
-    b TurtleStorage_CheckArchiveStatus
+    beq TurtleRedirect_StateSaveBegin
+    b TurtleRedirect_OriginalStateSaveBegin
+    .pool
+
+CombinePatch_LocalSavePoll:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeOffline
+    beq TurtleRedirect_StateSavePoll
+    b TurtleRedirect_OriginalStateSavePoll
+    .pool
+
+// Replay only the replaced prologues. All original state transitions, physical
+// game-save jobs and online settings writes continue in the untouched bodies.
+// 只回放被替换的函数前言；原状态转换、实体游戏保存及联网设置写入继续使用原函数体。
+TurtleRedirect_OriginalStateSaveBegin:
+    push {r4-r6,lr}
+    b StateLocalSave_Begin + 4
+TurtleRedirect_OriginalStateSavePoll:
+    push {r4-r6,lr}
+    b StateLocalSave_Poll + 4
+
+CombinePatch_InitialTurtleCheck:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeOffline
+    bne @@native
+    mov r2,r1
+    mov r1,r0
+    mov r0,r4
+    bl TurtleRedirect_InitialCheckPoll
+    cmn r0,#1
+    beq InitialGameCheck_UpdateWaiting
+    b Initial_TurtleStorageCheckCall + 4
+@@native:
+    bl TurtleStorage_CheckArchiveStatus
+    b Initial_TurtleStorageCheckCall + 4
+    .pool
+
+CombinePatch_InitialTurtleLoad:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeOffline
+    bne @@native
+    mov r2,r1
+    mov r1,r0
+    mov r0,r4
+    bl TurtleRedirect_InitialLoadPoll
+    cmn r0,#1
+    beq InitialGameCheck_UpdateWaiting
+    b Initial_TurtleStorageLoadCall + 4
+@@native:
+    bl GameData_LoadTurtle
+    b Initial_TurtleStorageLoadCall + 4
+    .pool
+
+CombinePatch_InitialTurtleDestruct:
+    push {r0,lr}
+    bl TurtleRedirect_CancelPrepareSession
+    pop {r0,lr}
+    ldr r1,=0x00361AB8
+    b InitialGameCheck_Destruct + 4
     .pool
 
 CombinePatch_TurtleFormat:
@@ -941,7 +1083,7 @@ CombinePatch_SelectBankSlotDate:
     cmp r12,#CombinePatch_ModeOffline
     bne BankSlot_GetCurrentDate
     mov r0,r1
-    b LocalMileage_GetCurrentDate
+    b SystemTime_GetCurrentDate
     .pool
 
 // Connection availability reads only the session mode latched as the title
@@ -960,75 +1102,218 @@ CombinePatch_NetworkAvailability:
     b 0x001103CC
     .pool
 
-// In Offline Mode skip allocating the stock remote connection job. Download
-// and Unlock modes replay the overwritten instructions before resuming it.
-// 离线模式跳过原版远端连接任务的分配；下载模式与解锁模式会重放被覆盖的指令，再
-// 继续原版流程。
-CombinePatch_NetworkSkipRemoteJob:
+// Replace only the system-session carrier; initialization, poll consumer,
+// timers, error handling and cleanup of the client state remain native.
+// 仅替换系统会话载体；客户端初始化、轮询消费、计时、错误处理及清理保持原版。
+CombinePatch_ConnectionConstruct:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12]
     cmp r12,#CombinePatch_ModeOffline
-    bne @@native
-    mov r0,#0
-    str r0,[r4,#0x38]
-    b NetworkConnectionState_Initialize + 0x5C
-@@native:
-CombinePatch_NetworkSkipRemoteJobOfficial:
-    ldr r1,[r4,#0x0C]
-    mov r0,#0x2B0
-    bl Allocator_Allocate
-    b NetworkConnectionState_Initialize + 0x4C
+    bne 0x002312CC
+    ldr r2,=0x00236A90
+    b NativeResponse_CreateConnection
     .pool
 
-CombinePatch_NetworkUpdate:
+CombinePatch_ConnectionPoll:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12]
     cmp r12,#CombinePatch_ModeOffline
-    bne @@native
-    b OfflinePatch_NetworkUpdate
-@@native:
+    beq NativeResponse_PollConnection
     push {r4-r6,lr}
-    b NetworkConnectionState_Update + 4
+    b 0x002A43D0
+    .pool
+
+CombinePatch_ConnectionUnbind:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12]
+    cmp r12,#CombinePatch_ModeOffline
+    bxeq lr
+    push {r4,lr}
+    b 0x002A44A4
+    .pool
+
+// SD sessions have no system-network handle. Keep the native SDK job scheduler,
+// but do not activate AC/NEX connection monitoring for Offline. The worker still
+// observes its stop flag, locks, sleeps and exits through its original code.
+// SD 会话没有系统网络句柄；保留原 SDK 作业调度，仅离线不执行 AC/NEX 连接监控。
+// 后台线程仍按原代码处理停止标志、加锁、休眠和退出，不改账户或错误状态。
+CombinePatch_NetworkMonitorUpdate:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeOffline
+    bxeq lr
+    push {r4-r6,lr}
+    b NetworkMonitor_Update + 4
+    .pool
+
+CombinePatch_NetworkMonitorWorkerAccount:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeOffline
+    moveq r4,#0
+    ldrne r4,[r6,#0x28]
+    bx lr
     .pool
 
 CombinePatch_InitialRemoteRecordUpdate:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12]
     cmp r12,#CombinePatch_ModeOffline
+    beq @@local
+    ldr r12,=ServerTicket_BackendStorage
+    ldrb r12,[r12]
+    cmp r12,#2
     bne @@native
-    b OfflinePatch_InitialRemoteRecordUpdate
+    ldr r12,[r0,#0x10]
+    cmp r12,#7
+    bne @@native
+@@local:
+    b BankdataRedirect_InitialRecordUpdate
 @@native:
+BankdataRedirect_OriginalInitialRecordUpdate:
     push {r4-r6,lr}
     b InitialRemoteRecordState_Update + 4
     .pool
 
-CombinePatch_FirstPresentDispatch:
-    cmp r0,#0
-    beq RewardReceive_FirstPresentPath
+CombinePatch_RecordProvider:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12]
+    cmp r12,#CombinePatch_ModeOffline
+    bne @@native
+    push {r4,lr}
+    mov r0,r4
+    mov r1,r5
+    mov r2,#5
+    bl NativeResponse_AcceptOperation
+    pop {r4,lr}
+    b BankRemote_RecordProviderResult
+@@native:
+    ldr r0,[r4,#0x10]
+    b BankRemote_RecordProvider + 4
+    .pool
+
+CombinePatch_QueryProvider:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12]
+    cmp r12,#CombinePatch_ModeOffline
+    bne @@native
+    push {r4,lr}
+    mov r0,r4
+    mov r1,r5
+    mov r2,#4
+    bl NativeResponse_AcceptOperation
+    pop {r4,lr}
+    b BankRemote_QueryProviderResult
+@@native:
+    ldr r0,[r4,#0x10]
+    b BankRemote_QueryProvider + 4
+    .pool
+
+CombinePatch_DownloadProvider:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12]
+    cmp r12,#CombinePatch_ModeOffline
+    bne @@native
+    push {r4,lr}
+    mov r0,r4
+    mov r1,r6
+    mov r2,#6
+    bl NativeResponse_AcceptOperation
+    pop {r4,lr}
+    b 0x002A363C
+@@native:
+    ldr r0,[r4,#0x10]
+    b 0x002A3628
+    .pool
+
+CombinePatch_DownloadResponse:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12]
+    cmp r12,#CombinePatch_ModeOffline
+    bne BankdataRedirect_OriginalDownloadResponse
+    ldr r2,=BankdataRedirect_OriginalDownloadResponse
+    b NativeResponse_DownloadResponse
+BankdataRedirect_OriginalDownloadResponse:
+    push {r4-r6,lr}
+    b 0x002A3958
+    .pool
+
+CombinePatch_MetadataUpdateProvider:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12]
+    cmp r12,#CombinePatch_ModeOffline
+    bne @@native
+    push {r4,lr}
+    mov r0,r4
+    mov r1,r5
+    mov r2,#10
+    bl NativeResponse_AcceptOperation
+    pop {r4,lr}
+    b 0x002A2B3C
+@@native:
+    ldr r0,[r4,#0x10]
+    b 0x002A2B28
+    .pool
+
+CombinePatch_InitialCampaignRequest:
+    // Select before the initial resource callback, not from a previous job.
+    // 初始资源回调前选择本次后端，不能沿用前一个作业的标志。
+    push {r0-r4,lr}
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12]
+    cmp r12,#CombinePatch_ModeOffline
+    moveq r0,#1
+    movne r0,#0
+    ldr r12,=CombinePatch_OnlineTicketFallback
+    ldrb r1,[r12]
+    bl FakeServerClient_SelectTicket
+    mov r12,r0
+    pop {r0-r4,lr}
+    cmp r12,#0
+    // Native initialization and observer binding have already run. Local
+    // transport delivers the resource on the next native wait update.
+    // 原初始化及观察者绑定已完成；本地传输在下一次原等待更新时交付资源。
+    movne r0,#0
+    bxne lr
+    b 0x001D5A14
+    .pool
+
+CombinePatch_GiftUpdate:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12,#CombinePatch_SessionModeOffset]
     cmp r12,#CombinePatch_ModeOffline
-    bne RewardReceive_FirstPresentBranch + 4
-    // Skip both online-gift passes only for this offline state instance. Keep
-    // the persistent update-gift flag intact for a later official session.
-    // 仅在当前离线状态实例中跳过两轮联网礼物查询，保留持久化的更新礼物
-    // 标志，供之后的原版联网会话使用。
-    mov r0,#1
-    str r0,[r4,#0x4C]
-    mov r0,#0x1B
-    str r0,[r4,#0x10]
-    b RewardReceive_UpdateReturnPending
+    beq ServerGifts_Update
+ServerGifts_OriginalUpdate:
+    push {r4-r11,lr}
+    b RewardReceiveState_Update + 4
+    .pool
+
+CombinePatch_GiftResourceRequest:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeOffline
+    beq ServerGifts_Request
+    b 0x001D5A14
     .pool
 
 CombinePatch_BankDataSyncDispatch:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12]
     cmp r12,#CombinePatch_ModeOffline
-    bne @@native
-    b CombinePatch_BankDataSyncEntry
-@@native:
+    beq BankdataRedirect_DownloadUpdate
+    cmp r12,#CombinePatch_ModeDownload
+    beq BankdataRedirect_ExportDownloadUpdate
+BankdataRedirect_OriginalDownloadUpdate:
     push {r4-r6,lr}
     b BankDataSyncState_Update + 4
+    .pool
+
+CombinePatch_BankDataSyncDestruct:
+    push {r0,lr}
+    bl BankdataRedirect_CancelDownloaded
+    pop {r0,lr}
+    ldr r1,=0x00361EC8
+    b BankDataSyncState_Destruct + 4
     .pool
 
 // Download Mode uses its SD destination message on the complete-file route.
@@ -1088,10 +1373,10 @@ CombinePatch_SelectSaveMessage:
     bx lr
     .pool
 
-// Both message sites in the post-selection state use the same mode dispatch;
+// Post-selection and gift-query connection messages use the session mode;
 // all surrounding stock UI, sound and animation instructions remain intact.
-// 选定游戏后状态中的两个消息位置共用同一模式分派；周围原版 UI、声音和动画指令
-// 全部保持不变。
+// 选游戏后和礼物查询的连接提示按会话模式选择；周围原版 UI、声音和
+// 动画指令全部保持不变。
 CombinePatch_SelectPostSelectionConnectionMessage:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12,#CombinePatch_SessionModeOffset]
@@ -1106,20 +1391,13 @@ CombinePatch_PostSelectionConnectionUpdate:
     ldrb r12,[r12]
     cmp r12,#CombinePatch_ModeOffline
     bne @@native
-    push {r4,lr}
-    mov r4,r0
-    bl OfflinePatch_PostSelectionConnectionUpdate
-    mov r4,r0
-    cmp r4,#0
-    beq @@offlineReturn
-    mov r0,r4
-@@offlineReturn:
-    pop {r4,pc}
+    b BankdataRedirect_SourceRecoveryUpdate
 @@native:
     cmp r12,#CombinePatch_ModeUnlock
     ldreq r1,=CombinePatch_PostSelectionConnectionUpdateOfficial
     beq UnlockMode_PostSelectionUpdate
 CombinePatch_PostSelectionConnectionUpdateOfficial:
+BankdataRedirect_OriginalSourceRecoveryUpdate:
     push {r4-r6,lr}
     b PostSelectionConnectionState_Update + 4
     .pool
@@ -1129,15 +1407,39 @@ CombinePatch_PostSelectionConnectionUpdateOfficial:
 // the same state reached after confirming the first feature-menu entry.
 // 只有解锁模式改动不匹配提示确认后的结果。流程控制器仍先执行原版收尾与析构，
 // 再创建 state 10，与确认功能选单第一项后进入的状态相同。
+// Offline appends one native-confirmed page; online modes keep stock line 10.
+// 离线仅追加一页原版按键确认说明，联网各模式保留原消息 10。
+CombinePatch_SelectMismatchMessage:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeOffline
+    moveq r2,#131
+    movne r2,#10
+    bx lr
+    .pool
+
 CombinePatch_TransactionRecoveryUpdate:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeOffline
+    beq BankdataRedirect_TransactionRecoveryUpdate
     cmp r12,#CombinePatch_ModeUnlock
     ldreq r1,=CombinePatch_TransactionRecoveryUpdateOfficial
     beq UnlockMode_RecoveryUpdate
 CombinePatch_TransactionRecoveryUpdateOfficial:
+BankdataRedirect_OriginalTransactionRecoveryUpdate:
     push {r4-r7,lr}
     b TransactionRecoveryState_Update + 4
+    .pool
+
+CombinePatch_LocalForceRollbackUpdate:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeOffline
+    beq BankdataRedirect_ForceRollbackUpdate
+BankdataRedirect_OriginalForceRollbackUpdate:
+    push {r4,r5,lr}
+    b ForceRollbackState_Update + 4
     .pool
 
 CombinePatch_RecoveryResult:
@@ -1165,113 +1467,192 @@ CombinePatch_ForceRollbackSuccess:
     b BankFlow_ForceRollbackSuccess + 0x18
     .pool
 
-// Offline exit keeps the stock prompt, timer and finalizer without creating or
-// binding a remote rollback job. Every native mode resumes the original body.
-// 离线退出保留原版提示、计时与收尾，不创建或绑定远端回滚作业；其他模式继续原函数。
+// Every mode retains the native rollback request object, wait and finalizer.
+// 所有模式保留原回滚请求对象、等待及收尾；离线仅替换实际请求接口。
 CombinePatch_NoSaveRollbackUpdate:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12,#CombinePatch_SessionModeOffset]
     cmp r12,#CombinePatch_ModeOffline
-    beq OfflinePatch_NoSaveRollbackUpdate
+    beq BankdataRedirect_NoSaveUpdate
 CombinePatch_NoSaveRollbackUpdateOfficial:
+BankdataRedirect_OriginalNoSaveUpdate:
     push {r4-r6,lr}
     b BankNoSaveRollbackState_Update + 4
     .pool
 
-CombinePatch_DisconnectUpdate:
+// Retain native construction and destruction of all SDK-owned containers.
+// 原版继续构造和销毁 SDK 容器；离线只使用不触发联网的提供者绑定。
+CombinePatch_RemoteBind:
     ldr r12,=CombinePatch_ModeStorage
-    ldrb r12,[r12]
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
     cmp r12,#CombinePatch_ModeOffline
-    beq CombinePatch_DisconnectWithLanguageSave
-    cmp r12,#CombinePatch_ModeOriginal
-    beq @@native
+    beq BankdataRedirect_BindRemote
+BankdataRedirect_OriginalBindRemote:
+    push {r4-r6,lr}
+    b 0x001DF3E4
+    .pool
+
+// Cancel delivery before native containers/jobs are released. Never join the
+// worker or dereference this remote from its background task.
+// 原容器／作业释放前取消投递；不等待后台线程，后台任务不解引用远端对象。
+CombinePatch_RemoteUnbind:
+    push {r0-r3,r12,lr}
+    bl NativeResponse_CancelRemote
+    pop {r0-r3,r12,lr}
+    push {r4-r6,lr}
+    b 0x002A3714
+    .pool
+
+CombinePatch_MetadataProvider:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeOffline
+    bne @@native
+    push {r4,lr}
+    mov r0,r4
+    mov r1,r6
+    mov r2,r5
+    bl NativeResponse_AcceptMetadata
+    pop {r4,lr}
+    b 0x002A2714
+@@native:
+    ldr r0,[r4,#0x10]
+    b 0x002A26FC
+    .pool
+
+CombinePatch_StageProvider:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeOffline
+    bne @@native
+    push {r4,lr}
+    mov r0,r4
+    mov r1,r6
+    mov r2,#8
+    bl NativeResponse_AcceptOperation
+    pop {r4,lr}
+    b 0x002A25DC
+@@native:
+    ldr r0,[r4,#0x10]
+    b 0x002A25C8
+    .pool
+
+CombinePatch_RecoveryTokenProvider:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeOffline
+    bne @@native
+    push {r4,lr}
+    mov r0,r5
+    mov r1,r4
+    mov r2,r6
+    bl BankdataRedirect_RecoveryTokenProvider
+    pop {r4,lr}
+    b 0x002A2854
+@@native:
+    ldr r0,[r4,#0x10]
+    b 0x002A283C
+    .pool
+
+CombinePatch_CommitProvider:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeOffline
+    bne @@native
+    push {r4,lr}
+    mov r0,r6
+    mov r1,r4
+    mov r2,#1
+    mov r3,r7
+    bl BankdataRedirect_TransactionProvider
+    pop {r4,lr}
+    b 0x001D5E0C
+@@native:
+    ldr r0,[r4,#0x10]
+    b 0x001D5DF4
+    .pool
+
+CombinePatch_RollbackProvider:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeOffline
+    bne @@native
+    push {r4,lr}
+    mov r0,r6
+    mov r1,r4
+    mov r2,#0
+    mov r3,r7
+    bl BankdataRedirect_TransactionProvider
+    pop {r4,lr}
+    b 0x001D5CC0
+@@native:
+    ldr r0,[r4,#0x10]
+    b 0x001D5CA8
+    .pool
+
+CombinePatch_DisconnectUpdate:
     ldrb r12,[r0,#0x3C]
     cmp r12,#0
-    beq @@native
-    ldr r12,=CombinePatch_ModeStorage
-    ldrb r12,[r12,#CombinePatch_InitialLanguagePendingOffset]
-    cmp r12,#0
-    beq CombinePatch_DisconnectWithLanguageSave
+    bne CombinePatch_DisconnectWithLanguageSave
 @@native:
 CombinePatch_DisconnectUpdateOfficial:
     push {r4,lr}
     b DisconnectCleanupState_Update + 4
     .pool
 
-CombinePatch_DisconnectSkipRemoteJob:
+
+CombinePatch_BankCreateUpdate:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12]
+    cmp r12,#CombinePatch_ModeOffline
+    beq BankdataRedirect_CreateUpdate
+BankdataRedirect_OriginalCreateUpdate:
+    push {r4-r6,lr}
+    b BankCreateState_Update + 4
+    .pool
+
+CombinePatch_AccountInitialize:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12]
+    cmp r12,#CombinePatch_ModeOffline
+    beq BankdataRedirect_InitializeAccount
+    push {r4-r6,lr}
+    b 0x00114920
+    .pool
+
+CombinePatch_AccountUnbind:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12]
+    cmp r12,#CombinePatch_ModeOffline
+    beq BankdataRedirect_UnbindAccount
+    push {r4-r6,lr}
+    b 0x0022DDD0
+    .pool
+
+CombinePatch_AccountSend:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12]
+    cmp r12,#CombinePatch_ModeOffline
+    moveq r0,r1
+    bxeq lr
+    b 0x0021EB10
+    .pool
+
+CombinePatch_CreateProvider:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12]
     cmp r12,#CombinePatch_ModeOffline
     bne @@native
-    mov r0,#0
-    str r0,[r4,#0x38]
-    b DisconnectCleanupState_Initialize + 0x78
+    push {r4,lr}
+    mov r0,r4
+    mov r1,r5
+    mov r2,#7
+    bl NativeResponse_AcceptOperation
+    pop {r4,lr}
+    b 0x002A3884
 @@native:
-CombinePatch_DisconnectSkipRemoteJobOfficial:
-    ldr r1,[r4,#0x0C]
-    mov r0,#0x2B0
-    bl Allocator_Allocate
-    b DisconnectCleanupState_Initialize + 0x68
-    .pool
-
-// These three sites preserve stock first-use creation in Download and Unlock
-// modes while retaining the local first-use initializer and checked write in
-// Offline mode.
-// 三个位置在下载模式与解锁模式保留原版首次创建，在离线模式保留本地首次初始化与
-// 检查写入。
-CombinePatch_BankCreateState0:
-    ldr r12,=CombinePatch_ModeStorage
-    ldrb r12,[r12]
-    cmp r12,#CombinePatch_ModeOffline
-    bne @@native
-    mov r0,#1
-    b BankCreateState_Update + 0x238
-@@native:
-CombinePatch_BankCreateState0Official:
-    ldr r0,=BankRootPointerSlot
-    ldr r1,[r4,#0x0C]
-    b BankCreateState_Update + 0x60
-    .pool
-
-CombinePatch_BankCreateAfterMessages:
-    ldr r12,=CombinePatch_ModeStorage
-    ldrb r12,[r12]
-    cmp r12,#CombinePatch_ModeOffline
-    bne @@native
-    mov r0,#6
-    b BankCreateState_Update + 0x238
-@@native:
-CombinePatch_BankCreateAfterMessagesOfficial:
-    ldr r0,=BankRootPointerSlot
-    ldr r5,[r0]
-    b BankCreateState_Update + 0x1EC
-    .pool
-
-CombinePatch_CreateInitial:
-    ldr r12,=CombinePatch_ModeStorage
-    ldrb r12,[r12]
-    cmp r12,#CombinePatch_ModeOffline
-    beq OfflinePatch_CreateInitial
-    b BankRemote_CreateSerializedFile
-    .pool
-
-CombinePatch_BankCreateSuccess:
-    ldr r12,=CombinePatch_ModeStorage
-    ldrb r12,[r12]
-    cmp r12,#CombinePatch_ModeOriginal
-    cmpne r12,#CombinePatch_ModeDownload
-    moveq r0,#7
-    movne r0,#8
-    b BankCreateState_Update + 0x238
-    .pool
-
-CombinePatch_SelectPostSelectionState:
-    ldr r12,=CombinePatch_ModeStorage
-    ldrb r12,[r12]
-    cmp r12,#CombinePatch_ModeOffline
-    moveq r0,#17
-    movne r0,#18
-    pop {r4,pc}
+    ldr r0,[r4,#0x10]
+    b 0x002A386C
     .pool
 
 // Preserve the receipt entry outside Download Mode. Its fallback route must
@@ -1291,7 +1672,10 @@ CombinePatch_HomeResult:
     ldrb r12,[r12,#CombinePatch_SessionModeOffset]
     cmp r12,#CombinePatch_ModeOriginal
     beq BankFlow_SelectNextState + 0x1F8
-    b CombinePatch_RedirectHomeToLanguage
+    // Defensive fallback for a stale menu result; no language entry in a mode.
+    // 防御旧选单残留结果：模式内部没有语言切换入口。
+    mov r0,#20
+    pop {r4,pc}
     .pool
 
 // The first Download menu item uses the native game-independent downloader.
@@ -1319,12 +1703,9 @@ CombinePatch_HomeCleanupResult:
     .pool
 
 CombinePatch_Result21:
-    ldr r12,=CombinePatch_ModeStorage
-    ldrb r12,[r12]
-    cmp r12,#CombinePatch_ModeOffline
-    beq BankFlow_SelectNextState + 0x3B4
+    // Keep native state 19 so the local service releases the load reservation.
+    // 保留原版 state 19，由本地服务释放载入预留后再断开。
     b BankFlow_SelectNextState + 0x370
-    .pool
 
 CombinePatch_Result5:
     ldr r12,=CombinePatch_ModeStorage
@@ -1348,125 +1729,19 @@ CombinePatch_Result6Or12:
 // each hook and then resume the original save state.
 // 下载、解锁和原版模式不能继承任何离线保存替换。下面的原版分支会重放各钩子处被
 // 覆盖的指令，然后回到原版保存状态。
-CombinePatch_SaveBegin:
+CombinePatch_SaveStateUpdate:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12]
     cmp r12,#CombinePatch_ModeOffline
-    bne @@native
-    mov r0,#1
-    b BankSaveState_Update + 0x47C
-@@native:
-    ldr r0,=BankRootPointerSlot
-    ldr r5,[r0]
-    b BankSaveState_Update + 0x8C
+    beq BankdataRedirect_SaveUpdate
+BankdataRedirect_OriginalSaveUpdate:
+    push {r4-r6,lr}
+    b BankSaveState_Update + 4
     .pool
 
-CombinePatch_SaveDisplayWait:
-    ldr r12,=CombinePatch_ModeStorage
-    ldrb r12,[r12]
-    cmp r12,#CombinePatch_ModeOffline
-    bne @@native
-    mov r0,r4
-    bl OfflinePatch_SaveDisplayDelayUpdate
-    b BankSaveState_Update + 0x5BC
-@@native:
-    ldrb r1,[r4,#0x48]
-    cmp r1,#1
-    bne BankSaveState_Update + 0x5BC
-    b BankSaveState_Update + 0x110
-    .pool
-
-CombinePatch_SaveStage:
-    ldr r12,=CombinePatch_ModeStorage
-    ldrb r12,[r12]
-    cmp r12,#CombinePatch_ModeOffline
-    bne @@native
-    b OfflinePatch_Stage
-@@native:
-    b BankRemote_StageFileUpdate
-    .pool
-
-CombinePatch_SaveCommit:
-    ldr r12,=CombinePatch_ModeStorage
-    ldrb r12,[r12]
-    cmp r12,#CombinePatch_ModeOffline
-    bne @@native
-    // The native save state has already persisted transaction state 2. Once
-    // the local file rotation succeeds, clear that now-obsolete remote marker
-    // through the stock Turtle object and persist the regenerated record.
-    // 原版保存状态此时已经持久化事务状态 2。本地文件轮换成功后，通过原版
-    // Turtle 对象清除这个已失去意义的远端标记，并保存重新生成的记录。
-    push {r4,lr}
-    bl OfflinePatch_Commit
-    cmp r0,#0
-    beq @@return
-    ldr r0,[r4,#0x08]
-    ldr r1,[r0,#0x74]
-    ldr r0,[r0,#0x78]
-    bl TurtleRedirect_ClearTransactionAndSave
-@@return:
-    pop {r4,pc}
-@@native:
-    b BankRemote_CommitStagedUpdate
-    .pool
-
-CombinePatch_SaveCommitWait:
-    ldr r12,=CombinePatch_ModeStorage
-    ldrb r12,[r12]
-    cmp r12,#CombinePatch_ModeOffline
-    bne @@native
-    mov r1,#13
-    str r1,[r4,#0x10]
-    b BankSaveState_Update + 0x5BC
-@@native:
-    ldrb r1,[r4,#0x48]
-    cmp r1,#1
-    bne BankSaveState_Update + 0x5BC
-    b BankSaveState_Update + 0x3D4
-    .pool
-
-CombinePatch_SaveRollback:
-    ldr r12,=CombinePatch_ModeStorage
-    ldrb r12,[r12]
-    cmp r12,#CombinePatch_ModeOffline
-    bne @@native
-    // A completed local rollback also has no pending remote transaction. This
-    // symmetrically clears native state 1 after bankdata.tmp is discarded.
-    // 本地回滚完成后同样不存在待处理的远端事务；删除 bankdata.tmp 后，对称地
-    // 清除原版状态 1。
-    push {r4,lr}
-    bl OfflinePatch_Rollback
-    cmp r0,#0
-    beq @@return
-    ldr r0,[r4,#0x08]
-    ldr r1,[r0,#0x74]
-    ldr r0,[r0,#0x78]
-    bl TurtleRedirect_ClearTransactionAndSave
-@@return:
-    pop {r4,pc}
-@@native:
-    b BankRemote_RollbackStagedUpdate
-    .pool
-
-CombinePatch_SaveRollbackWait:
-    ldr r12,=CombinePatch_ModeStorage
-    ldrb r12,[r12]
-    cmp r12,#CombinePatch_ModeOffline
-    bne @@native
-    mov r1,#16
-    str r1,[r4,#0x10]
-    b BankSaveState_Update + 0x5BC
-@@native:
-    ldrb r1,[r4,#0x48]
-    cmp r1,#1
-    bne BankSaveState_Update + 0x5BC
-    b BankSaveState_Update + 0x414
-    .pool
-
-// Support code and Mover/eShop are disabled in the first three modes. HOME is deliberately
-// left native here so its existing Bank-flow hook can redirect it to language.
-// 前三种模式禁用支持代码与 Mover/eShop；原版模式直接使用原回调。HOME 在这里保持原版，使 Bank
-// 流程钩子能够把它重定向至语言选择。
+// Mover/eShop and HOME are disabled in the first three modes. Support code
+// stays clickable even with an invalid identity; language is title-only.
+// 前三种模式禁用 Mover/eShop、HOME；支持代码均走原路径，语言仅在标题 L 设置。
 CombinePatch_MenuSelectionCallback:
     ldr r2,=CombinePatch_ModeStorage
     ldrb r2,[r2,#CombinePatch_SessionModeOffset]
@@ -1475,9 +1750,9 @@ CombinePatch_MenuSelectionCallback:
     ldr r2,[r0,#0x10]
     cmp r2,#1
     bne @@native
-    cmp r1,#2
-    beq @@disabled
     cmp r1,#3
+    beq @@disabled
+    cmp r1,#5
     beq @@disabled
 @@native:
     push {r4-r6,lr}
@@ -1521,13 +1796,14 @@ CombinePatch_DownloadCaptureTrampoline:
     ldr r0,=CombinePatch_ModeStorage
     mov r1,#DOWNLOAD_CAPTURE_FAILED
     strb r1,[r0,#CombinePatch_DownloadCaptureStatusOffset]
-    ldr r0,[r4,#8]
-    ldr r0,[r0,#0xCC]
+    ldr r1,[r4,#8]
+    ldr r1,[r1,#0xCC]
+    mov r0,r4
     bl BankdataRedirect_CaptureDownloaded
     cmp r0,#0
     beq @@restore
     ldr r1,=CombinePatch_ModeStorage
-    mov r0,#DOWNLOAD_CAPTURE_COMPLETE
+    mov r0,#DOWNLOAD_CAPTURE_PENDING
     strb r0,[r1,#CombinePatch_DownloadCaptureStatusOffset]
 @@restore:
     ldr r12,[sp]
@@ -1543,25 +1819,69 @@ CombinePatch_DownloadCaptureTrampoline:
 TurtleRedirect_PayloadBegin:
     .importobj BUILD_DIRECTORY + "/turtle_redirect.o"
 TurtleRedirect_PayloadEnd:
+LanguageSettings_PayloadBegin:
+    .importobj BUILD_DIRECTORY + "/language_settings.o"
+LanguageSettings_PayloadEnd:
 
 // Keep the remaining feature modules consecutive inside the added pages.
 // 其余功能模块在新增页内连续排列。
 CombinePatch_PayloadBegin:
 FsHelpers_PayloadBegin:
-    .importobj BUILD_DIRECTORY + "/fs_helpers.o"
+    .importobj BUILD_DIRECTORY + "/common/fs_system/fs_helpers.o"
+    .importobj BUILD_DIRECTORY + "/common/fs_system/memory.o"
+    .importobj BUILD_DIRECTORY + "/common/fs_system/console_settings.o"
+    .importobj BUILD_DIRECTORY + "/common/fs_system/console_identity.o"
+    .importobj BUILD_DIRECTORY + "/common/fs_system/utf_path.o"
+    .importobj BUILD_DIRECTORY + "/common/fs_system/title_users.o"
+    .importobj BUILD_DIRECTORY + "/support_code.o"
 FsHelpers_PayloadEnd:
+SystemTime_PayloadBegin:
+    .importobj BUILD_DIRECTORY + "/common/fs_system/system_time.o"
+SystemTime_PayloadEnd:
 BankdataRedirect_PayloadBegin:
     .importobj BUILD_DIRECTORY + "/bankdata_redirect.o"
 BankdataRedirect_PayloadEnd:
-OfflineFlow_PayloadBegin:
-    .importobj BUILD_DIRECTORY + "/offline_flow.o"
-OfflineFlow_PayloadEnd:
-LocalMileage_PayloadBegin:
-    .importobj BUILD_DIRECTORY + "/local_mileage.o"
-LocalMileage_PayloadEnd:
-LocalTicket_PayloadBegin:
-    .importobj BUILD_DIRECTORY + "/local_ticket.o"
-LocalTicket_PayloadEnd:
+FakeServer_PayloadBegin:
+    .importobj BUILD_DIRECTORY + "/common/fakeServer/console_profile.o"
+    .importobj BUILD_DIRECTORY + "/common/fakeServer/memory.o"
+    .importobj BUILD_DIRECTORY + "/common/fakeServer/fake_server_client.o"
+    .importobj BUILD_DIRECTORY + "/common/fakeServer/configuration.o"
+    .importobj BUILD_DIRECTORY + "/common/fakeServer/configuration_edit.o"
+    .importobj BUILD_DIRECTORY + "/common/fakeServer/fake_servers.o"
+    .importobj BUILD_DIRECTORY + "/common/fakeServer/fakeserverapi.o"
+    .importobj BUILD_DIRECTORY + "/common/fakeServer/native_response.o"
+    .importobj BUILD_DIRECTORY + "/common/fakeServer/native_transport.o"
+    .importobj BUILD_DIRECTORY + "/common/fakeServer/service_request.o"
+    .importobj BUILD_DIRECTORY + "/common/fakeServer/request_broker.o"
+    .importobj BUILD_DIRECTORY + "/common/fakeServer/async_task.o"
+    .importobj BUILD_DIRECTORY + "/common/fs_system/native_worker.o"
+    .importobj BUILD_DIRECTORY + "/common/fs_system/service_worker.o"
+    .importobj BUILD_DIRECTORY + "/common/fs_system/settings_store.o"
+    .importobj BUILD_DIRECTORY + "/common/fs_system/protected_file.o"
+    .importobj BUILD_DIRECTORY + "/common/fakeServer/source.o"
+    .importobj BUILD_DIRECTORY + "/common/fakeServer/unlock.o"
+    .importobj BUILD_DIRECTORY + "/common/fakeServer/gifts.o"
+    .importobj BUILD_DIRECTORY + "/common/fakeServer/gift_files.o"
+    .importobj BUILD_DIRECTORY + "/common/fakeServer/mover_checks.o"
+    .importobj BUILD_DIRECTORY + "/common/fakeServer/name_policy.o"
+    .importobj BUILD_DIRECTORY + "/common/fakeServer/custom_settings.o"
+    .importobj BUILD_DIRECTORY + "/common/fakeServer/mover_expression.o"
+    .importobj BUILD_DIRECTORY + "/common/fakeServer/word_pattern.o"
+    .importobj BUILD_DIRECTORY + "/common/fakeServer/ticket.o"
+    .importobj BUILD_DIRECTORY + "/common/fakeServer/ticket_settings.o"
+    .importobj BUILD_DIRECTORY + "/common/fakeServer/numbers.o"
+    .importobj BUILD_DIRECTORY + "/common/fakeServer/transaction.o"
+    .importobj BUILD_DIRECTORY + "/common/fakeServer/transaction_view.o"
+    .importobj BUILD_DIRECTORY + "/common/fakeServer/sd_adapter.o"
+    .importobj BUILD_DIRECTORY + "/common/fakeServer/user_profiles.o"
+    .importobj BUILD_DIRECTORY + "/common/fakeServer/account_configuration.o"
+FakeServer_PayloadEnd:
+ServerGifts_PayloadBegin:
+    .importobj BUILD_DIRECTORY + "/server_gifts.o"
+ServerGifts_PayloadEnd:
+ServerTicket_PayloadBegin:
+    .importobj BUILD_DIRECTORY + "/server_ticket.o"
+ServerTicket_PayloadEnd:
 UnlockMode_PayloadBegin:
     .importobj BUILD_DIRECTORY + "/unlock_mode.o"
 UnlockMode_PayloadEnd:
@@ -1571,36 +1891,148 @@ CombinePatch_PayloadEnd:
 // the stored result. Keep the native state, constructor and destructor.
 // 初始化时选择作业后端，后续接口读取已保存的结果。保留原版状态、构造与析构。
 .align 4
+// Offline never opens the entitlement applet. Keep its existing connection
+// pane visible instead of clearing it and fading into an empty applet screen.
+// 离线不打开使用权小程序；保留当前连接提示，不清屏渐变到空的小程序界面。
+CombinePatch_TicketUiPrepare:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeOffline
+    beq OptionalRewardState_TicketUiAdvance
+    ldr r5,[r4,#0x3C]
+    b OptionalRewardState_TicketUiPrepare + 4
+CombinePatch_TicketUiFade:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeOffline
+    moveq r0,#1
+    bxeq lr
+    b Ui_SetAppletFade
+CombinePatch_TicketUiCleanup:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeOffline
+    bne MessageUi_Animate
+    // Only successful local tickets keep the pane for the next connection
+    // message. Errors and no-pass dialogs retain their native UI cleanup.
+    // 仅本地票务成功时保留提示框衔接下一条连接消息；错误、未持券仍按原版收尾。
+    ldrb r12,[r4,#0x30]
+    cmp r12,#4
+    moveq r0,#1
+    bxeq lr
+    b MessageUi_Animate
 CombinePatch_TicketInitialize:
     ldr r1,[r4,#0x28]
     ldr r12,=CombinePatch_ModeStorage
     ldrb r2,[r12,#CombinePatch_SessionModeOffset]
     ldr r12,=CombinePatch_OnlineTicketFallback
     ldrb r3,[r12]
-    b LocalTicket_InitializeSelected
-CombinePatch_TicketPoll:
-    ldr r12,=LocalTicket_BackendStorage
+    b ServerTicket_InitializeSelected
+CombinePatch_TicketShopRequest:
+    ldr r12,=ServerTicket_BackendStorage
     ldrb r12,[r12]
     cmp r12,#0
-    bne CombinePatch_TicketPollLocal
-    b TicketJob_Poll
-CombinePatch_TicketPollLocal:
-    b LocalTicket_Poll
-CombinePatch_TicketUnbind:
-    ldr r12,=LocalTicket_BackendStorage
+    beq 0x0022DD84
+    mov r0,r4
+    ldr r12,=ServerTicket_RequestApplet + 1
+    bx r12
+CombinePatch_TicketCreditRequest:
+    ldr r12,=ServerTicket_BackendStorage
     ldrb r12,[r12]
     cmp r12,#0
-    bne CombinePatch_TicketUnbindLocal
-    b TicketJob_Unbind
-CombinePatch_TicketUnbindLocal:
-    // No network client was bound; the native destructor still runs afterwards.
-    // 未绑定网络客户端；返回后仍执行原版析构。
-    mov r0,#1
-    bx lr
+    moveq r1,#0
+    beq 0x002A0564
+    mov r1,#6
+    ldr r12,=ServerTicket_RequestApplet + 1
+    bx r12
+CombinePatch_TicketPurchaseRequest:
+    ldr r12,=ServerTicket_BackendStorage
+    ldrb r12,[r12]
+    cmp r12,#0
+    beq 0x0022DD84
+    sub r0,r4,#0x148
+    ldr r12,=ServerTicket_RequestApplet + 1
+    bx r12
+CombinePatch_TicketPurchasePoll:
+    ldr r12,=ServerTicket_BackendStorage
+    ldrb r12,[r12]
+    cmp r12,#0
+    beq TicketJob_PollPurchase
+    mov r2,r4
+    ldr r12,=ServerTicket_PollPurchase + 1
+    bx r12
+CombinePatch_TicketEcCatalog:
+    ldr r12,=ServerTicket_BackendStorage
+    ldrb r12,[r12]
+    cmp r12,#0
+    beq 0x00162658
+    ldr r12,=ServerTicket_EcCatalog + 1
+    bx r12
+CombinePatch_TicketEcBalance:
+    ldr r12,=ServerTicket_BackendStorage
+    ldrb r12,[r12]
+    cmp r12,#0
+    beq 0x00162E78
+    ldr r12,=ServerTicket_EcBalance + 1
+    bx r12
+CombinePatch_TicketEcFormat:
+    ldr r12,=ServerTicket_BackendStorage
+    ldrb r12,[r12]
+    cmp r12,#0
+    beq 0x00162F00
+    ldr r12,=ServerTicket_EcFormat + 1
+    bx r12
+CombinePatch_TicketEcWorkerConstruct:
+    ldr r12,=ServerTicket_BackendStorage
+    ldrb r12,[r12]
+    cmp r12,#0
+    movne r2,#LOCAL_TICKET_EC_STACK_SIZE
+    b 0x0022DFD0
+CombinePatch_TicketSend:
+    ldr r12,=ServerTicket_BackendStorage
+    ldrb r12,[r12]
+    cmp r12,#0
+    bne ServerTicket_Send
+    b 0x0021EB10
+CombinePatch_TicketJobPoll:
+    ldr r12,=ServerTicket_BackendStorage
+    ldrb r12,[r12]
+    cmp r12,#0
+    bne ServerTicket_Poll
+ServerTicket_OriginalPoll:
+    push {r4,r5,r6,lr}
+    b TicketJob_Poll + 4
+CombinePatch_TicketCreditPoll:
+    ldr r12,=ServerTicket_BackendStorage
+    ldrb r12,[r12]
+    cmp r12,#0
+    bne ServerTicket_PollCredit
+ServerTicket_OriginalCredit:
+    ldr r0,[r0,#4]
+    b 0x002A05FC
+CombinePatch_TicketExpiryRequest:
+    ldr r12,=ServerTicket_BackendStorage
+    ldrb r12,[r12]
+    cmp r12,#0
+    movne r3,#0
+    b 0x001D6FB8
+CombinePatch_TicketProviderBind:
+    ldr r12,=ServerTicket_BackendStorage
+    ldrb r12,[r12]
+    cmp r12,#0
+    movne r0,#1
+    bxne lr
+    bx r2
+CombinePatch_TicketProviderUnbind:
+    ldr r12,=ServerTicket_BackendStorage
+    ldrb r12,[r12]
+    cmp r12,#0
+    bne ServerTicket_CancelProvider
+    bx r1
     .pool
 CombinePatch_TicketWrappersEnd:
 CombinePatch_OnlineTicketFallback:
-    .byte ONLINE_TICKET_CHECK_BYPASS
+    .byte ONLINE_FAKE_SERVER_TICKET_FALLBACK
     .align 4
 CombinePatch_CodeUsedEnd:
 .endarea
@@ -1613,7 +2045,7 @@ CombinePatch_CodeUsedEnd:
 CodeExpansion_Startup:
     push {r0-r12,lr}
     ldr r0,=CodeExpansion_PayloadStart
-    ldr r1,=CODE_EXPANSION_PAYLOAD_SIZE
+    ldr r1,=CodeExpansion_ExecutableSize
     bl CodeExpansion_Enable
     cmp r0,#0
     bne @@failure
@@ -1625,7 +2057,7 @@ CodeExpansion_Startup:
     b @@failure
     .pool
 CodeExpansion_LoaderBegin:
-    .importobj BUILD_DIRECTORY + "/code_expansion.o"
+    .importobj BUILD_DIRECTORY + "/common/fs_system/runtime_environment.o"
 CodeExpansion_LoaderEnd:
 .endarea
 
@@ -1638,5 +2070,27 @@ CodeExpansion_LoaderEnd:
 OfflinePatch_VersionIdentifier:
     .asciiz "offline_patch_v0.9.1"
 .endarea
+
+// Dedicated service data, outside code and all original runtime objects.
+// 服务专用数据区，与代码及全部原版运行时对象分开。
+.org CombinePatch_CodeEnd
+FakeServer_ContextStart:
+.area FakeServer_ContextSize, 0
+.endarea
+FakeServer_ContextEnd:
+FakeServer_WorkerStart:
+.area 0x1000, 0
+.endarea
+FakeServer_TaskBodyStart:
+.area 0x100000, 0
+.endarea
+FakeServer_WorkerStackStart:
+.area 0x10000, 0
+.endarea
+FakeServer_WorkerStackEnd:
+FakeServer_ReservedTailStart:
+.area 0x1000, 0
+.endarea
+FakeServer_RuntimeEnd:
 
 .close

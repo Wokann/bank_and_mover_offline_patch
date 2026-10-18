@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Dump a per-tray listing of every non-empty Pokemon slot in a BankFileData dump,
-using the official PKSM-Core Chinese species names.
+with an optional explicitly supplied species-name table.
 
 Usage:
   python list_bank_file.py [--input DUMP.bin] [--range T1 T2] [--grid] [--nonempty]
@@ -10,19 +10,52 @@ Usage:
 
 import argparse
 import struct
+import tempfile
 from pathlib import Path
 
-from parse_bank_file import BOX_LENGTH, decrypt_ek6, fmt_u16
+from parse_bank_file import BOX_LENGTH, decrypt_ek6, fmt_u16, load_bank_file
+from file_safety import require_plain_file
 
 def load_names(path):
     names = {0: "蛋"}
-    with open(path, encoding="utf-8") as f:
+    with require_plain_file(path).open(encoding="utf-8") as f:
         lines = f.read().splitlines()
     for i, line in enumerate(lines):
         line = line.strip()
         if line:
             names[i] = line
     return names
+
+
+def check_output_file(output, inputs):
+    """Reject file aliases, including hard links; path strings are not identities."""
+    require_plain_file(output, allow_missing=True)
+    for source in inputs:
+        if source is None:
+            continue
+        try:
+            aliases = output.samefile(source)
+        except FileNotFoundError:
+            continue  # A new output file has no existing identity to collide with.
+        if aliases:
+            raise ValueError(f"--output must not refer to an input file: {source}")
+
+
+def write_report(output, report, inputs):
+    """Publish an independent report instead of truncating an existing inode."""
+    check_output_file(output, inputs)
+    staging = None
+    try:
+        with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", prefix=".bank-report-", suffix=".tmp",
+                dir=output.parent, delete=False) as stream:
+            staging = Path(stream.name)
+            stream.write(report)
+        check_output_file(output, inputs)
+        staging.replace(output)
+    finally:
+        if staging is not None:
+            staging.unlink(missing_ok=True)
 
 
 def disp_width(s):
@@ -80,15 +113,18 @@ def main():
     grid = args.grid
     only_nonempty = args.nonempty
 
-    data = open(path, "rb").read()
-    if len(data) == 767256:  # core-only (server serialized) input: pad 8-byte object header
-        data = b"\x00" * 8 + data
-    names = load_names(args.names) if args.names else {}
+    try:
+        data = load_bank_file(path)
+        names = load_names(args.names) if args.names else {}
+    except (OSError, ValueError) as error:
+        parser.error(str(error))
     dump = data
 
     slot_base = 0x184
     stride = 0x1B56
     start_tray, end_tray = tray_range if tray_range else (0, 100)
+    if not 0 <= start_tray < end_tray <= 100:
+        parser.error("tray range must satisfy 0 <= start < end <= 100")
 
     group_names = read_group_names(dump)
     group_label = {g: f"群组{g+1}({group_names[g]})" for g in range(10)}
@@ -148,7 +184,10 @@ def main():
 
     report = "\n".join(lines)
     if args.output:
-        args.output.write_text(report, encoding="utf-8")
+        try:
+            write_report(args.output, report, (path, args.names))
+        except (OSError, ValueError) as error:
+            parser.error(str(error))
         print(f"wrote {args.output} ({len(lines)} lines)")
     else:
         print(report)

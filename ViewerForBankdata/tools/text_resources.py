@@ -6,6 +6,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Sequence
+from file_safety import require_plain_file
 
 PRIVATE_USE_FIRST = 0xE000
 PRIVATE_USE_LAST = 0xF8FF
@@ -28,7 +29,7 @@ class GameNameCatalog:
 def load_species_name_catalog(resource_dir: Path, language: str) -> GameNameCatalog:
     path = resource_dir / f"species_{language}.json"
     try:
-        document = json.loads(path.read_text(encoding="utf-8"))
+        document = json.loads(require_plain_file(path).read_text(encoding="utf-8"))
         if document.get("format") != 1 or document.get("language") != language:
             raise ValueError("resource metadata does not match its file name")
         rows = document["names"]

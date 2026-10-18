@@ -18,7 +18,7 @@ transaction rules, and independent build procedure.
 | `.rodata` | `0x00314000–0x0036A000` | Read-only, non-executable |
 | `.data` | `0x0036A000–0x003AC000` | Read/write |
 | Logical `.bss` | `[0x003ABACC, 0x003FA904)`, length `0x4EE38`; RW pages extend to `0x003FB000` | Read/write, zero-initialized |
-| Thread stack | Length `0x40000` | ExHeader setting |
+| Main thread stack | Length `0x40000` | ExHeader setting; SDK background threads allocate their own stacks |
 
 The last non-zero image byte in `.text` is before `0x00313910`, leaving
 `0x6F0` bytes in the mapped executable page. Ghidra's last referenced
@@ -56,6 +56,38 @@ preserved-function ranges are described in the
 | `0x002A7094` | Bank Box UI entry |
 | `0x002B1CF8` | Save, commit, and rollback state machine |
 | `0x002ABC24` | Return-to-title state |
+
+### Title language and user selection
+
+The stock console `data:/turtle` record is the language authority. Startup
+`0x002A47F4` loads and validates it, and `0x0025C08C` applies its language. A
+missing record follows native first-language initialization before title selection;
+I/O errors never authorize formatting.
+
+Title L uses native confirmation `0x002D139C` and follows `2 → 1 → 21 → 2`.
+After the native save succeeds, the selected user's SD settings are synchronized:
+copy the full validated `0x200` bytes when missing, otherwise update only
+`0x28–0x2B`. Identity, transaction fields, CRC and opaque tail remain intact.
+Native language and font selection do not change when switching modes or users.
+
+The current mode is a separate single-line pane above START. R-mode, L-language
+and HOME hints sit below it. All use native font size and integer coordinates;
+their lower-screen centers are `88/120/156/182/208` for mode/START/R/L/HOME.
+The START and copyright assets stay in place. Layout and font formats follow
+the original resources; see [font coverage](../../common/docs/fonts.md).
+
+Offline and Download titles show the current user in dark gray at the upper left.
+The registry is refreshed at title/local-mode entry. Browsing uses an in-memory
+list, with auto first and the highest numbered user last, without wrapping.
+D-pad and Circle Pad up/down support repeat and acceleration; C-stick is ignored.
+The worker publishes the final selection, and entry waits for acknowledgement.
+Download selects a local destination, not a different official online account.
+
+Unavailable actions retain their native name plus a localized disabled suffix.
+Support code remains clickable in every mode and uses native encoder `0x002A4078`.
+ACT/FRD replies are observed for errors and placeholder values; those conditions
+add an Invalid label without replacing the identity or making an extra request.
+This label is not official account authentication or a ban check.
 
 ### Outer state table
 
@@ -261,7 +293,7 @@ Mode creates neither, so it cannot use this query. This explains a failing
 Transfer Box deposit alongside a working single-slot exchange within Bank.
 
 Only these three `BL` sites are redirected to `CombinePatch_SelectBankSlotDate`.
-Offline Mode reuses the current console date from `LocalMileage_GetCurrentDate`;
+Offline Mode reuses the current console date from shared `SystemTime_GetCurrentDate`;
 other modes pass the original arguments unchanged to `0x001D3BF4`. The local
 date has no 999-day adjustment. A null output or unavailable date returns
 failure, leaving each native caller's existing failure branch intact. All other
@@ -498,22 +530,22 @@ the middle, states 18 and 17 resolve the persisted state on a later use.
 |---|---|---|---|---|
 | state 3 without usable game data | Ask whether to move directly to HOME after the warning | Ask to download the server Bank directly; confirmation uses the native direct-entry connection path | Keep the two missing-data/Pokédex warning pages and return after confirmation | Same as Offline Mode |
 | state 4 first entry | Result `12 → 10`, select a game | Result `12 → 28`, no game selection | Stock entry | Stock entry |
-| Turtle backend | Stock `data:/turtle` storage | Stock backend after mode confirmation | Redirected to `sd:/3ds/Bank/sav.bin` | Stock backend after mode confirmation |
+| Turtle backend | Stock `data:/turtle` storage | Stock backend after mode confirmation | Redirected to `sd:/3ds/Bank/client/users/<userID>/sav.bin` | Stock backend after mode confirmation |
 | state 5 | Real connection | Stock | Complete the session locally; no remote job | Stock |
 | state 8 | Server account summary | Stock | Classify existing/first-use from local `bankdata.bin/.bak` | Stock |
-| state 15 | Remote entitlement/campaign | Public policy `0` stays native; test policy `1` uses local results only for a confirmed missing Azahar interface | Always supply required ticket fields locally; disable online campaigns | Same policy as Download Mode |
+| state 15 | Remote entitlement/campaign | Public policy `0` stays native; automatic policy `1` uses local results only for a confirmed missing Azahar interface | Always supply required ticket fields locally; disable online campaigns | Same policy as Download Mode |
 | state 9 | Server-side first creation | Stock creation, upload and asynchronous success wait in substate 7 | Create the initial local `bankdata.bin` | Stock creation and upload |
-| state 11 | Select recovery path | Not entered | Keep the test, but redirect result `9` to state 17 instead of state 18 | Stock |
-| state 18 | Current Turtle remote recovery and game matching | Not entered | Never entered | Native requests, validation and combination; an acknowledged mismatch recreates state 10 after cleanup |
-| state 23 | Official forced-unlock challenge and rollback | Not normally entered | Not normally entered | Display the first server candidate; successful result `4 → 17` latches completion, with other native branches unchanged |
-| state 17 | Selected-game remote recovery | Not entered | Keep stock UI timing without remote commit/rollback | Finish native transactions/game saving, show no-recovery/automatic-recovery/forced-unlock result, then disconnect after acknowledgment |
-| state 16 | Download complete file | Not entered | Load the complete object from `bankdata.bin` | Not normally entered |
+| state 11 | Select recovery path | Not entered | Native existing → 17 / pending → 18 split | Stock |
+| state 18 | Current Turtle remote recovery and game matching | Not entered | Native ID/version matching, state-1 rollback/state-2 commit and mismatch UI; service calls local | Native requests, validation and combination; an acknowledged mismatch recreates state 10 after cleanup |
+| state 23 | Official forced-unlock challenge and rollback | Not normally entered | Native challenge request receives three local candidates; native keyboard validation precedes service-authorized rollback; error/cancel branches retained | Display the first server candidate; successful result `4 → 17` latches completion, with other native branches unchanged |
+| state 17 | Selected-game remote recovery | Not entered | Native reading, 1/2 decisions and token cleanup/save; service calls local | Finish native transactions/game saving, show no-recovery/automatic-recovery/forced-unlock result, then disconnect after acknowledgment |
+| state 16 | Download complete file | Not entered | DownloadBank loads the local body plus a state-1 reservation; native source/Turtle saves continue | Not normally entered |
 | state 28 | Game-independent complete download | Keep native `+0x41=1`; capture the loaded current-format record in its success callback | Not normally entered | Not normally entered |
 | state 29 | Pre-HOME remote release and UI cleanup | Keep native job and destruction; success enters state 20 instead of state 27 | Not normally entered | Not normally entered |
-| state 12/13 | Local mileage plus online gifts | Skipped after download | Keep local mileage; skip only online-gift lookup | Not normally entered |
+| state 12/13 | Local mileage plus online gifts | Skipped after download | Keep local mileage; gift lookup uses optional local events | Not normally entered |
 | state 25 | Normal Bank Box | Not entered after capture | Stock Bank Box | Not normally entered |
 | state 7 | Remote stage, game save, commit/rollback | Normally not reached; stock if reached | Local file stage, commit, and rollback | Stock |
-| state 19/20 | Remote release and disconnect | Disconnect in state 20 after state 29 completes release | State 19 completes locally; keep native prompt/timed finalizer, then state 20 cleanup and title return | Stock |
+| state 19/20 | Remote release and disconnect | Disconnect in state 20 after state 29 completes release | State 19 releases the load reservation, including Box no-save exits; native prompt/timed finalizer then state 20 cleanup | Stock |
 
 Download Mode retains real networking, first-use creation, and native ticket
 and online-gift checks. It uses the stock HOME complete-file downloader without
@@ -532,8 +564,16 @@ wait for the native success callback before requesting the complete server file.
 Upload failure retains native error cleanup; the pre-upload memory object is
 not treated as a downloaded file. Existing appended messages `0x61/0x62` provide
 download progress and local completion; `0x74` reports local capture failure.
-HOME, support-code and Mover/eShop menu
-entries stay disabled or redirected. Download and Unlock reload stock Turtle
+All ten language resources call the local endpoint the "local server" in
+connection/save/download messages and explicitly say "official server" in
+Unlock Mode notices. Paths/filenames are omitted. Dialogs use at most three rows;
+mode descriptions leave one row for the native greeting. The three-row balance
+notice explains that each offline virtual top-up adds an annual-pass price and
+that simulated credit/balances have no relationship to official eShop funds or
+purchases. Mover's corresponding offline connection/save texts are aligned.
+Connection, purchase, download and publication behavior is unchanged.
+HOME and Mover/eShop entries stay disabled; Support ID retains its native
+console-identity path. Download and Unlock reload stock Turtle
 after title confirmation; other retained native initialization/save operations
 use the stock backend, not `sav.bin`.
 
@@ -556,13 +596,21 @@ use the stock backend, not `sav.bin`.
    `0xACA48` bytes into an initialized object and changes its version to 2.
    The capture hook at `0x002D1248` runs after either load and before native
    preservation of prior session flags.
-5. The C capture helper accepts the loaded object's normal vtable, version 2
-   and 100 boxes. Zero Pokemon remains valid. It writes exactly `0xBB518` bytes
-   from object `+8` through the existing checked temp-write and rotation helpers.
-6. Session byte `0x003FAFF1` is independent of the native state object's response
-   flag: 0 means no capture attempt, 2 is set before an attempt, and 1 is set only
-   after both write and installation succeed. Failure does not change the native
-   response-success flag or suppress its metadata updates.
+5. The C capture helper checks the loaded object's normal vtable and freezes
+   exactly `0xBB518` bytes from object `+8` before native session-flag changes.
+   It performs no SD access. A checked native-heap allocation uses heap 23;
+   allocation failure does not write. Download updates nonblockingly queue
+   `EXPORT_BANK` (operation 34), copying into task-owned storage before freeing
+   the transient snapshot. The worker checks version 2/100 boxes and performs
+   the BANK_ONLY stage, verification, commit and publication. Empty Banks are
+   valid; unresolved transactions block replacement.
+6. Session byte `0x003FAFF1` is independent of the native response flag:
+   0 means not attempted, 2 is set before capture, 3 means export pending,
+   and 1 requires successful publication and release of the worker result.
+   Busy submission/release returns the original update's WAIT value without
+   advancing its substate. Failure preserves native response/metadata processing.
+   The destructor at `0x002AFE70` cancels delivery before replaying its original
+   vtable load and resuming at `0x002AFE74`; running file effects are not undone.
 7. State 28's native direct flag avoids selected-game metadata/save phases;
    state 29 retains its remote release, callbacks, delay, sound and UI destruction.
    Download changes only successful routing to state 20 instead of HOME state 27.
@@ -572,54 +620,156 @@ Empty existing Banks are downloaded, without invoking state 27's empty-Bank
 warning. First-use empty Banks are downloaded only after official creation
 succeeds. Request failures retain native error handling; they do not create a
 fake empty file. A failed state-29 release retains the native error even if the
-local copy was already installed. See the subproject README's case tables for
-SD errors and interruption/retry behavior. These are client-code checks, not
-an end-to-end test of first creation or server rejection.
+local copy was already installed. SD errors and interrupted installation do not authorize bypassing official release or error handling.
 
 Original Mode follows the Stock column, including native first-creation UI
 timing, all menu functions, original messages, and the no-game HOME question.
 It does not capture or load local Bankdata. Tickets share Download/Unlock's
-public/test policy: `0` requires native results; `1` permits local results only
+automatic/native-only policy: `0` requires native results; `1` permits local results only
 for the confirmed missing Azahar interface. The title mode hint is still shown.
 
-Common startup/title handling uses the SD preview. After title exit animations,
-the native shared-prompt view is released asynchronously before title destruction.
-The selected record is then checked and reloaded, clearing its predecessor's
-loaded flag and pending language. After applying its language and font, subsequent
-states recreate the prompt/menu view with the matching archive. Missing or invalid records go
-through language selection (state 1), disconnect cleanup (state 21), and game
-checking (state 3), whose native chain initializes the selected backend.
-Download/Unlock's added language-menu operation saves its choice to the stock
-record; Offline saves to SD. Returning to the title restores the SD preview
-before title UI creation. These rebinds do not copy SD data into the stock save
-or mirror native writes back to SD, and write failures never switch backends.
-The title keeps the selected mode across returns within this run; a fresh
-launch defaults to Offline. Preview and session-backend selection remain separate.
+Startup uses only the native save for language and first-language initialization.
+Title L saves natively, then synchronizes SD: complete copy if missing, language
+fields only if present. No mode has an internal language switch. Mode confirmation
+binds settings/transaction storage without applying a backend language or reloading
+fonts/messages. Title returns retain the selected mode; a fresh launch defaults
+to Offline. An SD failure never imports SD settings into the native save.
 
-State 15 retains its native entry, transitions, job construction and cleanup.
-Only job initialization at `0x002B0444`, result polling at `0x002B0464`, and
-unbinding at `0x002B1994` are redirected. Wrappers occupy added pages after
-native BSS; HOME box-selection UI stays intact. Other bytes in
-`[0x002B0270, 0x002B1AD0)` and the
-native job implementation remain intact. Download, Unlock and Original modes call native
-interfaces with `ONLINE_TICKET_CHECK_BYPASS=0`, including native failure when an
-interface is missing. Test policy `1` uses local results only for Azahar's verified
+State 15 retains its native entry, transitions, job construction and cleanup body.
+Initialization at `0x002B0444` selects the backend; polling at `0x002B0464` and
+the outer unbind call at `0x002B1994` remain native. Both backends run original initialization;
+`0x002B0464` is completely unmodified. Send provider `0x0021EB10` supplies
+service response bytes to the original parsers. Wrappers occupy added pages after
+native BSS; HOME box-selection UI stays intact. Four additional Offline-only UI
+hooks skip applet screen clearing at `0x002B0374` and fades at
+`0x002B0404/0x002B0438`. At `0x002B19D0`, only successful Offline phase `4`
+retains the connection message for the local-data transition. No-pass/failure
+exit animation, destruction, callback cleanup and resource release remain native.
+Other modes replay the original instructions/calls at all four UI sites,
+including online ticket compatibility response. Original Yes/No and three-choice purchase observers
+are unchanged. Local purchase polls at `0x002B110C/0x002B1248` additionally handle an
+acknowledged insufficient-funds notice before resuming the native retry branch; native backends
+forward directly to the original poll. Other bytes in `[0x002B0270, 0x002B1AD0)` remain intact.
+Inside the job, only system binding/unbinding, shop/EC calls and the send-provider
+boundary are adapted; its state machine, parsing and cleanup remain native. Download, Unlock and Original modes call native
+interfaces with `ONLINE_FAKE_SERVER_TICKET_FALLBACK=0`, including native failure when an
+interface is missing. Automatic policy `1` uses fakeServer results only for Azahar's verified
 unimplemented-handler reply; hardware, unknown environments, implemented
-interfaces and ordinary errors remain native. Offline Mode always supplies
-console time and an expiry 999 days later. Purchase counts stay
-`-1` and existing EC account fields are retained. The local free-campaign window
-reuses the current/expiry pair in the native decimal timestamp format. Native
+interfaces and ordinary errors remain native. Online fallback uses an independent read-only
+backend-2 policy with the fixed window `2000-01-01 00:00:00..2099-12-30 23:59:59`
+shared by ticket expiry and campaign responses: no offline configuration, pass dates, purchase counts or transaction-bound
+policy are consumed. Catalog/history responses are empty native vectors and count slots stay
+`-1`; shop, credit and purchase operations cannot report success or write files. The initial
+campaign request selects the current backend; only campaign waiting is adapted online,
+while account-record and transaction queries retain their native providers.
+Online fallback currently covers only the fixed free window, not the complete
+historical shop. Outside that window, the zero-expiry reply makes original ticket
+job `0x002A1CAC` request shop initialization at `0x002A1EE8`. The fallback returns
+`FS_UNSUPPORTED`, so the job fails rather than completing with no entitlement;
+existing-account paths in outer state 15 substate 2 then finish through substate
+52 before the original purchase prompt. Native behavior is not unconditional
+disconnection outside a free period: successful shop/product queries are required
+before the purchase decision. Forcing job success or an entitlement flag would
+not fix this; the fallback also has empty product/history vectors and must not
+consume offline purchases, credit or configuration online. The complete purchase
+prompt needs separately verified shop/product responses and is not yet restored.
+The independent long window supports historical console dates without simulated online
+purchases. Native expiry checks remain: dates outside the window or too close to
+its end may still reach the unsupported-shop path.
+Offline Mode defaults to actual
+console time and expiry `2050-12-31 23:59:59`. Trial/annual counts default to
+`0`; the other three remain `-1`. Existing EC account fields are retained. The default free-campaign window
+starts at `2023-02-14 00:00:00` and ends at that expiry, matching the verified
+official `FREE` resource in the native decimal timestamp format. Native
 state 15 calculates the free flag, remaining days and hours and selects the
-free-use text. Each local initialization rebuilds the window from console time
-without changing the mileage reference or relying on fixed server campaign dates.
+free-use text. Actual console time remains the mileage reference rather than
+the campaign start. The automatically created `server.conf` can set shared
+independent free/trial calendars and pass state, preserving valid existing values.
+Independent boolean switches are `free_enable`/`trial_enable`; `free_periods`/`trial_periods`
+contain only comma-separated date ranges without `mode`. Matching regional keys replace the
+common key. Legacy date toggles are removed after migration. Defaults include the 2020 HOME campaign.
+Pass dates use `paid_periods`; `purchased=false` ignores residue. `trial_claimed` is boolean and
+annual counts remain numeric; BIN formats are unchanged. Free periods never extend purchased passes.
+Missing/invalid basic fields regain built-in defaults; misplaced valid values retain their contents
+and return to canonical order. Unknown/damaged entries are removed. Four blocks share one `[ticket]`
+section, with blank separators and currency tuple labels only. Detailed notes live in adjacent Markdown,
+not embedded, generated or loaded by the patch; canonical repair omits old explanatory comments.
+Missing/malformed optional checks, words and
+gift configuration add no extension without blocking connection. Real I/O errors and invalid Bank
+bodies or existing transactions and Bank bodies retain native error handling rather than resetting defaults.
+The service generates the native campaign body from the current applicable window, without another SD
+file. No entitlement is a normal response with a zero expiry date, not a client
+assignment of validity or completion. The initial native 15-day shop-refresh check remains.
+Substates `12/13` re-query expiry; `14/15` retain original catalog loading. Applets
+`5/6/7` dispatch at `0x002A1EE8/0x002A0560/0x002A2184`; initialization is not a purchase.
+The service supplies local catalog availability and console-country currency/amount display. Original product
+matching, pass descriptions and Purchase/Add Credit/Do not purchase choices remain intact,
+without added menu choices or shortcut keys. The historical 30-day trial requires an enabled matching claim period, no
+previous trial, no valid pass and the native first-use status `'5'`; it does not supply a `FREE` campaign.
+Existing-bank statuses `'2'`/`'4'` still select the annual pass; annual counts alone do not choose the trial.
+The 365-day pass is offered in every mode, with no enable switch. Original purchase request `0x002A2160` stores kind at
+job `+0x148`; its other three arguments are product-description/title strings, not prices or durations.
+The service adds `30/365` days for kind `0/1`, extending an active local pass or starting
+from the purchase date otherwise. Add Credit and annual debit use `shop.$currency` tuples;
+only balances change. Missing components use historical defaults and valid manual values remain.
+Automatic currency updates `currentCurrency` from console location; manual mode uses its configured
+value. Unsupported/conflicting locations are not guessed; insufficient balance denies purchase.
+Currency wallets are independent. One `server.tmp` publishes the debit, local pass dates, purchased status
+and the corresponding record without changing campaign dates. Mode changes also preserve passes. Original consumer
+`0x002A0ADC` re-queries history and then expiry; original parsers and state decisions calculate
+entitlement. Cancellation makes no purchase request; service failure supplies the original
+error result. The client never assigns job phases, validity or expiry, and never overrides a
+failed re-query. Native backends retain original eShop/EC calls. System EC call sites and
+local checkout-result prompting are adapted; native workers and jobs continue running. The local read-only catalog view
+uses the native `0x2800`-byte allocation/destructor, not platform authorization or official encrypted receipts.
+The stock checkout `0x002A0D84` and result callback `0x002A0624` classify SDK results.
+After an unfinished purchase, substates `39/41` read job `+0xAA`: nonzero returns to
+trial substate `27` or annual substate `18`, refreshing balance and rebuilding the menu;
+zero ends the ticket flow through substate `52`. Stock Bank message resources contain
+no standalone insufficient-balance notice; checkout prompting belongs to the SDK/system
+boundary. This establishes the client routing, not the exact original system-dialog wording.
+Local checkout retains `FS_INSUFFICIENT_FUNDS` as a denied purchase, with no debit or pass
+update. Poll adapters at `0x002B110C/0x002B1248` use the native UI/message view to display
+localized patch line `121`, wait for confirmation, then set the native return flag to `1`.
+Local values `2/3` at `+0xAA` mean notice pending/shown and are consumed before returning
+to native routing; no unknown reserved fields or new persistent files are used. The native
+UI restoration call reverses the checkout entry fade before the notice. Configuration,
+IO and publication failures still abort, and successful purchases still re-query history
+and expiry through `0x002A0ADC`. Native backends bypass this local prompt handling,
+preserving original checkout, result classification, state transitions and cleanup.
+Native amount copy `0x002C028C` reads 32 bytes at price-view `+4` through a bounded string copy.
+The service supplies zero-padded amount strings, not embedded binary fields; original amount
+function `0x002A20F8` and the balance worker pass them to the formatting boundary without changing global currency settings.
+Successful SDK decoding alone does not establish usable entitlement; configuration/IO
+failure follows native errors.
 Native exit cleanup copies the resulting entitlement and date.
-Local unbinding does not access a nonexistent network client; native
-destruction still runs. No system eShop applet or loading-animation simulation
-is used. Both paths remain present, and only the policy byte at `0x003FECC8`
+Local system unbinding does not access a nonexistent network client; native
+SDK construction, parsing, polling and destruction still run. No system loading-animation
+simulation is added. Both paths remain present, and only the `CombinePatch_OnlineTicketFallback` policy byte
 changes between builds. Initialization records this job's backend at `0x003FAFF4`;
 polling and cleanup keep that selection. The policy does not alter other networking,
 transaction recovery, mileage calculations, or post-download exit branches.
-The subproject README documents the capability probe.
+The shared runtime module caches environment/SVC capabilities at startup and
+ticket capability once at title initialization after services/TLS are ready.
+The cache occupies `[0x003FAFE0, 0x003FAFF0)`, outside native BSS; jobs only read it.
+The shared selector reads it before campaign/ticket sending, not after a failed
+online request. Only confirmed Azahar plus a missing ticket capability can use
+the enabled online local policy; SVC capability and date do not select it.
+Detection also runs for policy `0`, which never selects local online results.
+The subproject README documents the probe criteria. The two client adapters
+use `FakeServerClient_TicketReply` to obtain native-format response bytes: console time is an observation, while current
+date, expiry, purchase counts and campaign bounds come from the server response.
+Client code does not maintain a second ticket policy or calendar conversion.
+
+Mileage is still calculated by native state 12 (`0x002AD1BC`), not fakeServer.
+It uses the stored baseline and balance, occupied Bank slots and elapsed hours,
+then updates the baseline and caps the balance at `65535`. The server stores
+those fields in the complete Bankdata body; it does not recompute the points.
+The current time reaches this state through the ticket service response: real
+networking uses the returned server time, while the local fakeServer formats
+the console clock as that response. Mileage does not directly read the host clock.
+Shared `system_time.c` supplies clock observations and Bank-slot timestamps,
+which are separate from the mileage baseline. No replacement mileage module exists.
 
 Local results are not display-only: `0x002B1924` copies the job's current date
 at `+0xB8` to shared `+0x28`. First Bankdata initialization at `0x002AE8B0`
@@ -632,10 +782,10 @@ but not first creation.
 The server download callback at `0x002D11B0` replaces the Bankdata body and
 transaction descriptor, not shared ticket dates. Refreshing native tickets later
 does not undo earlier uploaded Bankdata changes. No direct serialization of the
-999-day expiry or entitlement display fields into that body was identified;
-purchase count `-1` skips the native stored-count/reward update. These findings
-do not establish server-side correction of client-uploaded values. Public policy
-stays `0`, and test policy is not a guarantee of safe online use.
+local expiry or entitlement display fields into that body was identified;
+local trial/annual counts reach native stored-count/reward decisions and are not official history. These findings
+do not establish server-side correction of client-uploaded values. Native-only
+policy `0` remains available; automatic fallback is not an online-safety guarantee.
 
 With no usable game data in Offline/Unlock, `0x002AC958` branches to the existing failure substate
 at `0x002ACA90` after the stock message completes and its text is cleared.
@@ -694,23 +844,19 @@ Unlock-only branches.
 
 Declining to continue at the state-12 full-gift warning returns result `21`;
 state 13 can also terminate with result `21`. Both retain the native transition
-to state 19. Its Offline update reports completion without allocating or binding
-a remote job, sending rollback, or waiting for a server callback. The native
-initializer still prepares the prompt and timer; the finalizer retains its
-1,500-ms wait and existing null-job cleanup before state 20 returns to title.
-Download, Unlock and Original resume the complete native state-19 update.
+to state 19. Allocation, binding, the native rollback request, observer and wait
+are retained. Provider `0x001D5CA4` submits `FsServer_RequestTransaction`; a subsequent
+wait poll completes the real SDK job and its original callback selects success/error.
+The service distinguishes a clean-session zero-token acknowledgement from an actual
+reservation rollback, never releasing unrelated pending work. Native prompts, the
+1,500-ms final wait, unbinding and destruction precede state 20. Other modes use
+the original remote provider.
 
-This exit does not fabricate a transaction descriptor or change Turtle fields,
-and does not stage, commit or roll back local Bankdata files. Local save-failure
-rollback belongs to state 7, not this pre-Box exit. The existing Offline
-state-25 no-save exit continues directly to state 20.
-
-离线在 state 12 的礼物已满提示中选择不继续使用，或 state 13 返回终止结果 `21`，
-仍按原版转换进入 state 19。仅替换其离线更新：不创建或绑定远端作业、不发送回滚
-请求，直接报告阶段完成；保留原版提示、计时初始化以及 1,500 毫秒收尾等待，随后
-进入 state 20 清理并返回标题。下载、解锁、原版模式继续完整原版函数。这里不伪造
-事务描述、不改 Turtle 字段，也不操作本地银行文件；保存失败的本地回滚仍由 state 7
-负责。现有离线 state 25 的不保存退出仍直接进入 state 20。
+State 16 already reserves a state-1 transaction when loading the Bank. Both
+pre-Box exits and the state-25 no-save exit retain state 19 to release that
+reservation before state 20 disconnects, without publishing edited Bank data.
+The service checks the journal/files before reporting rollback success. Local
+save-failure rollback belongs to state 7.
 
 #### Offline save transaction
 
@@ -718,36 +864,279 @@ Offline state 7 keeps the stock game-save ordering while replacing remote
 file operations:
 
 ```text
-serialize 0xBB518
-  → write bankdata.tmp
-  → preserve Turtle 0x00–0x1B, set only 0x1C to 2, and save via stock serialization
-  → local commit: rotate bankdata.bin/.bak, then clear Turtle 0x1C and save
+state 16: DownloadBank reads 0xBB518, snapshots old Bank and returns a state-1 reservation
+  → native substates 6/7: write descriptor and state 1 to source; save and poll
+  → native substates 8/9: save Turtle descriptor and state 0; continue normal flow
+
+state 7: serialize 0xBB518; Stage updates the same live-session reservation
+  → reread bankdata.tmp, persist its new full fingerprint; keep the native wait UI
+  → native substates 3/4: source state 2 and descriptor; save/poll
+  → native substates 5/6: save complete Turtle descriptor and state 2
+  → substate 9 RequestTransaction: acknowledge the native state-2 decision; COMMIT_DECIDED → publish Bank and backups
+  → retain Turtle state 2 and its descriptor, without an extra save/reset to 0
+  → native substates 13/14: clear only the source's 64-bit token at +0x08; save/poll
+  → native success message; commit/cleanup failures keep native error/restart recovery
 
 selected-game save failure
-  → preserve Turtle 0x00–0x1B, set only 0x1C to 1, and save
-  → local rollback: delete bankdata.tmp, then clear Turtle 0x1C and save
+  → native substates 7/8: save Turtle state 1 and descriptor
+  → substate 11 RequestTransaction rollback; continue the native failure message
 ```
 
-Local staging does not create a server 32-byte descriptor. The patch therefore
-does not overwrite Turtle with an empty descriptor; it changes only `0x1C`
-through the stock setter and retains stock object serialization and checksum
-generation.
+The local service generates a nonzero descriptor in native SDK layout, copied
+to source and Turtle by native setters. State 11 keeps its existing/pending
+split: existing routes to state 17; pending routes to state 18. State 18 compares
+the Turtle data ID/current version, then the selected game's fields if needed.
+Native state 1 rolls back, state 2 commits, and mismatch UI/key-combination
+branches remain intact. State 17 then handles the source token and saving.
+Offline state 23 retains the mismatch-only key combination, challenge, numeric
+keyboard and rollback request. Provider `0x002A2838` forwards the challenge to
+`FsServer_Support`, which verifies a pending reservation and generates three
+distinct eight-digit candidates. Native allocation, containers and the observer
+copy them to state 23. The existing third line shows the first; the native
+keyboard accepts all three and retains wrong-input/retry, cancel and failure branches.
+`AuthorizeRollback` then rechecks challenge, input, transaction and descriptor;
+only that authorized reservation can be rolled back. Changed challenges or
+transactions and post-success replay cannot reuse the authorization. Native
+callbacks proceed to state 17 for token handling and saving; no other game save
+is rewritten. This local password protocol is not the official algorithm:
+Download, Unlock and Original continue using official requests and responses. Download's
+live restaging permission exists only in server context and is not reauthorized
+from a journal or game version after restart.
 
-If an old patch or interrupted run leaves `sav.bin+0x1C = 1/2`, Offline Mode
-does not enter stock state 18. State 11's corresponding branch is redirected
-to state 17, and a successful local state-16 load restores state `0` and saves
-it. Exiting before that load leaves the value temporarily intact, but the next
-completed offline path clears it.
+An existing Bank without a reservation returns native status `2`; only a
+nonzero pending token returns `4`. First-time service creation cannot fabricate
+a lock or empty trainer metadata. The preliminary record query omits redundant
+body verification; the later transaction query still validates participants.
+Complete body loading hashes that same memory snapshot. Service I/O uses
+a 1 MiB buffer, large enough for one complete Bank read, with a 1 KiB stack fallback when busy. CRC32 uses journal
+version 5. Status/metadata and the following download share one snapshot; only
+body delivery consumes the load. Box operations do not read server files.
+Local settings updates dispatch before connecting, using the fs_system settings
+backend and existing durable record without policy/Bank scans. Original record
+serialization/validation and save success/error branches remain.
+The service's volatile loaded view reuses body observations across
+read-only requests in the native load; it is neither persisted nor journal
+authority. Journals/settings/configuration stay independently read. New loads,
+source selection, reconnect/restart and mutations invalidate affected views;
+failed I/O clears the view. Actual uploads recheck primaries. External edits
+within a load become visible on reloading, not automatically on every guard.
+Actual short reads, failed close and corrupt new writeback still fail.
+Settled and unregistered existing Banks now inspect group/order metadata in the
+same stream that produces the fingerprint. Initial registration reuses it only
+throughout that load, without another body pass or 100 per-box reads. Recovery
+and pending phases retain existing paths. One native ticket job shares its
+policy/time snapshot; a new job, reload/edit, purchase/recharge or location change
+invalidates it. Staged bodies and commit/rollback decisions are retained, not a frozen policy. Canonical configuration
+output/verification uses 512-byte batches without dropping source/temp checks. Download passes
+its validated snapshot through the current native load to reserve
+the unchanged Bank; it cannot authorize recovery against a replaced source.
+Read-only reservations leave the previous backup untouched. The primary is
+rechecked before a real upload; a changed body snapshots the old main before staging.
+Unchanged downloads do not stage a duplicate tmp; actual save restaging still
+writes, flushes and verifies it. Missing tmp is allowed only for unchanged
+native Bank reservations, never damaged/unreadable tmp, other sources or changed
+bodies. Whole-image copying reuses verified buffer bytes when available, otherwise
+verifies the actual read before writing, then reads back the new destination once.
+Publication distinguishes before/after/missing from one observation and checks
+physical file existence/length before replacing the primary. Native save acknowledgement
+is unchanged.
+
+The new `0x002B1CF8` entry hook invokes response polling only in Offline
+Mode. Download, Unlock and Original replay `push {r4-r6,lr}` and continue at
+`0x002B1CFC`. Native source saving, result polling and token-cleanup bodies are
+retained. The offline wrapper calls that same native body, delivers service replies
+at native wait stages, and permits native Turtle saves to use the SD backend.
+It does not clear Turtle or manufacture a completion phase.
+
+#### Local journal format and recovery evidence
+
+`/3ds/Bank/fakeServers/users/<userID>/transaction.bin` is one little-endian `0x370`-byte
+[FsTransactionRecord](../../common/include/fakeServer/transaction.h). Both applications compile the same independent server core and filesystem implementation, with separate title-specific SDK addresses.
+
+| Offset | Size | Content |
+|---|---:|---|
+| `0x00` | `0x20` | LTX2, version 5, size, sequence, internal transaction sequence, owner, operation, phase |
+| `0x20` | `0x20` | Mode, participants, flags, source kind, game code, path size, reserved title ID |
+| `0x40` | `0x220` | 272 UTF-16 units for the NDS path; zero for native sources |
+| `0x260` | `0x20` | SDK-layout descriptor: ID, versions, size, zero alignment word, token |
+| `0x280` | `0x24` | Native recovery display data: format, name format, 13-unit trainer name, trainer ID, game ID |
+| `0x2A4` | `0x04` | Zero alignment padding |
+| `0x2A8` | `0x18` | bankBefore: presence, reserved zero, 64-bit size, four-byte CRC32, explicit zero reserved word |
+| `0x2C0` | `0x18` | bankAfter |
+| `0x2D8` | `0x18` | sourceBefore: NDS files only |
+| `0x2F0` | `0x18` | sourceAfter: first NDS save |
+| `0x308` | `0x18` | sourceClean: NDS token-cleanup save |
+| `0x320` | `0x18` | turtleBefore |
+| `0x338` | `0x18` | turtleCurrent: published |
+| `0x350` | `0x18` | turtleAfter: pending target |
+| `0x368` | `0x04` | CRC32 of preceding `0x368` bytes |
+| `0x36C` | `0x04` | Zero tail alignment word |
+
+Scalar integers remain little-endian; CRC32 is four bytes in most-significant-byte-first order.
+The journal remains version 5; binary configuration bindings are removed/ignored.
+Later loads use current text without reevaluating staged bodies. Old SHA-256 journal authority remains
+preserved/refused, not automatically erased. Bank bodies,
+settings/game saves and native SDK descriptor layouts are unchanged. CRC32 identifies local
+non-adversarial versions and accidental changes; it is not cryptographic authentication or a
+collision-resistance guarantee. Random dataIds, tokens and challenge codes still use randomness,
+never file CRC32. Configuration temporary seals use eight hexadecimal CRC32 digits and retain
+valid user configuration values.
+
+Internal sequence increments per update; the internal transaction number is the
+first record-update sequence. Server dataId is stable, random and nonzero;
+each reservation gets a new nonzero random 64-bit token, different from the
+previous one, and updateVersion is currentVersion plus one. The SDK alignment
+word at +0x14 is not filled by native calls and is excluded from matching.
+Tokens map SDK +0x18 to game +0x08, not a whole-block copy.
+File times and native 1/2 markers do not identify generations. Updates fully
+write/flush/close/reread tmp, preserve the previous main as `transaction.bak`,
+rename tmp to bin and verify. A valid main wins; only a missing main permits
+the valid backup to resume. Invalid main or unknown authority stops. Temporary
+journals are never promoted; missing published history uses the explicit local
+adoption/pure-temporary reset policy. The backup holds one small published journal,
+not historical Bank data, and is not a power-loss atomicity guarantee.
+
+A zero-length `transaction.bak` is created before the first tmp write. It is
+not authority. Missing published history is classified again after bootstrap
+interruption. A checked Bank baseline/backup-adoption decision must be published
+before Bank temporaries are retired; tmp never supplies the old decision.
+Settings-baseline flag `0x10` keeps the version-5 structure size. Known
+`turtleCurrent` survives Bank/source-only operations and Bank repair; reads,
+writes and completion verify the complete settings file, without rebasing
+unexpected present bytes or overwriting trusted `sav.bak`. A missing primary
+may recover an exact current-baseline backup/temporary. Once settled, deleting
+all three settings files records absence and permits native initialization,
+without changing the Bank ID/version or last-source metadata. Pending loss of
+all settings evidence still stops. Normal recorded format and
+reinitialization remain supported. First untracked settings need native format
+validation; successful writes establish the baseline, not historical integrity. If recovery cannot establish matching versions, preserve all files rather than clearing an unresolved native transaction.
+
+PREPARING → SOURCE_PENDING → STAGED → COMMIT_DECIDED → PUBLISHED →
+CLEANUP_PENDING → CLEANUP_READY → COMPLETED connects native saves to publication.
+Bank/settings-only need no source save. Online NDS SOURCE_ONLY retains current
+Bank baseline and uploads no local Bank. Undecided work aborts only with provable
+old Bank/full old NDS source; decisions proceed forward. ROLLBACK_DECIDED and
+DETACHED_ROLLBACK_DECIDED are manual decisions retryable after interruption.
+No extra title warning, X/Y controls or risk menu is added. Native matching and
+state-1/2 branches choose rollback/commit; NDS image validation/publication stays
+in the file backend. R switching remains; native modes use stock Turtle and
+their native source saves have no local journal-based cross-mode restriction.
+Official transaction calls do not enter fakeServer.
+
+Bank/settings backups remain server-managed pre-write snapshots after completion;
+Finish never overwrites them with the new main. Read-only native Bank reservations
+leave the previous backup untouched; the actual changed upload backs up its old
+main before staging. NDS sibling work files are retired only after verified
+publication and successful token cleanup. A damaged, truncated or missing settled Bank is repaired
+only from a backup matching the journal's bankAfter fingerprint, with a new
+RESTORE_BACKUP decision recorded before copying. Unknown or stale backups are
+preserved, never promoted on readability alone.
+
+Offline import policy gives a well-formed primary priority over old backups.
+A primary differing from the settled image, or from both pending images, gets
+a new ID/version 0 through recorded `ADOPT_BANK=6`; old work files and the Bank
+backup are removed only after the adoption decision is published. All Bank
+images missing with valid old authority may establish an empty baseline and
+enter native creation. A settings deletion alone is not a Bank import; same-Bank
+repair/settings rebuilding retains native last-source metadata. Adoption does
+not rewrite game saves or prove paired rollback. Native callbacks handle stale
+source tokens. Unknown well-formed corruption is indistinguishable from import
+under this policy; damaged authority and I/O faults still stop. Without published
+history, a checked primary wins, a sole valid backup is adopted as a new baseline,
+and a sole Bank tmp is abandoned before native creation. Other pure temporaries
+are classified by their associated published evidence; no blank NDS save or
+replacement policy for an active bound transaction is invented.
+See [file combinations](../../common/docs/fakeServer/architecture.zh-cn.md#删除损坏和手动换入的处理边界).
+
+Native source saving/polling remain. Bank state 7 reports first-save success
+only on substate `4 → 5`, and native restoration-save success only on `8 → 11`;
+waiting or failed polls cannot create acknowledgement. The state-2 commit request
+still selects Bank publication, not final completion. Substate 13 records cleanup
+start before native token clearing/saving, and only actual `14 → 15` success
+acknowledges cleanup and finishes. Failure preserves the original descriptor and
+native error exit. State 17 also observes native cleanup substates `5/6/7`, allowing
+another application's transaction to resume using its matching native descriptor.
+No native-save fingerprint or full snapshot is added. Turtle writes record intent, complete snapshots
+and fingerprints; native serialization/checksum remains. Failed cleanup never
+deletes Bank as if uncommitted.
+
+[Mover's NDS transaction](../../mover/docs/code-analysis.md#offline-local-transaction-journal)
+supports full source fingerprints/snapshots and restart cleanup. Native cartridge,
+VC and Bank 3DS sources lack full snapshots and have no extra native-block hash.
+The service matches native request IDs, versions, size and nonzero token. It may
+acknowledge the same decision for its last completed reservation, never successful
+commit/rollback of unknown history. Native callbacks decide whether a definitive
+expired/not-found reply permits residual-token cleanup.
+Bank state 17 keeps native reading, state-1/2 decisions and cleanup/save
+substates 5/6/7. The native cancel field is no longer borrowed as a local delay
+latch. Local IDs/tokens are not official credentials.
+When Bank and Mover alternate, an obsolete descriptor cannot acknowledge a newer
+reservation. A valid formal journal is authoritative; only its absence allows
+the previous `.bak`, never a newer-looking `.tmp`. Settled/absent old-token cleanup
+is a guarded no-op on Bank, not a commit or rollback of the current reservation.
+Native save events do not replace Gen 5 file SavePoll, validation or publication.
+Journals are not uploaded. One writer and storage
+persistence assumptions remain; file rereads do not establish real SD power-loss safety.
 
 ### Boundaries
 
-- Local Bankdata validation checks fixed size, format version, and box count;
-  it is not equivalent to server-side content validation.
+- Local Bankdata validation checks fixed size, format version, box count,
+  groups and in-group order, plus complete fingerprints for journal generations;
+  first import without a journal cannot detect every middle-body corruption and is not
+  equivalent to server-side content validation.
 - Download Mode still requires valid account, transaction, and complete-file
   responses from the official service.
 - Unlock Mode can display only a candidate actually present in the server
   response; it cannot guarantee that the service accepts the later rollback.
-- Offline Mode neither interprets nor fabricates a remote descriptor;
-  `bankdata.tmp/.bin/.bak` forms a separate local file transaction.
+- Offline Mode generates local descriptors to reuse native client branches,
+  not official credentials. The journal manages file publication/backups;
+  native sources lack full snapshots and paired rollback/atomicity guarantees.
 - This document states branches implemented in the current binary and patch;
   unpublished server-side checks are not asserted as facts.
+
+## Local service integration
+
+Only Offline routes Bank, local settings and transaction requests to the embedded
+service. Other modes preserve official dispatch, apart from Download's explicit
+local export and the capability-gated emulator ticket response. The service does
+not replace official authentication or invent a valid HOME transfer.
+
+Original download state `0x002AF460` retains its SDK job, observer and Bank-file
+consumer. The service owns a complete response; the client copies it into the
+native buffer in bounded chunks, releases it, then completes the original job.
+Cancellation unbinds observers and discards late results without joining the worker.
+
+Initial settings format enters native substate 21 and polls `FORMAT_TURTLE` at
+`0x002AC68C`. Pending remains pending; success and failure follow the unchanged
+table in `0x002ABE08`. Initial creation parameters do not depend on a Bank already
+being present. Native begin/poll `0x002B4AB4/0x002B4A20` retain save preparation,
+completion and cleanup; local settings publication runs in the worker.
+
+Offline connection monitoring does not query an official session that was never
+created. It still respects local cancellation and error results. Online modes
+retain native connection monitoring.
+
+### Gifts and mileage
+
+Native gift callback `0x002AB17C` consumes service-supplied frames. Gen6 writes
+the source game's Link area and updates its CRC/Bank IDs; Gen7 inserts cards and
+uses native capacity and repeat handling. Saving follows ordinary Bank/game
+transactions, without a separate receipt ledger.
+
+Gift query `0x002A9824` uses the local-server connection label in Offline.
+Mileage dialogue at `0x002AA990/0x002AAEC8` retains portrait table 37, line 14;
+it is not replaced with a generic connection-message index.
+Offline time comes from the local service response, based on the console clock.
+Online time remains the official service's response.
+
+### Per-user console locale
+
+The selected user's locale and currency live in `user.conf`. Explicit values
+remain fixed; autoRegion refreshes only after the title selection is confirmed,
+and autoCurrency derives the currency from that profile's region. Browsing users
+does not update their locale or balances. Bank does not rewrite the console-region
+fields of Pokemon already stored in the Bank.
+
+See [service architecture](../../common/docs/fakeServer/architecture.zh-cn.md),
+[personal configuration](../../configTemplate/templateForCopy/Bank/fakeServers/users/readme_user.md)
+and [gift configuration](../../configTemplate/templateForCopy/Bank/fakeServers/shared/gifts/readme_gift.md).

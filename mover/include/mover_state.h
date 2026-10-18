@@ -2,6 +2,9 @@
 #define MOVER_OFFLINE_PATCH_MOVER_STATE_H
 
 #include "patch_types.h"
+#include "fakeServer/types.h"
+
+#define CombinePatch_ModeStorage ((volatile u8 *)0x00363FF4u)
 
 struct MoverBankRuntimeObjectView;
 
@@ -10,14 +13,7 @@ struct MoverBankRuntimeObjectView;
    64-bit transaction password. */
 /* 远端事务查询所填充的共用流程数据前缀。显式填充用于保持最后一个 64 位
    事务密码之前的原版 ARM 布局。 */
-typedef struct MoverTransactionParamView {
-    u64 dataId;
-    u32 currentVersion;
-    u32 updateVersion;
-    u32 size;
-    u32 reserved14;
-    u64 transactionPassword;
-} MoverTransactionParamView;
+typedef FsTransactionParameters MoverTransactionParamView;
 
 typedef struct MoverCommonDataPrefixView {
     MoverTransactionParamView transaction;
@@ -36,6 +32,14 @@ typedef struct MoverFlowView {
     MoverNetworkContextView *networkContext;
     u8 reserved28[0xA4];
     struct MoverBankRuntimeObjectView *bankObject;
+    u8 reservedD0[0x10];
+    u32 vcTrainerId;
+    u8 vcNameFormat;
+    u8 reservedE5;
+    u16 vcTrainerName[13];
+    u8 reserved100[0x48];
+    void *vcArchive;
+    void *vcSave;
 } MoverFlowView;
 
 typedef struct MoverStateView {
@@ -44,12 +48,13 @@ typedef struct MoverStateView {
     MoverFlowView *bankdataFlow;
     u32 heapId;
     u32 substate;
-    u8 reserved14[0x14];
+    u8 reserved14[0x10];
+    u8 saveKind;
+    u8 savePending;
+    u8 reserved26[0x02];
     void *sharedData;
     u8 reserved2C[0x04];
     u8 phase;
-    u8 reserved31[0x13];
-    u8 saveDelayMarker;
 } MoverStateView;
 
 enum MoverStateUpdateResult {
@@ -62,19 +67,12 @@ enum MoverNetworkConnectionValue {
     MOVER_NETWORK_CONNECTED = 1
 };
 
-enum MoverBankStatusValue {
-    MOVER_BANK_STATUS_READY = 50
-};
-
 /* These phase values belong to different native state classes and therefore
    intentionally keep state-specific names. */
 /* 这些阶段值分属不同原版状态类，因此有意保留各自的状态专用名称。 */
 enum MoverNetworkStatePhase {
+    MOVER_NETWORK_PHASE_ERROR = 2,
     MOVER_NETWORK_PHASE_COMPLETE = 3
-};
-
-enum MoverRemoteCheckStatePhase {
-    MOVER_REMOTE_CHECK_PHASE_COMPLETE = 8
 };
 
 enum MoverEligibilityStatePhase {
@@ -82,16 +80,8 @@ enum MoverEligibilityStatePhase {
     MOVER_ELIGIBILITY_PHASE_ERROR = 5
 };
 
-enum MoverNoTransferStatePhase {
-    MOVER_NO_TRANSFER_PHASE_COMPLETE = 3
-};
-
 enum MoverEligibilitySubstate {
     MOVER_ELIGIBILITY_SUBSTATE_TRANSFER_BOX_OCCUPIED = 7
-};
-
-enum MoverSaveSubstate {
-    MOVER_SAVE_SUBSTATE_LOCAL_COMPLETE = 3
 };
 
 #endif

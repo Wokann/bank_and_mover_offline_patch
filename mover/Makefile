@@ -1,4 +1,4 @@
-.PHONY: all clean verify FORCE layeredfs exheader
+.PHONY: all clean verify FORCE layeredfs exheader check-files
 .DEFAULT_GOAL := all
 
 export MSYS2_ARG_CONV_EXCL := *
@@ -21,7 +21,14 @@ RELEASE_TITLE := $(RELEASE_ROOT)/$(TITLE_ID)
 RELEASE_BPS := $(RELEASE_TITLE)/code.bps
 RELEASE_ROMFS := $(RELEASE_TITLE)/romfs
 ROMFS_SOURCE ?= rom/romfs
-OBJECTS := $(patsubst $(SRC)/%.c,$(BUILD)/%.o,$(wildcard $(SRC)/*.c))
+COMMON := ../common
+FONT_NAMES := $(wildcard ../ViewerForBankdata/resources/species_*.json)
+SERVER_SRC := $(COMMON)/src/fakeServer
+FS_SRC := $(COMMON)/src/fs_system
+SERVER_OBJECTS := $(patsubst $(COMMON)/src/%.c,$(BUILD)/common/%.o,$(wildcard $(SERVER_SRC)/*.c))
+FS_OBJECTS := $(patsubst $(COMMON)/src/%.c,$(BUILD)/common/%.o,$(wildcard $(FS_SRC)/*.c))
+COMMON_OBJECTS := $(SERVER_OBJECTS) $(FS_OBJECTS)
+OBJECTS := $(patsubst $(SRC)/%.c,$(BUILD)/%.o,$(wildcard $(SRC)/*.c)) $(COMMON_OBJECTS)
 SYMBOLS := $(BUILD)/armips-symbols.txt
 EXHEADER ?= rom/exheader.bin
 PREPARED_BASE := $(BUILD)/expanded-base.code
@@ -36,51 +43,68 @@ ARM_CFLAGS := -std=c11 -Os -march=armv6k -mtune=mpcore -marm -mfloat-abi=soft \
 	-ffreestanding -fno-builtin -fno-stack-protector -fno-unwind-tables \
 	-fno-asynchronous-unwind-tables -fomit-frame-pointer -fno-common \
 	-ffunction-sections -fdata-sections -MMD -MP -Wall -Wextra -Werror \
-	-Iinclude
+	-mlong-calls -Iinclude -I$(COMMON)/include
 THUMB_CFLAGS := $(filter-out -marm,$(ARM_CFLAGS)) -mthumb -fno-jump-tables
 CFLAGS := $(ARM_CFLAGS)
 
-$(BUILD)/bankdata_redirect.o $(BUILD)/fs_helpers.o $(BUILD)/local_validation.o \
-$(BUILD)/offline_flow.o $(BUILD)/nds_fs.o $(BUILD)/nds_sources.o \
-$(BUILD)/language_settings.o: CFLAGS := $(THUMB_CFLAGS)
+$(BUILD)/bankdata_redirect.o $(BUILD)/server_validation.o \
+$(BUILD)/nds_sources.o \
+$(BUILD)/language_settings.o $(BUILD)/bank_native_settings.o $(COMMON_OBJECTS): CFLAGS := $(THUMB_CFLAGS)
+
+# Time observation and shared-buffer arbitration use ARM-only barriers/atomics.
+# 时间读取与共享缓冲仲裁使用 ARM 模式的内存屏障／原子指令。
+$(BUILD)/common/fs_system/system_time.o $(BUILD)/common/fs_system/runtime_environment.o \
+$(BUILD)/common/fs_system/native_worker.o $(BUILD)/common/fakeServer/async_task.o \
+$(BUILD)/common/fs_system/service_worker.o \
+$(BUILD)/common/fakeServer/native_transport.o \
+$(BUILD)/common/fs_system/title_users.o \
+$(BUILD)/common/fakeServer/transaction_view.o: CFLAGS := $(ARM_CFLAGS)
 
 -include $(OBJECTS:.o=.d)
 
-all: $(RELEASE_BPS) exheader layeredfs verify
+all: check-files $(RELEASE_BPS) exheader layeredfs verify
 
-$(BUILD):
+check-files:
+	"$(PYTHON)" -B ../common/tools/check_file_links.py --recursive --allow-missing .. "$(BUILD)" "$(RELEASE_ROOT)" "$(ROMFS_SOURCE)" "$(BASE)" "$(EXHEADER)"
+
+$(BUILD): | check-files
 	mkdir -p "$@"
 
-$(BUILD)/%.o: $(SRC)/%.c | $(BUILD)
+$(BUILD)/common/%.o: $(COMMON)/src/%.c | $(BUILD) check-files
+	mkdir -p "$(dir $@)"
 	"$(CC)" $(CFLAGS) -c "$<" -o "$@"
 	"$(OBJDUMP)" -dr -z "$@" > "$(@:.o=.s)"
 
-$(PREPARED_BASE): FORCE $(BASE) $(EXHEADER) $(TOOLS)/prepare_expanded_code.py | $(BUILD)
-	"$(PYTHON)" -B -m tools.prepare_expanded_code prepare --base-code "$(BASE)" --base-exheader "$(EXHEADER)" --output-code "$@" --output-exheader "$(EXPANDED_EXHEADER)" --payload-start 0x00365000 --payload-size 0x3000
+$(BUILD)/%.o: $(SRC)/%.c | $(BUILD) check-files
+	"$(CC)" $(CFLAGS) -c "$<" -o "$@"
+	"$(OBJDUMP)" -dr -z "$@" > "$(@:.o=.s)"
+
+$(PREPARED_BASE): FORCE $(BASE) $(EXHEADER) $(TOOLS)/prepare_expanded_code.py | $(BUILD) check-files
+	"$(PYTHON)" -B -m tools.prepare_expanded_code prepare --base-code "$(BASE)" --base-exheader "$(EXHEADER)" --output-code "$@" --output-exheader "$(EXPANDED_EXHEADER)" --payload-start 0x00365000 --payload-size 0x2BF000
 
 $(PATCHED): FORCE $(SRC)/main.s $(OBJECTS) $(ASSEMBLY_BASE) $(TOOLS)/verify_patch.py
 	cd "$(SRC)" && "$(ARMIPS)" -erroronwarning -stat -sym "../$(SYMBOLS)" -strequ INPUT_CODE "../$(ASSEMBLY_BASE)" -strequ OUTPUT_CODE "../$(PATCHED)" -strequ BUILD_DIRECTORY "../$(BUILD)" main.s
 
-$(RELEASE_EXHEADER): $(PATCHED)
+$(RELEASE_EXHEADER): $(PATCHED) | check-files
 	mkdir -p "$(dir $@)"
 	cp "$(EXPANDED_EXHEADER)" "$@"
 
 exheader: $(RELEASE_EXHEADER)
 
-$(RELEASE_BPS): $(PATCHED)
+$(RELEASE_BPS): $(PATCHED) | check-files
 	mkdir -p "$(dir $@)"
 	rm -f "$@"
 	"$(IPS_TOOL)" --create --bps --exact "$(BASE)" "$(PATCHED)" "$@"
 	rm -f "$(RELEASE_TITLE)/code.ips"
 
-layeredfs: $(SRC)/patch_messages.py $(TOOLS)/message_archive.py
+layeredfs: $(SRC)/patch_messages.py $(TOOLS)/message_archive.py $(TOOLS)/title_layout.py $(COMMON)/tools/title_resources.py $(COMMON)/tools/title_messages.py $(COMMON)/tools/title_font.py $(FONT_NAMES) | check-files
 	rm -rf "$(RELEASE_ROMFS)"
 	"$(PYTHON)" -B -m src.patch_messages --source-romfs "$(ROMFS_SOURCE)" --output-romfs "$(RELEASE_ROMFS)"
 
 verify: $(PATCHED) $(RELEASE_BPS) exheader layeredfs $(TOOLS)/verify_patch.py
 	"$(PYTHON)" -B -m tools.verify_patch --base "$(BASE)" --patched "$(PATCHED)" --symbols "$(SYMBOLS)" --bps "$(RELEASE_BPS)" --source-romfs "$(ROMFS_SOURCE)" --output-romfs "$(RELEASE_ROMFS)" $(VERIFY_EXHEADER)
 
-clean:
+clean: | check-files
 	rm -rf "$(RELEASE_TITLE)" "$(BUILD)"
 
 FORCE:

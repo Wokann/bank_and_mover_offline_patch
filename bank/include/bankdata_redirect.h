@@ -2,6 +2,25 @@
 #define BANK_OFFLINE_PATCH_BANKDATA_REDIRECT_H
 
 #include "patch_types.h"
+#include "fakeServer/types.h"
+#include "fakeServer/native_response.h"
+
+typedef void (*BankUi_SetMessageLineFn)(void *,u32,u32,u32);
+#define BankUi_SetMessageLine ((BankUi_SetMessageLineFn)0x001E0EF8u)
+
+enum BankTitleLanguageConstant {
+    BANK_TITLE_LANGUAGE_PANE = 0x29,
+    BANK_TITLE_LANGUAGE_MESSAGE = 122,
+    BANK_TITLE_MODE_PANE = 0x2A,
+    BANK_TITLE_SWITCH_PANE = 0x2B,
+    BANK_TITLE_SWITCH_MESSAGE = 127,
+    BANK_TITLE_HOME_MESSAGE = 77
+};
+
+struct BankFlowView;
+void BankdataRedirect_TitleInitialize(void *view,u32 screen,u32 pane,u32 modeMessage);
+int BankdataRedirect_SourceMetadata(struct BankFlowView *,FsSourceMetadata *);
+
 
 /* Confirmed serialized Bankdata dimensions and field offsets. */
 /* 已确认的 Bankdata 序列化尺寸与字段偏移。 */
@@ -89,7 +108,10 @@ typedef struct BankNetworkContextView {
 typedef struct BankFlowView {
     u8 reserved00[0x24];
     BankNetworkContextView *networkContext;
-    u8 reserved28[0xA4];
+    u8 reserved28[0x4C];
+    void *turtleRecord;
+    void *turtleStorage;
+    u8 reserved7C[0x50];
     struct BankRuntimeObjectView *bankObject;
     u8 reservedD0[0x28];
     u32 metadataValue;
@@ -105,10 +127,6 @@ typedef struct BankStateView {
     void *sharedData;
     u8 reserved2C[0x04];
     u8 phase;
-    u8 reserved31[0x17];
-    u8 saveDelayMarker;
-    u8 reserved49[0x18];
-    u8 postSelectionDelayMarker;
 } BankStateView;
 
 enum BankStatePhase {
@@ -135,16 +153,93 @@ typedef struct BankRuntimeObjectView {
     void *metadata;
 } BankRuntimeObjectView;
 
-typedef struct BankInitialRecordSharedView {
-    u8 reserved00[0x20];
-    u8 mode;
-    u8 reserved21[0x27];
-    u16 counter;
-    u8 reserved4A[0x02];
-    u8 flag0;
-    u8 flag1;
-    u8 flag2;
-} BankInitialRecordSharedView;
+typedef struct BankInitialRecordView {
+    u8 reserved00[0x40];
+    NativeRemoteView *remote;
+    u8 reserved44[4];
+    u32 resourceId;
+} BankInitialRecordView;
+
+typedef struct BankDownloadStateView {
+    u8 reserved00[0x3C];
+    NativeRemoteView *remote;
+} BankDownloadStateView;
+
+typedef struct BankCreateStateView {
+    u8 reserved00[0x40];
+    NativeRemoteView *remote;
+} BankCreateStateView;
+typedef struct BankRemoteStateView {
+    u8 reserved00[0x3C];
+    NativeRemoteView *remote;
+} BankRemoteStateView;
+typedef struct BankSaveRemoteView {
+    u8 reserved00[0x40];
+    NativeRemoteView *remote;
+    u8 reserved44[4];
+    u8 finished;
+} BankSaveRemoteView;
+typedef struct BankSourceRecoveryView {
+    u8 reserved00[0x3C];
+    NativeRemoteView *remote;
+    FsTransactionParameters transaction;
+    u8 finished;
+    u8 cancelled;
+} BankSourceRecoveryView;
+typedef struct BankAccountTransportView {
+    u8 initialized;
+    u8 reserved01[0x127];
+    NativeRemoteResult *request;
+    u8 reserved12C[8];
+    void *provider;
+} BankAccountTransportView;
+typedef void *(*BankAccountConstructFn)(void *);
+typedef void (*BankAccountResultFn)(u32 *,const u32 *);
+#define BankAccount_Construct ((BankAccountConstructFn)0x001197FCu)
+#define BankAccount_BuildResult ((BankAccountResultFn)0x0022A1FCu)
+#define BankAccount_ParseInitial ((NativeRpcParserFn)0x0012C2E0u)
+
+typedef struct BankCampaignResourceView {
+    u8 reserved00[0x14];
+    u32 resourceId;
+} BankCampaignResourceView;
+typedef int (*BankCampaignResponseFn)(void *,const BankCampaignResourceView *,u32,
+    const FsCampaignRecord *);
+#define BankCampaign_Response ((BankCampaignResponseFn)0x002ACF10u)
+
+typedef struct BankGameInfoView BankGameInfoView;
+typedef struct BankGameInfoVtable {
+    void *reserved00[2];
+    u32 (*nameFormat)(BankGameInfoView *);
+    u32 (*gameId)(BankGameInfoView *);
+    void *reserved10[3];
+    u32 (*trainerId)(BankGameInfoView *);
+    void *reserved20;
+    void (*copyTrainerName)(BankGameInfoView *,u16 *);
+} BankGameInfoVtable;
+struct BankGameInfoView { BankGameInfoVtable *vtable; };
+typedef union BankGameInfoLayout {
+    struct { u8 reserved00[0x129AC]; BankGameInfoView info; } early;
+    struct { u8 reserved00[0x74304]; BankGameInfoView info; } extended;
+} BankGameInfoLayout;
+typedef struct BankSelectedGameView {
+    u8 reserved00[8];
+    u8 version;
+} BankSelectedGameView;
+typedef void *(*BankGame_GetSelectedFn)(BankFlowView *);
+#define BankGame_GetSelected ((BankGame_GetSelectedFn)0x00233A6Cu)
+
+typedef struct BankForceRollbackView {
+    u8 reserved00[0x3C];
+    u32 challenge;
+    u32 enteredCode;
+    u8 cancelled;
+    u8 reserved45[3];
+    void *view;
+    void *job;
+    u8 finished;
+    u8 failed;
+} BankForceRollbackView;
 
 /* Result of validating one local Bankdata candidate. */
 /* 单个本地 Bankdata 候选文件的校验结果。 */
@@ -153,11 +248,6 @@ enum BankdataFileStatus {
     BANKDATA_FILE_INVALID = -1,
     BANKDATA_FILE_MISSING = 0,
     BANKDATA_FILE_VALID = 1
-};
-
-enum BankInitialRecordMode {
-    BANK_INITIAL_RECORD_MODE_EXISTING = '4',
-    BANK_INITIAL_RECORD_MODE_FIRST_USE = '5'
 };
 
 enum BankdataRecoveryConstant {
@@ -170,12 +260,43 @@ typedef u32 (*BankFile_DeriveFlowMetadataFn)(void *);
 #define BankFile_DeriveFlowMetadata ((BankFile_DeriveFlowMetadataFn)0x001D5EC0u)
 #define BankFile_Vtable 0x003626FCu
 
-int OfflinePatch_InitialRemoteRecordUpdate(BankStateView *state);
-int OfflinePatch_LoadBankData(BankStateView *state);
-int OfflinePatch_CreateInitial(void *remote,const void *data,u32 size);
-int BankdataRedirect_CaptureDownloaded(BankRuntimeObjectView *object);
-int OfflinePatch_Stage(void *remote,const void *data,u32 size,void *transaction);
-int OfflinePatch_Commit(void *remote,void *transaction,u32 zero);
-int OfflinePatch_Rollback(void *remote,void *transaction,u32 zero);
+int BankdataRedirect_InitialRecordUpdate(BankStateView *);
+int BankdataRedirect_OriginalInitialRecordUpdate(BankStateView *);
+int BankdataRedirect_DownloadUpdate(BankStateView *);
+int BankdataRedirect_OriginalDownloadUpdate(BankStateView *);
+int BankdataRedirect_CreateUpdate(BankStateView *);
+int BankdataRedirect_OriginalCreateUpdate(BankStateView *);
+int BankdataRedirect_InitializeAccount(BankAccountTransportView *);
+int BankdataRedirect_UnbindAccount(BankAccountTransportView *);
+enum BankDownloadCaptureStatus {
+    BANK_DOWNLOAD_CAPTURE_NONE=0, BANK_DOWNLOAD_CAPTURE_COMPLETE=1,
+    BANK_DOWNLOAD_CAPTURE_FAILED=2, BANK_DOWNLOAD_CAPTURE_PENDING=3
+};
+#define BankDownload_CaptureStatusStorage ((volatile u8 *)0x003FAFF1u)
+int BankdataRedirect_CaptureDownloaded(BankStateView *,BankRuntimeObjectView *);
+int BankdataRedirect_ExportDownloadUpdate(BankStateView *);
+void BankdataRedirect_CancelDownloaded(uintptr_t peer);
+int BankdataRedirect_BindRemote(NativeRemoteView *);
+int BankdataRedirect_OriginalBindRemote(NativeRemoteView *,const void *);
+int BankdataRedirect_TransactionProvider(NativeRemoteResult *,NativeRemoteView *,u32 commit,u32 force);
+int BankdataRedirect_RecoveryTokenProvider(NativeRemoteResult *,NativeRemoteView *,u32 challenge);
+int BankdataRedirect_NoSaveUpdate(BankStateView *);
+int BankdataRedirect_OriginalNoSaveUpdate(BankStateView *);
+int BankdataRedirect_TransactionRecoveryUpdate(BankStateView *);
+
+#define BankRemote_BuildResult ((NativeRemoteResultBuildFn)0x0022A338u)
+#define BankRemote_StageResponse ((NativeRemoteResponseFn)0x002A3424u)
+#define BankRemote_CommitResponse ((NativeRemoteResponseFn)0x002A3268u)
+#define BankRemote_RollbackResponse ((NativeRemoteResponseFn)0x002A2CB4u)
+#define BankRemote_MetadataResponse ((NativeRemoteResponseFn)0x002A2A14u)
+#define BankRemote_CompleteJob NativeResponse_Complete
+#define BankRemote_Allocate ((NativeResponseAllocateFn)0x0022A488u)
+int BankdataRedirect_SaveUpdate(BankStateView *state);
+int BankdataRedirect_OriginalSaveUpdate(BankStateView *state);
+int BankdataRedirect_SourceRecoveryUpdate(BankStateView *state);
+int BankdataRedirect_OriginalSourceRecoveryUpdate(BankStateView *state);
+int BankdataRedirect_OriginalTransactionRecoveryUpdate(BankStateView *);
+int BankdataRedirect_ForceRollbackUpdate(BankStateView *);
+int BankdataRedirect_OriginalForceRollbackUpdate(BankStateView *);
 
 #endif

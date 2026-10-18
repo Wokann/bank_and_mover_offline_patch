@@ -1,284 +1,394 @@
 #include "bankdata_redirect.h"
-#include "fs_helpers.h"
-#include "patch_paths.h"
+#include "fakeServer/fake_server_client.h"
+#include "turtle_redirect.h"
+#include "unlock_mode.h"
+#include "runtime_environment.h"
+#include "fs_system/title_users.h"
+#include <string.h>
 
 /* Bankdata redirection and local-file transaction implementation. */
 /* Bankdata 重定向与本地文件事务实现。 */
 
-static int validHeader(u16 formatVersion,u16 boxCount)
+#define SERVICE_UPDATE_SCOPE() \
+    NativeTransportScope serviceScope __attribute__((cleanup(NativeTransport_Leave)))={NativeTransport_Lock(0)}; \
+    if (serviceScope.status==FS_ASYNC_BUSY) return BANK_STATE_UPDATE_WAITING
+
+int BankdataRedirect_SourceMetadata(BankFlowView *flow,FsSourceMetadata *metadata)
 {
-    return formatVersion==BANKDATA_FORMAT_VERSION && boxCount==BANKDATA_BOX_COUNT;
+    BankSelectedGameView *game=flow?BankGame_GetSelected(flow):0;
+    if (!game) return 0;
+    BankGameInfoLayout *layout=(BankGameInfoLayout *)game;
+    BankGameInfoView *info=game->version>=5 && game->version<=8?
+        &layout->extended.info:&layout->early.info;
+    for (u32 i=0;i<sizeof(*metadata);i++) ((u8 *)metadata)[i]=0;
+    metadata->formatVersion=2;
+    metadata->nameFormat=(u8)info->vtable->nameFormat(info);
+    metadata->trainerId=info->vtable->trainerId(info);
+    metadata->gameId=(u8)info->vtable->gameId(info);
+    info->vtable->copyTrainerName(info,metadata->trainerName);
+    return 1;
 }
 
-static int writeTemporary(const void *data)
+void BankdataRedirect_TitleInitialize(void *view,u32 screen,u32 pane,u32 modeMessage)
 {
-    return writeCompleteFile(tempPath,sizeof(tempPath),data,BANK_FILE_SIZE,BANK_FILE_SIZE);
+    RuntimeEnvironment_InitializeTicket();
+    BankUi_SetMessageLine(view,screen,pane,BANK_TITLE_HOME_MESSAGE);
+    /* Separate child pane inherits the stock help pane's fade/visibility. */
+    /* 独立子窗格继承原帮助窗格的淡入淡出和可见状态，不挤占原文本缓冲。 */
+    BankUi_SetMessageLine(view,1,BANK_TITLE_LANGUAGE_PANE,BANK_TITLE_LANGUAGE_MESSAGE);
+    BankUi_SetMessageLine(view,1,BANK_TITLE_MODE_PANE,modeMessage);
+    BankUi_SetMessageLine(view,1,BANK_TITLE_SWITCH_PANE,BANK_TITLE_SWITCH_MESSAGE);
+    TitleUsers_Initialize(view);
 }
 
-static int commitTemporary(void)
+int BankdataRedirect_InitialRecordUpdate(BankStateView *state)
 {
-    u64 a=0; s32 r,restoreResult; int hasBackup=0;
-    if (openArchive(&a)) return 0;
-
-    /* Only a missing old backup is harmless. Preserve the current bank file
-       unless it was successfully moved aside before installing the temp file. */
-    /* 只有旧备份不存在属于无害情况。必须先成功把当前银行文件移作备份，
-       才能安装临时文件。 */
-    r=pathCommand(FSUSER_CMD_DELETE_FILE,a,backupPath,sizeof(backupPath));
-    if (r && !resultIsNotFound(r)) { closeArchive(a); return 0; }
-    r=renamePath(a,bankPath,sizeof(bankPath),backupPath,sizeof(backupPath));
-    if (!r) hasBackup=1;
-    else if (!resultIsNotFound(r)) { closeArchive(a); return 0; }
-
-    r=renamePath(a,tempPath,sizeof(tempPath),bankPath,sizeof(bankPath));
-    if (r && hasBackup) {
-        restoreResult=renamePath(a,backupPath,sizeof(backupPath),bankPath,sizeof(bankPath));
-        (void)restoreResult;
-    }
-    closeArchive(a); return !r;
-}
-
-static int installTemporary(const char *path,u32 pathSize)
-{
-    u64 archive=0;
-    s32 result;
-
-    /* Called only after staging, flushing and closing succeed. A failed
-       installation retains the complete temp file and reports failure. */
-    /* 仅在暂存、刷新及关闭成功后调用；安装失败保留完整临时文件并报告失败。 */
-    if (openArchive(&archive)) return 0;
-    result=pathCommand(FSUSER_CMD_DELETE_FILE,archive,path,pathSize);
-    if (!result || resultIsNotFound(result))
-        result=renamePath(archive,tempPath,sizeof(tempPath),path,pathSize);
-    closeArchive(archive);
-    return !result;
-}
-
-static int writeInitialBank(const void *data)
-{
-    /* Initial creation uses the same checked staging and rotation as saving. */
-    /* 首次创建与常规保存共用经过检查的暂存及轮换流程。 */
-    return writeTemporary(data) && commitTemporary();
-}
-
-static int inspectBankFile(const char *path,u32 pathSize)
-{
-    u16 header[2];
-    u32 handle=0,bytesRead=0;
-    u64 size=0;
-    s32 result=openFile(path,pathSize,OPEN_READ,&handle);
-    int status=BANKDATA_FILE_IO_ERROR;
-
-    if (resultIsNotFound(result)) status=BANKDATA_FILE_MISSING;
-    if (!result) {
-        result=FSFILE_GetSize(&handle,&size);
-        if (!result && size!=BANK_FILE_SIZE) status=BANKDATA_FILE_INVALID;
-        if (!result && size==BANK_FILE_SIZE) {
-            result=FSFILE_Read(&handle,&bytesRead,
-                __builtin_offsetof(BankdataRecord,header.formatVersion),header,sizeof(header));
-            if (!result && bytesRead==sizeof(header))
-                status=validHeader(header[0],header[1])?
-                    BANKDATA_FILE_VALID:BANKDATA_FILE_INVALID;
+    if (!state->substate) NativeTransport_Cancel((uintptr_t)state);
+    SERVICE_UPDATE_SCOPE();
+    BankInitialRecordView *view=(BankInitialRecordView *)state;
+    if (state->substate==2)
+        NativeResponse_PollRecord(view->remote,0,
+            BankRemote_BuildResult,BankRemote_CompleteJob);
+    else if (state->substate==6)
+        NativeResponse_PollQuery(view->remote,0,
+            BankRemote_BuildResult,BankRemote_CompleteJob);
+    else if (state->substate==7) {
+        FsCampaignRecord body;
+        FsServiceRequest input;
+        uintptr_t peer=(uintptr_t)state;
+        int prepared=FS_OK;
+        if (NativeTransport_Request(peer,peer,&input)!=FS_ASYNC_ACCEPTED)
+            prepared=FakeServerClient_PrepareCampaignRequest(&input,view->resourceId);
+        FsAsyncDelivery delivery;
+        int received=prepared==FS_OK?
+            NativeTransport_PollRequest(peer,peer,&input,0,sizeof(body),&delivery):FS_ASYNC_INVALID;
+        if (received==FS_ASYNC_ACCEPTED || received==FS_ASYNC_BUSY) return BANK_STATE_UPDATE_WAITING;
+        int copied=0;
+        if (received==FS_ASYNC_READY) {
+            copied=delivery.result==FS_OK && delivery.reply.bodySize==sizeof(body) && delivery.body;
+            if (copied) memcpy(&body,delivery.body,sizeof(body));
+            int released=NativeTransport_Release(&delivery);
+            if (released==FS_ASYNC_BUSY) return BANK_STATE_UPDATE_WAITING;
+            if (released!=FS_ASYNC_ACCEPTED) copied=0;
         }
+        BankCampaignResourceView resource;
+        for (u32 i=0;i<sizeof(resource);i++) ((u8 *)&resource)[i]=0;
+        resource.resourceId=input.input.campaign.requestId;
+        /* Original callback validates resource length/CRC and consumes dates. */
+        /* 原回调仍核对资源长度／CRC并消费日期。 */
+        if (copied)
+            BankCampaign_Response(state,&resource,sizeof(body),&body);
+        else BankCampaign_Response(state,0,0,0);
     }
-    if (handle && closeFile(handle)) status=BANKDATA_FILE_IO_ERROR;
-    return status;
+    int result=BankdataRedirect_OriginalInitialRecordUpdate(state);
+    if (result==BANK_STATE_UPDATE_FINISHED) NativeTransport_Cancel((uintptr_t)state);
+    return result;
 }
 
-static int preserveBrokenFile(const char *source,u32 sourceSize,
-    const char *destination,u32 destinationSize)
+int BankdataRedirect_InitializeAccount(BankAccountTransportView *transport)
 {
-    u8 buffer[BANKDATA_COPY_BUFFER_SIZE];
-    u32 sourceHandle=0,destinationHandle=0,readCount=0,writeCount=0;
-    u32 size32=0,offset=0,chunk;
-    u64 size=0;
-    s32 r,sourceClose=0,destinationClose=0;
-    int destinationOpened=0;
-
-    r=openFile(source,sourceSize,OPEN_READ,&sourceHandle);
-    if (!r) r=FSFILE_GetSize(&sourceHandle,&size);
-    if (!r && (size>>32)) r=-1;
-    if (!r) size32=(u32)size;
-    if (!r) {
-        r=openFile(destination,destinationSize,
-            OPEN_READ|OPEN_WRITE|OPEN_CREATE,&destinationHandle);
-        destinationOpened=!r;
+    if (!transport->provider) {
+        void *storage=BankRemote_Allocate(0x54);
+        if (!storage) return 0;
+        transport->provider=BankAccount_Construct(storage);
     }
-    if (!r) r=setSize(destinationHandle,size);
-    while (!r && offset<size32) {
-        u32 remaining=size32-offset;
-        chunk=(remaining>sizeof(buffer))?sizeof(buffer):(u32)remaining;
-        readCount=0;
-        writeCount=0;
-        r=FSFILE_Read(&sourceHandle,&readCount,offset,buffer,chunk);
-        if (!r && readCount!=chunk) r=-1;
-        if (!r) r=FSFILE_Write(&destinationHandle,&writeCount,offset,buffer,chunk,WRITE_FLUSH);
-        if (!r && writeCount!=chunk) r=-1;
-        offset+=chunk;
-    }
-    if (destinationHandle) destinationClose=closeFile(destinationHandle);
-    if (sourceHandle) sourceClose=closeFile(sourceHandle);
-    if (!r && !sourceClose && !destinationClose && offset==size32) return 1;
-
-    /* Preservation overwrites .break directly and does not use the normal
-       .bin/.bak/.tmp rotation. Clean only a destination opened by this copy. */
-    /* 保全副本直接覆盖 .break，不使用正常 .bin/.bak/.tmp 轮换；
-       失败时只清理本次复制确实打开过的目标。 */
-    if (destinationOpened) (void)deleteFile(destination,destinationSize);
-    return 0;
+    /* The native initial-parameter request requires this flag, which also
+       enables real-network monitoring. Offline mode gates both monitor
+       consumers; this does not assert that a system session exists. */
+    /* 原初始参数请求依赖此标志，但它也启用真实网络监控；离线在两个监控消费者
+       分流，不将该标志视为已建立系统会话。 */
+    transport->initialized=1;
+    return transport->provider!=0;
 }
 
-static int restoreBankFromBackup(BankStateView *state)
+int BankdataRedirect_UnbindAccount(BankAccountTransportView *transport)
 {
-    BankFlowView *flow=state->bankdataFlow;
-    BankRuntimeObjectView *object=flow?flow->bankObject:0;
-    s32 r;
-
-    if (!object || object->vtable!=BankFile_Vtable)
-        return 0;
-    r=readCompleteFile(backupPath,sizeof(backupPath),BANK_FILE_SIZE,0,
-        &object->record,BANK_FILE_SIZE);
-    if (r || !validHeader(object->record.header.formatVersion,
-        object->record.header.boxCount)) return 0;
-
-    /* Preserve bankdata.bak and create a checked byte-for-byte bankdata.bin copy. */
-    /* 保留 bankdata.bak，并创建经过完整检查、逐字节一致的 bankdata.bin 副本。 */
-    return writeTemporary(&object->record) && installTemporary(bankPath,sizeof(bankPath));
+    NativeTransport_Cancel((uintptr_t)transport);
+    if (transport->provider) {
+        void (**table)(void *)=*(void (***) (void *))transport->provider;
+        table[1](transport->provider);
+        transport->provider=0;
+    }
+    return 1;
 }
 
-static int finishInitialRecordState(BankStateView *state,
-    BankInitialRecordSharedView *shared,u8 mode)
+int BankdataRedirect_CreateUpdate(BankStateView *state)
 {
-    shared->mode=mode;
-    shared->counter=0;
-    shared->flag0=0;
-    shared->flag1=0;
-    shared->flag2=0;
-    state->phase=BANK_STATE_PHASE_COMPLETE;
-    return BANK_STATE_UPDATE_FINISHED;
+    SERVICE_UPDATE_SCOPE();
+    if (state->substate==5) {
+        BankAccountTransportView *account=*(BankAccountTransportView **)0x003AB938u;
+        NativeRemoteResult *job=account?account->request:0;
+        NativeResponse_PollInitial((uintptr_t)account,job,BankAccount_ParseInitial,
+            BankAccount_BuildResult,BankRemote_CompleteJob);
+    } else if (state->substate==7) {
+        NativeResponse_PollCreate(((BankCreateStateView *)state)->remote,0,
+            BankRemote_BuildResult,BankRemote_CompleteJob);
+    }
+    return BankdataRedirect_OriginalCreateUpdate(state);
+}
+
+int BankdataRedirect_DownloadUpdate(BankStateView *state)
+{
+    SERVICE_UPDATE_SCOPE();
+    BankDownloadStateView *view=(BankDownloadStateView *)state;
+    if (state->substate==2) {
+        FsSourceMetadata metadata;
+        int known=BankdataRedirect_SourceMetadata(state->bankdataFlow,&metadata);
+        NativeResponse_PollDownload(view->remote,0,known?&metadata:0,
+            BankRemote_Allocate, BankRemote_BuildResult,BankRemote_CompleteJob);
+    } else if (state->substate==4) {
+        FsSourceMetadata metadata;
+        int known=BankdataRedirect_SourceMetadata(state->bankdataFlow,&metadata);
+        NativeResponse_PollMetadataUpdate(view->remote,0,known?&metadata:0,
+            BankRemote_BuildResult,BankRemote_CompleteJob);
+    }
+    *TurtleRedirect_SaveActiveStorage=1;
+    int result=BankdataRedirect_OriginalDownloadUpdate(state);
+    *TurtleRedirect_SaveActiveStorage=0;
+    return result;
+}
+
+/* UI-owned immutable snapshot: the original callback adjusts session flags
+   after this hook. No UI object is retained by the worker. The transient native
+   heap allocation is released once the process-owned task has copied it. */
+/* 界面持有不变快照；原回调在钩子后还会调整会话标志。后台不保留界面对象，
+   任务取得自持副本后立即释放临时原生堆分配。 */
+static struct { uintptr_t peer; u8 *snapshot; } downloadedBank
+    __attribute__((section(".data.download_capture")))={0};
+enum { BANK_DOWNLOAD_EXPORT_REQUEST=0x404 };
+#define BankSnapshot_GetHeap ((void *(*)(u32))0x00235BFCu)
+#define BankSnapshot_Allocate ((void *(*)(u32,void *))0x00235BC8u)
+#define BankSnapshot_Free ((void (*)(void *))0x00236A90u)
+
+__attribute__((used,noinline))
+void BankdataRedirect_CancelDownloaded(uintptr_t peer)
+{
+    if (!peer || downloadedBank.peer!=peer) return;
+    NativeTransport_Cancel(peer);
+    if (downloadedBank.snapshot) BankSnapshot_Free(downloadedBank.snapshot);
+    downloadedBank=(__typeof__(downloadedBank)){0};
 }
 
 __attribute__((used,noinline,section(".text.offline")))
-int OfflinePatch_InitialRemoteRecordUpdate(BankStateView *state)
+int BankdataRedirect_CaptureDownloaded(BankStateView *state,BankRuntimeObjectView *object)
 {
-    BankInitialRecordSharedView *shared=(BankInitialRecordSharedView *)state->sharedData;
-    int bankStatus,backupStatus;
+    BankdataRedirect_CancelDownloaded(downloadedBank.peer);
+    /* Native loading already expanded legacy data. Empty banks remain valid;
+       all format/transaction decisions belong to the worker endpoint. */
+    /* 原版装载已展开旧格式，空银行同样可导出；格式及事务决策仍在后台服务。 */
+    if (!state || !object || object->vtable!=BankFile_Vtable) return 0;
+    void *heap=BankSnapshot_GetHeap(23);
+    u8 *snapshot=heap?BankSnapshot_Allocate(BANK_FILE_SIZE,heap):0;
+    if (!snapshot) return 0;
+    memcpy(snapshot,&object->record,BANK_FILE_SIZE);
+    downloadedBank.peer=(uintptr_t)state;
+    downloadedBank.snapshot=snapshot;
+    return 1;
+}
 
-    if (!shared) {
-        state->phase=BANK_STATE_PHASE_ERROR;
-        return BANK_STATE_UPDATE_FINISHED;
-    }
-    bankStatus=inspectBankFile(bankPath,sizeof(bankPath));
-    if (bankStatus==BANKDATA_FILE_VALID) {
-        /* ASCII '4' is the stock existing-record mode; '5' is first use. */
-        /* ASCII“4”是原版既有记录模式；“5”表示首次使用。 */
-        return finishInitialRecordState(state,shared,BANK_INITIAL_RECORD_MODE_EXISTING);
-    }
-    if (bankStatus==BANKDATA_FILE_IO_ERROR) {
-        state->phase=BANK_STATE_PHASE_ERROR;
-        return BANK_STATE_UPDATE_FINISHED;
-    }
-
-    /* A missing or invalid primary always checks the backup first. A valid
-       backup must be restored; a missing or invalid backup selects stock
-       first-use creation instead. */
-    /* 主文件缺失或无效时一律优先检查备份。有效备份必须恢复；备份缺失或
-       无效时则进入原版首次创建。 */
-    backupStatus=inspectBankFile(backupPath,sizeof(backupPath));
-    if (backupStatus==BANKDATA_FILE_IO_ERROR) {
-        state->phase=BANK_STATE_PHASE_ERROR;
-        return BANK_STATE_UPDATE_FINISHED;
-    }
-    if (backupStatus==BANKDATA_FILE_VALID) {
-        if (restoreBankFromBackup(state)) {
-            return finishInitialRecordState(state,shared,BANK_INITIAL_RECORD_MODE_EXISTING);
-        } else {
-            state->phase=BANK_STATE_PHASE_ERROR;
-        }
-    } else {
-        int attempt;
-        /* Preserve only files that exist but cannot be recognized. After the
-           initial failure, retry each copy up to three times, but do not block
-           stock first use if all four attempts fail. The original invalid
-           files stay intact until a replacement is fully staged. */
-        /* 只保全实际存在但无法识别的文件。初次失败后，每个副本最多重试三次；即使四次尝试全部失败，
-           也不阻止原版首次创建。新文件完整暂存前不改动原始无效文件。 */
-        if (bankStatus==BANKDATA_FILE_INVALID) {
-            for (attempt=0;attempt<BANKDATA_BROKEN_COPY_ATTEMPTS;attempt++) {
-                if (preserveBrokenFile(bankPath,sizeof(bankPath),
-                    brokenBankPath,sizeof(brokenBankPath))) break;
+__attribute__((used,noinline))
+int BankdataRedirect_ExportDownloadUpdate(BankStateView *state)
+{
+    if (downloadedBank.peer==(uintptr_t)state) {
+        NativeTransportScope scope __attribute__((cleanup(NativeTransport_Leave)))={NativeTransport_Lock(0)};
+        if (scope.status==FS_ASYNC_BUSY) return BANK_STATE_UPDATE_WAITING;
+        int status=FS_IO_ERROR;
+        if (scope.status==FS_ASYNC_ACCEPTED) {
+            FsServiceRequest input={.operation=FS_SERVICE_EXPORT_BANK};
+            FsAsyncDelivery delivery;
+            int received=NativeTransport_PollRequest((uintptr_t)state,BANK_DOWNLOAD_EXPORT_REQUEST,
+                &input,downloadedBank.snapshot,BANK_FILE_SIZE,&delivery);
+            if (received==FS_ASYNC_ACCEPTED || received==FS_ASYNC_READY) {
+                if (downloadedBank.snapshot) BankSnapshot_Free(downloadedBank.snapshot);
+                downloadedBank.snapshot=0;
+            }
+            if (received==FS_ASYNC_ACCEPTED || received==FS_ASYNC_BUSY) return BANK_STATE_UPDATE_WAITING;
+            if (received==FS_ASYNC_READY) {
+                int released=NativeTransport_Release(&delivery);
+                if (released==FS_ASYNC_BUSY) return BANK_STATE_UPDATE_WAITING;
+                if (released==FS_ASYNC_ACCEPTED) status=delivery.result;
             }
         }
-        if (backupStatus==BANKDATA_FILE_INVALID) {
-            for (attempt=0;attempt<BANKDATA_BROKEN_COPY_ATTEMPTS;attempt++) {
-                if (preserveBrokenFile(backupPath,sizeof(backupPath),
-                    brokenBackupPath,sizeof(brokenBackupPath))) break;
-            }
+        BankdataRedirect_CancelDownloaded((uintptr_t)state);
+        *BankDownload_CaptureStatusStorage=status==FS_OK?
+            BANK_DOWNLOAD_CAPTURE_COMPLETE:BANK_DOWNLOAD_CAPTURE_FAILED;
+    }
+    /* The download's original metadata, success/error and cleanup remain
+       native; this local acknowledgement cannot approve an online request. */
+    /* 下载原元数据、成功／错误及收尾不变；本地发布确认不会替联网请求判定成功。 */
+    int result=BankdataRedirect_OriginalDownloadUpdate(state);
+    if (result==BANK_STATE_UPDATE_FINISHED) BankdataRedirect_CancelDownloaded((uintptr_t)state);
+    return result;
+}
+
+static void pollStage(BankStateView *state,NativeRemoteView *remote)
+{
+    FsSourceMetadata metadata;
+    const FsSource source={FS_TRANSACTION_NATIVE_SOURCE,0,0,0,0,0,&metadata};
+    NativeUploadView *body=remote?remote->upload:0;
+    int known=state && BankdataRedirect_SourceMetadata(state->bankdataFlow,&metadata);
+    u32 size=body && body->begin && body->end>=body->begin?(u32)(body->end-body->begin):0;
+    NativeResponse_PollStage(remote,known?&source:0,body?body->begin:0,size,
+        BankRemote_BuildResult,BankRemote_CompleteJob);
+}
+
+int BankdataRedirect_BindRemote(NativeRemoteView *remote)
+{
+    return NativeResponse_Bind(remote,BankdataRedirect_OriginalBindRemote);
+}
+
+int BankdataRedirect_TransactionProvider(NativeRemoteResult *job,NativeRemoteView *remote,
+    u32 commit,u32 force)
+{
+    return NativeResponse_TransactionReply(job,remote,0,commit,force,
+        BankRemote_BuildResult);
+}
+
+int BankdataRedirect_RecoveryTokenProvider(NativeRemoteResult *job,NativeRemoteView *remote,
+    u32 challenge)
+{
+    return NativeResponse_RecoveryTokenReply(job,remote,0,challenge,
+        BankRemote_Allocate,BankRemote_BuildResult);
+}
+
+int BankdataRedirect_NoSaveUpdate(BankStateView *state)
+{
+    SERVICE_UPDATE_SCOPE();
+    if (state->substate==2)
+        NativeResponse_PollAccepted(((BankRemoteStateView *)state)->remote,BankRemote_Allocate,
+            BankRemote_BuildResult,BankRemote_CompleteJob);
+    return BankdataRedirect_OriginalNoSaveUpdate(state);
+}
+
+int BankdataRedirect_TransactionRecoveryUpdate(BankStateView *state)
+{
+    SERVICE_UPDATE_SCOPE();
+    NativeRemoteView *remote=((BankRemoteStateView *)state)->remote;
+    if (state->substate==2)
+        NativeResponse_PollMetadata(remote,0,BankRemote_Allocate,
+            BankRemote_BuildResult,BankRemote_CompleteJob);
+    else if (state->substate==7) NativeResponse_PollAccepted(remote,BankRemote_Allocate,
+        BankRemote_BuildResult,BankRemote_CompleteJob);
+    return BankdataRedirect_OriginalTransactionRecoveryUpdate(state);
+}
+
+int BankdataRedirect_SaveUpdate(BankStateView *state)
+{
+    if (!state->substate) NativeTransport_Cancel((uintptr_t)state);
+    SERVICE_UPDATE_SCOPE();
+    int status=FS_IO_ERROR;
+    int pending=NativeTransport_StatePending((uintptr_t)state,&status);
+    if (pending==FS_ASYNC_BUSY || pending==FS_ASYNC_ACCEPTED) return BANK_STATE_UPDATE_WAITING;
+    if (pending!=FS_ASYNC_STALE && status!=FS_OK)
+        state->substate=state->substate==3?19:20;
+    u32 previous=state->substate;
+    NativeRemoteView *remote=((BankSaveRemoteView *)state)->remote;
+    if (previous==2) pollStage(state,remote);
+    else if (previous==10 || previous==12)
+        NativeResponse_PollAccepted(remote,BankRemote_Allocate,BankRemote_BuildResult,BankRemote_CompleteJob);
+    if (previous==13) {
+        FsServiceRequest input={.operation=FS_SERVICE_NATIVE_SAVE_EVENT};
+        if (!state->sharedData) state->substate=20;
+        else {
+            input.input.native.descriptor=*(FsTransactionParameters *)state->sharedData;
+            input.input.native.event=FS_NATIVE_CLEANUP_STARTING;
+            int received=NativeTransport_StateRequest((uintptr_t)state,0x100u+previous,&input,&status);
+            if (received==FS_ASYNC_ACCEPTED || received==FS_ASYNC_BUSY) return BANK_STATE_UPDATE_WAITING;
+            if (status!=FS_OK) state->substate=20;
         }
-        return finishInitialRecordState(state,shared,BANK_INITIAL_RECORD_MODE_FIRST_USE);
     }
-    return BANK_STATE_UPDATE_FINISHED;
-}
-
-__attribute__((used,noinline,section(".text.offline")))
-int OfflinePatch_LoadBankData(BankStateView *state)
-{
-    BankFlowView *flow=state->bankdataFlow;
-    BankRuntimeObjectView *object=flow?flow->bankObject:0;
-    s32 r;
-
-    if (!object || object->vtable!=BankFile_Vtable)
-        return 0;
-    r=readCompleteFile(bankPath,sizeof(bankPath),BANK_FILE_SIZE,0,
-        &object->record,BANK_FILE_SIZE);
-
-    if (!r && validHeader(object->record.header.formatVersion,
-        object->record.header.boxCount)) {
-        /* Rebuild the flow metadata value set by the stock download callback. */
-        /* 重建原版完整数据下载回调写入流程对象的元数据值。 */
-        flow->metadataValue=BankFile_DeriveFlowMetadata(object->metadata);
-        return 1;
+    *TurtleRedirect_SaveActiveStorage=1;
+    int result=BankdataRedirect_OriginalSaveUpdate(state);
+    *TurtleRedirect_SaveActiveStorage=0;
+    /* Observe transitions caused by the real SavePoll; do not call it twice. */
+    /* 只观察真实 SavePoll 产生的转换，不额外重复轮询原保存作业。 */
+    int event=-1;
+    if (previous==4 && state->substate==5) event=FS_NATIVE_SOURCE_SAVED;
+    else if (previous==8 && state->substate==11) event=FS_NATIVE_SOURCE_RESTORED;
+    else if (previous==14 && state->substate==15) event=FS_NATIVE_CLEANUP_SAVED;
+    if (event>=0) {
+        if (!state->sharedData) {
+            state->substate=20;
+            return BANK_STATE_UPDATE_WAITING;
+        }
+        FsServiceRequest input={.operation=FS_SERVICE_NATIVE_SAVE_EVENT};
+        input.input.native.descriptor=*(FsTransactionParameters *)state->sharedData;
+        input.input.native.event=(uint32_t)event;
+        int received=NativeTransport_StateRequest((uintptr_t)state,0x200u+(u32)event,&input,&status);
+        if (received==FS_ASYNC_ACCEPTED || received==FS_ASYNC_BUSY) return BANK_STATE_UPDATE_WAITING;
+        if (status!=FS_OK) {
+            state->substate=20;
+            return BANK_STATE_UPDATE_WAITING;
+        }
     }
-    return 0;
+    if (result==BANK_STATE_UPDATE_FINISHED) NativeTransport_Cancel((uintptr_t)state);
+    return result;
 }
 
-__attribute__((used,noinline,section(".text.offline")))
-int OfflinePatch_CreateInitial(void *remote,const void *data,u32 size)
+int BankdataRedirect_ForceRollbackUpdate(BankStateView *state)
 {
-    (void)remote;
-    return size==BANK_FILE_SIZE && writeInitialBank(data);
+    if (!state->substate) NativeTransport_Cancel((uintptr_t)state);
+    SERVICE_UPDATE_SCOPE();
+    if (state->substate==2 || state->substate==6)
+        NativeResponse_PollAccepted(((BankForceRollbackView *)state)->job,BankRemote_Allocate,
+            BankRemote_BuildResult,BankRemote_CompleteJob);
+    if (state->substate==5) {
+        BankForceRollbackView *view=(BankForceRollbackView *)state;
+        /* Native keyboard acceptance precedes the request. The service verifies
+           the entered code again against its own challenge/reservation. */
+        /* 原键盘验证后才发请求；服务再次核对输入与自己签发的挑战和预留。 */
+        FsServiceRequest input={.operation=FS_SERVICE_AUTHORIZE_ROLLBACK};
+        input.input.rollback.challenge=view->challenge;
+        input.input.rollback.enteredCode=view->enteredCode;
+        FsAsyncDelivery delivery;
+        int received=NativeTransport_PollRequest((uintptr_t)state,1,&input,0,0,&delivery);
+        if (received==FS_ASYNC_ACCEPTED || received==FS_ASYNC_BUSY) return BANK_STATE_UPDATE_WAITING;
+        if (received==FS_ASYNC_READY && NativeTransport_Release(&delivery)==FS_ASYNC_BUSY)
+            return BANK_STATE_UPDATE_WAITING;
+        /* The subsequent stock rollback request performs the final service
+           authorization/result check, including rejected or failed approval. */
+        /* 后续原回滚请求仍由服务端最终核对授权并返回结果，授权拒绝或失败不强制放行。 */
+    }
+    int result=BankdataRedirect_OriginalForceRollbackUpdate(state);
+    if (result==BANK_STATE_UPDATE_FINISHED) NativeTransport_Cancel((uintptr_t)state);
+    return result;
 }
 
-__attribute__((used,noinline,section(".text.offline")))
-int BankdataRedirect_CaptureDownloaded(BankRuntimeObjectView *object)
+int BankdataRedirect_SourceRecoveryUpdate(BankStateView *state)
 {
-    /* Native loading has already expanded any legacy body to the current
-       record. Empty banks are valid; no Pokemon-count test belongs here. */
-    /* 原版装载已将旧格式扩展为当前记录。空银行同样有效，此处不按宝可梦数量过滤。 */
-    if (!object || object->vtable!=BankFile_Vtable ||
-        !validHeader(object->record.header.formatVersion,object->record.header.boxCount))
-        return 0;
-    return writeTemporary(&object->record) && commitTemporary();
-}
-
-__attribute__((used,noinline,section(".text.offline")))
-int OfflinePatch_Stage(void *remote,const void *data,u32 size,void *transaction)
-{
-    (void)remote; (void)transaction; return size==BANK_FILE_SIZE && writeTemporary(data);
-}
-
-__attribute__((used,noinline,section(".text.offline")))
-int OfflinePatch_Commit(void *remote,void *transaction,u32 zero)
-{
-    (void)remote; (void)transaction; (void)zero; return commitTemporary();
-}
-
-__attribute__((used,noinline,section(".text.offline")))
-int OfflinePatch_Rollback(void *remote,void *transaction,u32 zero)
-{
-    s32 r; (void)remote; (void)transaction; (void)zero;
-    r=deleteFile(tempPath,sizeof(tempPath));
-    /* Repeating rollback after the temp file is gone is idempotent. */
-    /* 临时文件已不存在时，重复回滚仍视为成功。 */
-    return !r || resultIsNotFound(r);
+    if (!state->substate) NativeTransport_Cancel((uintptr_t)state);
+    SERVICE_UPDATE_SCOPE();
+    /* No fixed two-second display gate: service replies and the native
+       callback drive progress. Keep native request/save waits unchanged. */
+    /* 不再添加固定两秒显示门槛；按服务响应和原回调推进，保留原请求及保存等待。 */
+    int status=FS_IO_ERROR;
+    int pending=NativeTransport_StatePending((uintptr_t)state,&status);
+    if (pending==FS_ASYNC_ACCEPTED || pending==FS_ASYNC_BUSY) return BANK_STATE_UPDATE_WAITING;
+    if (pending!=FS_ASYNC_STALE && status!=FS_OK) state->substate=9;
+    u32 previous=state->substate;
+    BankSourceRecoveryView *view=(BankSourceRecoveryView *)state;
+    if (previous==4)
+        NativeResponse_PollAccepted(((BankRemoteStateView *)state)->remote,BankRemote_Allocate,
+            BankRemote_BuildResult,BankRemote_CompleteJob);
+    if (previous==5) {
+        FsServiceRequest input={.operation=FS_SERVICE_NATIVE_SAVE_EVENT};
+        input.input.native.descriptor=view->transaction;
+        input.input.native.event=FS_NATIVE_CLEANUP_STARTING;
+        int received=NativeTransport_StateRequest((uintptr_t)state,0x100u,&input,&status);
+        if (received==FS_ASYNC_ACCEPTED || received==FS_ASYNC_BUSY) return BANK_STATE_UPDATE_WAITING;
+        if (status!=FS_OK) state->substate=9;
+    }
+    *TurtleRedirect_SaveActiveStorage=1;
+    int result=BankdataRedirect_OriginalSourceRecoveryUpdate(state);
+    *TurtleRedirect_SaveActiveStorage=0;
+    if (previous==6 && state->substate==7) {
+        FsServiceRequest input={.operation=FS_SERVICE_NATIVE_SAVE_EVENT};
+        input.input.native.descriptor=view->transaction;
+        input.input.native.event=FS_NATIVE_CLEANUP_SAVED;
+        int received=NativeTransport_StateRequest((uintptr_t)state,0x200u,&input,&status);
+        if (received==FS_ASYNC_ACCEPTED || received==FS_ASYNC_BUSY) return BANK_STATE_UPDATE_WAITING;
+        if (status!=FS_OK) { state->substate=9; return BANK_STATE_UPDATE_WAITING; }
+    }
+    if (result==BANK_STATE_UPDATE_FINISHED) NativeTransport_Cancel((uintptr_t)state);
+    return result;
 }

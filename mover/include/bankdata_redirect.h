@@ -3,6 +3,27 @@
 
 #include "mover_state.h"
 #include "patch_types.h"
+#include "fakeServer/types.h"
+#include "fakeServer/native_response.h"
+
+typedef void (*MoverUi_SetMessageLineFn)(void *,u32,u32,u32);
+#define MoverUi_SetMessageLine ((MoverUi_SetMessageLineFn)0x0019C410u)
+
+enum MoverTitleHint { MOVER_TITLE_MODE_PANE = 43, MOVER_TITLE_SWITCH_PANE = 44,
+    MOVER_TITLE_SWITCH_MESSAGE = 73 };
+
+void BankdataRedirect_TitleInitialize(void *view,u32 screen,u32 pane,u32 modeMessage);
+
+typedef FsNativeTransaction MoverSourceTransactionView;
+
+typedef void (*MoverUi_ShowMessageLineFn)(void *,u32,u32);
+typedef u32 (*MessageView_GetResultFn)(void *);
+typedef void *(*MoverSource_TransactionFn)(void *,MoverSourceTransactionView *);
+#define MoverUi_ShowMessageLine ((MoverUi_ShowMessageLineFn)0x0019B50Cu)
+#define MessageView_GetResult ((MessageView_GetResultFn)0x0019B4BCu)
+#define MoverSource_GetTransaction ((MoverSource_TransactionFn)0x0019BA68u)
+#define MoverSource_SetTransaction ((MoverSource_TransactionFn)0x0019A13Cu)
+
 
 /* Confirmed serialized Bankdata dimensions and field offsets. */
 /* 已确认的 Bankdata 序列化尺寸与字段偏移。 */
@@ -85,50 +106,59 @@ typedef struct MoverBankRuntimeObjectView {
     void *transferBox;
 } MoverBankRuntimeObjectView;
 
-/* Transfer-object constants and stock entry points. */
-/* 传送对象常量及原版入口。 */
-enum MoverTransferObjectConstant {
-    TRANSFER_OBJECT_ALLOCATION_SIZE = 0x14
-};
-
-enum MoverLocalBankLoadResult {
-    MOVER_LOCAL_BANK_LOAD_ERROR = -1,
-    MOVER_LOCAL_BANK_LOAD_COMPLETE = 0,
-    MOVER_LOCAL_BANK_TRANSFER_BOX_OCCUPIED = 1
-};
-
-typedef void (*TransferObject_DestroyFn)(void *);
-
-typedef struct TransferObjectVtableView {
-    void *reserved00;
-    void *reserved04;
-    TransferObject_DestroyFn destroy;
-} TransferObjectVtableView;
-
-typedef struct TransferObjectView {
-    TransferObjectVtableView *vtable;
-} TransferObjectView;
-
-typedef void *(*Heap_AllocateObjectFn)(u32,u32);
-typedef TransferObjectView *(*TransferObject_CreateFn)(void *,u32,u32);
-typedef int (*TransferSlot_IsOccupiedFn)(void *,u32);
-typedef void (*TransferSlot_LoadFn)(void *,void *,u32);
-typedef void (*TransferSlot_ClearFn)(void *,u32);
-typedef void (*TransferSlot_WriteFn)(void *,void *,u32);
-typedef int (*TransferSlot_CountOccupiedFn)(void *);
-
-#define Heap_AllocateObject ((Heap_AllocateObjectFn)0x001E6360u)
-#define TransferObject_Create ((TransferObject_CreateFn)0x001DFBA4u)
-#define TransferSlot_IsOccupied ((TransferSlot_IsOccupiedFn)0x0019A858u)
-#define TransferSlot_Load ((TransferSlot_LoadFn)0x0019A224u)
-#define TransferSlot_Clear ((TransferSlot_ClearFn)0x0019A7E0u)
-#define TransferSlot_Write ((TransferSlot_WriteFn)0x0019A6F4u)
-#define TransferSlot_CountOccupied ((TransferSlot_CountOccupiedFn)0x0024D624u)
 #define BankFile_Vtable 0x002E6DD0u
 
-int OfflinePatch_EligibilityUpdate(MoverStateView *state);
-int OfflinePatch_Stage(void *remote,const void *data,u32 size,void *transaction);
-int OfflinePatch_Commit(void *remote,void *transaction,u32 zero);
-int OfflinePatch_Rollback(void *remote,void *transaction,u32 zero);
+int BankdataRedirect_EligibilityUpdate(MoverStateView *state);
+int BankdataRedirect_SourceMetadata(MoverFlowView *,FsSourceMetadata *);
+int BankdataRedirect_OriginalEligibilityUpdate(MoverStateView *) __attribute__((long_call));
+int BankdataRedirect_BindRemote(NativeRemoteView *);
+int BankdataRedirect_OriginalBindRemote(NativeRemoteView *,const void *) __attribute__((long_call));
+int BankdataRedirect_TransactionProvider(NativeRemoteResult *,NativeRemoteView *,u32 commit,u32 force);
+int BankdataRedirect_RemoteCheckUpdate(MoverStateView *);
+int BankdataRedirect_OriginalRemoteCheckUpdate(MoverStateView *) __attribute__((long_call));
+int BankdataRedirect_NoSaveUpdate(MoverStateView *);
+int BankdataRedirect_OriginalNoSaveUpdate(MoverStateView *) __attribute__((long_call));
+int BankdataRedirect_TransactionRecoveryUpdate(MoverStateView *);
+
+#define MoverRemote_BuildResult ((NativeRemoteResultBuildFn)0x001DC5CCu)
+#define MoverRemote_StageResponse ((NativeRemoteResponseFn)0x0023F588u)
+#define MoverRemote_CommitResponse ((NativeRemoteResponseFn)0x0023F3CCu)
+#define MoverRemote_RollbackResponse ((NativeRemoteResponseFn)0x0023F058u)
+#define MoverRemote_MetadataResponse ((NativeRemoteResponseFn)0x0023EDB8u)
+#define MoverRemote_CompleteJob NativeResponse_Complete
+#define MoverRemote_Allocate ((NativeResponseAllocateFn)0x001DC71Cu)
+
+enum MoverSavePhase {
+    MOVER_SAVE_PHASE_ERROR = 2,
+    MOVER_SAVE_PHASE_COMPLETE = 3
+};
+
+int BankdataRedirect_SaveUpdate(MoverStateView *state);
+int BankdataRedirect_OriginalSaveUpdate(MoverStateView *state) __attribute__((long_call));
+
+/* Recovery-state fields independently confirmed by the native update functions. */
+/* 由原版更新函数独立确认的恢复状态字段。 */
+typedef struct MoverSourceRecoveryView {
+    u8 reserved00[0x34];
+    void *callbackVtable;
+    void *view;
+    void *job;
+    FsTransactionParameters transaction;
+    u8 finished;
+    u8 cancelled;
+} MoverSourceRecoveryView;
+
+typedef struct MoverRemoteCheckView {
+    u8 reserved00[0x3C];
+    NativeRemoteView *remote;
+} MoverRemoteCheckView;
+typedef struct MoverTransactionRecoveryView {
+    u8 reserved00[0x40];
+    NativeRemoteView *remote;
+} MoverTransactionRecoveryView;
+
+int BankdataRedirect_SourceRecoveryUpdate(MoverStateView *);
+int BankdataRedirect_OriginalSourceRecoveryUpdate(MoverStateView *) __attribute__((long_call));
+int BankdataRedirect_OriginalTransactionRecoveryUpdate(MoverStateView *) __attribute__((long_call));
 
 #endif

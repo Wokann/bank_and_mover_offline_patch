@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).absolute().parents[1]
 TOOLS = ROOT / "tools"
 if str(TOOLS) not in sys.path:
     sys.path.insert(0, str(TOOLS))
@@ -25,6 +25,7 @@ from text_resources import (  # noqa: E402
     render_stored_name,
 )
 from parse_bank_file import BOX_LENGTH, decrypt_ek6, fmt_u16  # noqa: E402
+from file_safety import require_plain_file  # noqa: E402
 from viewer_i18n import (  # noqa: E402
     LANGUAGE_OPTIONS,
     STAT_HEADERS,
@@ -82,6 +83,7 @@ def service_time(value: int) -> str:
 
 class BankModel:
     def __init__(self, path: Path):
+        path = require_plain_file(path)
         raw = path.read_bytes()
         if len(raw) == OBJECT_SIZE:
             raw = raw[8:]
@@ -185,7 +187,7 @@ class BankViewer(tk.Tk):
         self.model: BankModel | None = None
         self.language = tk.StringVar(value=initial_language)
         self.language_choice = tk.StringVar(value=dict(LANGUAGE_OPTIONS)[initial_language])
-        self.resource_dir = (ROOT / "resources").resolve()
+        self.resource_dir = ROOT / "resources"
         self.catalog = GameNameCatalog(None, {}, dict(COMMON_PRIVATE_GLYPHS), None)
         self.species_names: dict[int, str] = {}
         self._stored_name_maps: dict[int, dict[int, str]] = {}

@@ -1,0 +1,20 @@
+{
+  "us": {
+    "repository": "https://github.com/TomJinW/pokecrystal_cn",
+    "revision": "f487d44c0d6f75a48a4a4b975ca04bc3914b3f52",
+    "path": "constants/charmap_cn.asm",
+    "url": "https://raw.githubusercontent.com/TomJinW/pokecrystal_cn/f487d44c0d6f75a48a4a4b975ca04bc3914b3f52/constants/charmap_cn.asm",
+    "sha256": "6428e74d9e49ccb174a9c5db4faa1a2d58552d381291f14280a007e6fad4ccb4",
+    "entries": 7615,
+    "table_bytes": 23922
+  },
+  "ko": {
+    "repository": "https://github.com/TomJinW/PKMN_GSCHS",
+    "revision": "c3947b83c6c66a015103e1bc08bbca7f2a862d3b",
+    "path": "05_Font/fontTBL.txt",
+    "url": "https://raw.githubusercontent.com/TomJinW/PKMN_GSCHS/c3947b83c6c66a015103e1bc08bbca7f2a862d3b/05_Font/fontTBL.txt",
+    "sha256": "66815ad3ffdee62846651350d9d6308f5e683b321e533d5ab58a9feb809c9f0d",
+    "entries": 2350,
+    "table_bytes": 5630
+  }
+}

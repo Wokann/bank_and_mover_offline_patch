@@ -75,11 +75,16 @@ def patch_message_file(
     replacements: dict[int, str],
     appended_lines: tuple[tuple[str, int], ...] = (),
     appended_value_lines: tuple[tuple[list[int], int], ...] = (),
+    *, replacement_values: dict[int, list[int]] | None = None,
 ) -> bytes:
     lines = read_message_values(data)
     section_offset = u32(data, 12)
     for index, text in replacements.items():
         lines[index] = (_text_values(text), lines[index][1])
+    for index, values in (replacement_values or {}).items():
+        if index in replacements:
+            raise ValueError(f"duplicate text/raw replacement for line {index}")
+        lines[index] = (list(values), lines[index][1])
     lines.extend((_text_values(text), flags) for text, flags in appended_lines)
     lines.extend((list(values), flags) for values, flags in appended_value_lines)
     section = bytearray(4 + len(lines) * 8)
