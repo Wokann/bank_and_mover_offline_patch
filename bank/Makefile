@@ -1,4 +1,4 @@
-.PHONY: all clean verify FORCE layeredfs exheader check-files
+.PHONY: all clean verify FORCE layeredfs exheader config check-files
 .DEFAULT_GOAL := all
 
 export MSYS2_ARG_CONV_EXCL := *
@@ -20,8 +20,16 @@ RELEASE_ROOT ?= ../release
 RELEASE_TITLE := $(RELEASE_ROOT)/$(TITLE_ID)
 RELEASE_BPS := $(RELEASE_TITLE)/code.bps
 RELEASE_ROMFS := $(RELEASE_TITLE)/romfs
+CONFIG_TEMPLATE := ../configTemplate/templateForCopy/Bank
+RELEASE_CONFIG := $(RELEASE_ROOT)/Bank
 ROMFS_SOURCE ?= rom/romfs
 COMMON := ../common
+PATCH_VERSION ?=
+PATCH_RELEASE ?= 0
+PATCH_REVISION ?= $(shell git rev-parse --short=6 HEAD 2>/dev/null)
+PATCH_REVISION := $(strip $(PATCH_REVISION))
+PATCH_VERSION_ARGS := --patch-version "$(PATCH_VERSION)" --patch-release "$(PATCH_RELEASE)" --patch-revision "$(PATCH_REVISION)"
+VERSION_DATA := $(BUILD)/patch-version.bin
 FONT_NAMES := $(wildcard ../ViewerForBankdata/resources/species_*.json)
 SERVER_SRC := $(COMMON)/src/fakeServer
 FS_SRC := $(COMMON)/src/fs_system
@@ -54,6 +62,18 @@ $(BUILD)/common/fakeServer/fake_server_client.o \
 $(BUILD)/common/fakeServer/user_profiles.o \
 $(BUILD)/common/fakeServer/console_profile.o \
 $(BUILD)/common/fs_system/protected_file.o \
+$(BUILD)/common/fs_system/storage_notice.o \
+$(BUILD)/common/fs_system/diagnostic_log.o \
+$(BUILD)/common/fs_system/fs_helpers.o \
+$(BUILD)/common/fs_system/utf_path.o \
+$(BUILD)/common/fs_system/settings_store.o \
+$(BUILD)/common/fs_system/console_settings.o \
+$(BUILD)/common/fakeServer/numbers.o \
+$(BUILD)/common/fakeServer/gift_files.o \
+$(BUILD)/common/fakeServer/custom_settings.o \
+$(BUILD)/common/fakeServer/source.o \
+$(BUILD)/common/fakeServer/gifts.o \
+$(BUILD)/common/fakeServer/request_broker.o \
 $(BUILD)/common/fakeServer/account_configuration.o \
 $(BUILD)/common/fakeServer/sd_adapter.o \
 $(BUILD)/common/fs_system/console_identity.o \
@@ -71,7 +91,7 @@ $(BUILD)/common/fakeServer/transaction.o: CFLAGS += -mthumb -mtp=soft -fno-jump-
 # Standalone payloads have no Thumb jump-table runtime helper.
 # 独立补丁不链接 Thumb 跳转表运行库，由编译器使用直接分支。
 
-all: check-files $(RELEASE_BPS) exheader layeredfs verify
+all: check-files $(RELEASE_BPS) exheader layeredfs config verify
 
 check-files:
 	"$(PYTHON)" -B ../common/tools/check_file_links.py --recursive --allow-missing .. "$(BUILD)" "$(RELEASE_ROOT)" "$(ROMFS_SOURCE)" "$(BASE)" "$(EXHEADER)"
@@ -91,7 +111,10 @@ $(BUILD)/%.o: $(SRC)/%.c | $(BUILD) check-files
 $(PREPARED_BASE): FORCE $(BASE) $(EXHEADER) $(TOOLS)/prepare_expanded_code.py | $(BUILD) check-files
 	"$(PYTHON)" -B -m tools.prepare_expanded_code prepare --base-code "$(BASE)" --base-exheader "$(EXHEADER)" --output-code "$@" --output-exheader "$(EXPANDED_EXHEADER)" --payload-start 0x003FC000 --payload-size 0x238000
 
-$(PATCHED): FORCE $(SRC)/main.s $(OBJECTS) $(PREPARED_BASE)
+$(VERSION_DATA): FORCE ../VERSION $(COMMON)/tools/patch_version.py | $(BUILD) check-files
+	"$(PYTHON)" -B $(COMMON)/tools/patch_version.py $(PATCH_VERSION_ARGS) --output "$@"
+
+$(PATCHED): FORCE $(SRC)/main.s $(OBJECTS) $(PREPARED_BASE) $(VERSION_DATA)
 	cd "$(SRC)" && "$(ARMIPS)" -erroronwarning -stat -sym "../$(SYMBOLS)" -strequ INPUT_CODE "../$(PREPARED_BASE)" -strequ OUTPUT_CODE "../$(PATCHED)" -strequ BUILD_DIRECTORY "../$(BUILD)" main.s
 
 $(RELEASE_EXHEADER): $(PATCHED) | check-files
@@ -106,12 +129,17 @@ $(RELEASE_BPS): $(PATCHED) | check-files
 	"$(IPS_TOOL)" --create --bps --exact "$(BASE)" "$(PATCHED)" "$@"
 	rm -f "$(RELEASE_TITLE)/code.ips"
 
-layeredfs: $(SRC)/patch_messages.py $(TOOLS)/message_archive.py $(TOOLS)/title_layout.py $(COMMON)/tools/title_resources.py $(COMMON)/tools/title_messages.py $(COMMON)/tools/title_font.py $(FONT_NAMES) | check-files
+layeredfs: $(SRC)/patch_messages.py $(TOOLS)/message_archive.py $(TOOLS)/title_layout.py $(COMMON)/tools/title_resources.py $(COMMON)/tools/title_messages.py $(COMMON)/tools/storage_messages.py $(COMMON)/tools/title_font.py $(COMMON)/tools/patch_version.py ../VERSION $(FONT_NAMES) | check-files
 	rm -rf "$(RELEASE_ROMFS)"
-	"$(PYTHON)" -B -m src.patch_messages --source-romfs "$(ROMFS_SOURCE)" --output-romfs "$(RELEASE_ROMFS)"
+	"$(PYTHON)" -B -m src.patch_messages --source-romfs "$(ROMFS_SOURCE)" --output-romfs "$(RELEASE_ROMFS)" $(PATCH_VERSION_ARGS)
 
 verify: $(PATCHED) $(RELEASE_BPS) exheader layeredfs $(TOOLS)/verify_patch.py
-	"$(PYTHON)" -B -m tools.verify_patch --base "$(BASE)" --patched "$(PATCHED)" --symbols "$(SYMBOLS)" --bps "$(RELEASE_BPS)" --base-exheader "$(EXHEADER)" --exheader "$(RELEASE_EXHEADER)" --source-romfs "$(ROMFS_SOURCE)" --output-romfs "$(RELEASE_ROMFS)"
+	"$(PYTHON)" -B -m tools.verify_patch --base "$(BASE)" --patched "$(PATCHED)" --symbols "$(SYMBOLS)" --bps "$(RELEASE_BPS)" --base-exheader "$(EXHEADER)" --exheader "$(RELEASE_EXHEADER)" --source-romfs "$(ROMFS_SOURCE)" --output-romfs "$(RELEASE_ROMFS)" $(PATCH_VERSION_ARGS)
+
+# Ship the complete empty-user template, never the example account data.
+# 分发完整空用户模板，不采用带演示账号的数据。
+config: | check-files
+	"$(PYTHON)" -B -c "import shutil, sys; shutil.copytree(sys.argv[1], sys.argv[2], dirs_exist_ok=True)" "$(CONFIG_TEMPLATE)" "$(RELEASE_CONFIG)"
 
 clean: | check-files
 	rm -rf "$(RELEASE_TITLE)" "$(BUILD)"

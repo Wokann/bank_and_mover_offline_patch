@@ -10,8 +10,8 @@ enum FsCustomOption {
 const char *FsCustom_Key(uint32_t index);
 const char *FsCustom_Value(uint32_t options,uint32_t index);
 int FsCustom_Parse(uint32_t *options,const char *key,const char *value);
-/* The only automatic edit to player-supplied screening rules. Missing optional
-   input/rule is not created. Turning the permission off never re-enables it.
-   唯一自动修改的筛选字段；缺少文件／规则不新建，关闭许可不重新启用规则。 */
-int FsCustom_ApplyMover(const FsStorageIo *,uint32_t options,uint32_t source);
+struct FsMoverPolicy;
+/* Override only this user's loaded rules; shared files are always read-only.
+   仅覆盖当前用户已载入的内存规则，共享文件始终只读。 */
+void FsCustom_ApplyMover(struct FsMoverPolicy *);
 #endif

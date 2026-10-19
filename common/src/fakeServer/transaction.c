@@ -1,5 +1,7 @@
 #include "fakeServer/transaction.h"
 #include "fs_system/settings_store.h"
+#include "fs_system/diagnostic_log.h"
+#include "fs_system/storage_notice.h"
 
 _Static_assert(sizeof(FsTransactionFingerprint)==0x18,"CRC32 fingerprint ABI");
 _Static_assert(sizeof(FsTransactionRecord)==0x370,"CRC32 transaction journal ABI");
@@ -229,11 +231,13 @@ static int physicalFileIs(const FsTransactionIo *io,uint32_t file,
 static int writeFile(const FsTransactionIo *io,uint32_t file,const FsTransactionRecord *record,
     const void *data,uint32_t size)
 {
+    FsDiag_Checkpoint("transaction.file.begin",0,file,size,0);
     uint32_t handle=0;
     int ok=FsTransaction_OpenWrite(io,file,record,&handle);
     if (ok) ok=io->setSize(handle,size);
     if (ok) ok=io->write(handle,0,data,size);
     if (handle && !io->close(handle)) ok=0;
+    FsDiag_Record("transaction.file.end",ok?0:-1,file,size,0);
     if (!ok) FsTransaction_ViewClear(io);
     return ok;
 }
@@ -424,6 +428,7 @@ static int orphanAdoptionReady(const FsTransactionIo *io,const FsTransactionReco
 
 static int persist(const FsTransactionIo *io,FsTransactionRecord *record,uint32_t phase)
 {
+    FsDiag_Checkpoint("transaction.persist.begin",0,record->operation,phase,record->sequence);
     FsTransactionRecord actual;
     if (record->sequence==0xffffffffu) return 0;
     if (!record->sequence) {
@@ -1117,6 +1122,18 @@ static int beginDescriptor(const FsTransactionIo *io,FsTransactionRecord *record
     return 0;
 }
 
+static int availableRoom(const FsTransactionIo *io,uint64_t required)
+{
+    uint64_t available=0;
+    if (!io->freeBytes || !io->freeBytes(&available)) {
+        FsStorageNotice_Mark(FS_STORAGE_ISSUE_CAPACITY);return 0;
+    }
+    if (available<required) {
+        FsStorageNotice_Mark(FS_STORAGE_ISSUE_FULL);return 0;
+    }
+    return 1;
+}
+
 static int room(const FsTransactionIo *io,const FsTransactionRecord *record,uint64_t extra)
 {
     uint64_t available=0;
@@ -1126,7 +1143,13 @@ static int room(const FsTransactionIo *io,const FsTransactionRecord *record,uint
     if (record->sourceKind==FS_TRANSACTION_NDS_FILE) extra+=record->sourceBefore.size*2;
     if (record->participants&FS_TRANSACTION_HAS_TURTLE) extra+=record->turtleBefore.size;
     extra+=sizeof(*record);
-    return io->freeBytes && io->freeBytes(&available) && available>=extra;
+    int queried=io->freeBytes && io->freeBytes(&available);
+    FsDiag_Record("space.required",0,(uint32_t)extra,(uint32_t)(extra>>32),record->operation);
+    FsDiag_Record("space.available",queried?0:-1,(uint32_t)available,(uint32_t)(available>>32),
+        available>=extra);
+    if (!queried) FsStorageNotice_Mark(FS_STORAGE_ISSUE_CAPACITY);
+    else if (available<extra) FsStorageNotice_Mark(FS_STORAGE_ISSUE_FULL);
+    return queried && available>=extra;
 }
 
 static int prepare(const FsTransactionIo *io,FsTransactionRecord *record,const void *bank,uint32_t size,
@@ -1367,15 +1390,13 @@ int FsTransaction_SourceRestored(const FsTransactionIo *io,uint32_t owner)
 int FsTransaction_BeginCleanup(const FsTransactionIo *io,uint32_t owner)
 {
     FsTransactionRecord record;
-    uint64_t available=0;
     if (FsTransaction_ReadRecord(io,&record)!=FS_TRANSACTION_PRESENT || record.owner!=owner ||
         record.operation!=FS_TRANSACTION_SOURCE_SAVE ||
         (record.phase!=FS_TRANSACTION_PUBLISHED && record.phase!=FS_TRANSACTION_CLEANUP_PENDING) ||
         !bankIs(io,&record,1)) return 0;
     if (record.sourceKind==FS_TRANSACTION_NDS_FILE) {
         if (!FsTransaction_Matches(io,FS_TRANSACTION_SOURCE,&record,&record.sourceAfter) ||
-            !io->freeBytes || !io->freeBytes(&available) ||
-            available<record.sourceAfter.size+sizeof(record) ||
+            !availableRoom(io,record.sourceAfter.size+sizeof(record)) ||
             !persist(io,&record,FS_TRANSACTION_CLEANUP_PENDING) ||
             (!io->deferSourceImage &&
              !FsTransaction_Copy(io,FS_TRANSACTION_SOURCE,FS_TRANSACTION_SOURCE_TEMP,

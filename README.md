@@ -76,7 +76,7 @@ See [Bank usage](bank/README.md) and [Mover usage](mover/README.md) for recovery
 
 - [SD layout and file protection](configTemplate/templateForCopy/Bank/readme_fakeServer.md)
 - [User selection and migration](configTemplate/templateForCopy/Bank/client/readme_client.md)
-- [Server policy and optional conversion](configTemplate/templateForCopy/Bank/fakeServers/shared/readme_server.md)
+- [Server policy and diagnostic logging](configTemplate/templateForCopy/Bank/fakeServers/shared/readme_server.md)
 - [Personal locale, currency and passes](configTemplate/templateForCopy/Bank/fakeServers/users/readme_user.md)
 - [Gifts](configTemplate/templateForCopy/Bank/fakeServers/shared/gifts/readme_gift.md)
 - [Pokemon screening and rule sources](configTemplate/templateForCopy/Bank/fakeServers/shared/mover/readme_checkPokemon.md)
@@ -95,6 +95,17 @@ See [Bank usage](bank/README.md) and [Mover usage](mover/README.md) for recovery
 ## Building from source
 
 Build Bank and Mover separately with GNU Make, Python 3, devkitARM, armips and Floating IPS. Original decrypted/decompressed code, ExHeader and RomFS inputs must come from your own titles and are not distributed here.
+
+The patch label appears in white at the upper screen's top left; the official version stays in its original position. The root `VERSION` file defines the base patch version. Ordinary `make` always produces a development label such as `Offline Patch v0.9.1-abcdef`, using the current Git short revision; a tag does not select release mode. Uncommitted changes on the same commit retain the same Git suffix.
+
+For an official patch release, explicitly update and commit `VERSION`, then build both titles:
+
+```sh
+make -C bank PATCH_RELEASE=1
+make -C mover PATCH_RELEASE=1
+```
+
+Only explicit `PATCH_RELEASE=1` omits the Git suffix, displaying `Offline Patch v<version>`. `PATCH_VERSION` overrides the base version for one build. Source copies without Git metadata require an explicit `PATCH_REVISION=<short revision>` for development builds. Generated identifiers are not written back to source and do not change SD configuration or saves.
 
 - [Bank build instructions and implementation](bank/README.md#independent-build)
 - [Mover build instructions and implementation](mover/README.md#independent-build)

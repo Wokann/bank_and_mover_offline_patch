@@ -221,6 +221,8 @@
     bl CombinePatch_SelectDisconnectMessage
 .org MoverDisconnectState_Initialize + 0x90
     bl CombinePatch_SelectClosingMessage
+.org MoverDisconnectState_Update
+    b CombinePatch_StorageNoticeDisconnectUpdate
 
 // Shared source discovery keeps the stock list and save-validation state, but
 // supplies SD-backed Gen 5 candidates at the three native card I/O edges in
@@ -686,6 +688,16 @@ CombinePatch_SelectSaveMessage:
     movne r1,#9
     bx lr
 
+CombinePatch_StorageNoticeDisconnectUpdate:
+    push {r0,lr}
+    bl MoverStorageNotice_Poll
+    cmp r0,#0
+    pop {r0,lr}
+    moveq r0,#0
+    bxeq lr
+    push {r4,lr}
+    b MoverDisconnectState_Update + 4
+
 CombinePatch_SelectDisconnectMessage:
     ldr r12,=CombinePatch_ModeStorage
     ldrb r12,[r12]
@@ -924,6 +936,9 @@ CombinePatch_NdsWriteSaveEntry:
 // 的文件操作采用 Thumb。
 FsHelpers_PayloadBegin:
     .importobj BUILD_DIRECTORY + "/common/fs_system/fs_helpers.o"
+    .importobj BUILD_DIRECTORY + "/common/fs_system/diagnostic_log.o"
+    .importobj BUILD_DIRECTORY + "/common/fs_system/storage_notice.o"
+    .importobj BUILD_DIRECTORY + "/storage_notice.o"
     .importobj BUILD_DIRECTORY + "/common/fs_system/memory.o"
 FsHelpers_PayloadEnd:
 
@@ -1023,6 +1038,11 @@ CombinePatch_LanguageReturnExit:
     ldr r12,=LanguageSettings_PollSynchronization + 1
     blx r12
     cmp r0,#0
+    beq CombinePatch_LanguageReturnWait
+    mov r0,r4
+    bl MoverStorageNotice_Poll
+    cmp r0,#0
+CombinePatch_LanguageReturnWait:
     mov r0,r4
     pop {r4,lr}
     moveq r0,#0
@@ -1157,7 +1177,7 @@ CombinePatch_OfflinePayloadUsedEnd:
 .org OfflinePatch_VersionStorageStart
 .area OfflinePatch_VersionStorageSize, 0
 OfflinePatch_VersionIdentifier:
-    .asciiz "offline_patch_v0.9.1"
+    .incbin BUILD_DIRECTORY + "/patch-version.bin"
 .endarea
 
 // Dedicated service data, outside code and all original runtime objects.

@@ -2,6 +2,7 @@
 #include "fs_system/protected_file.h"
 #include "fakeServer/numbers.h"
 #include "fakeServer/conf_text.h"
+#include "fs_system/diagnostic_log.h"
 #include <string.h>
 
 enum { DOC_SHARED,DOC_USER };
@@ -30,6 +31,7 @@ static void defaults(FsConfiguration *config)
     config->ticket=(FsTicketPolicy){0};config->shop=(FsShopPolicy){0};
     memset(&config->ticketSettings,0,sizeof(config->ticketSettings));
     config->mover.customOptions=0;
+    config->enableLog=0;
     for(uint32_t i=0;i<FS_TICKET_SETTING_FIELDS;i++)if(FsConfiguration_TicketRequired(i))
         (void)FsConfiguration_ParseTicket(config,i,FsConfiguration_TicketValue(i));
 }
@@ -48,12 +50,17 @@ static void parseDocument(FsConfiguration *config,uint32_t doc,char *text,uint32
             /* Read older balance sections without emitting them on publication. */
             section=!strcmp(line,"[ticket]")?1:doc==DOC_USER && !strcmp(line,"[wallet]")?2:
                 doc==DOC_USER && !strcmp(line,"[console]")?3:
-                doc==DOC_SHARED && !strcmp(line,"[custom]")?4:0;
+                doc==DOC_USER && !strcmp(line,"[custom]")?4:
+                doc==DOC_SHARED && !strcmp(line,"[debug]")?5:0;
             continue;
         }
         if(!section)continue;
         char *value=strchr(line,'=');if(!value)continue;*value++=0;line=trim(line);value=trim(value);
         FsConf_Value(value);
+        if(section==5) {
+            if(!strcmp(line,"enablelog"))(void)FsConf_Bool(value,&config->enableLog);
+            continue;
+        }
         if(section==4){(void)FsCustom_Parse(&config->mover.customOptions,line,value);continue;}
         if(section==3) {
             if(!strcmp(line,"autoRegion") && (!strcmp(value,"true") || !strcmp(value,"false")))
@@ -156,13 +163,18 @@ static int render(const FsStorageIo *io,const FsConfiguration *config,uint32_t d
             strcpy(out,"balance.");out+=8;strcpy(out,FsConfiguration_TicketKey(field)+5);out+=strlen(out);*out++='=';
             out=number(out,*FsConfiguration_ShopValue((FsConfiguration *)config,marketOf(field),2));*out++=';';*out++='\n';
         }
-    } else {
+    }
+    if(doc==DOC_USER) {
         strcpy(out,"\n[custom]\n");out+=strlen(out);
         for(uint32_t i=0;i<FS_CUSTOM_COUNT;i++) {
             strcpy(out,FsCustom_Key(i));out+=strlen(out);*out++='=';
             strcpy(out,FsCustom_Value(config->mover.customOptions,i));out+=strlen(out);
             *out++=';';*out++='\n';
         }
+    }
+    if(doc==DOC_SHARED) {
+        strcpy(out,config->enableLog?"\n[debug]\nenablelog=true;\n":"\n[debug]\nenablelog=false;\n");
+        out+=strlen(out);
     }
     *out=0;*data=text;*size=(uint32_t)(out-text);return FS_OK;
 }
@@ -171,6 +183,7 @@ static int saveDocuments(const FsStorageIo *io,FsConfiguration *config,uint32_t 
     for(uint32_t doc=0;doc<2;doc++)if(mask&(1u<<doc)) {
         char *text=0;uint32_t size=0;int result=render(io,config,doc,&text,&size);
         if(result==FS_OK)result=FsText_Publish(io,paths[doc],temps[doc],text,size);
+        FsDiag_Record("configuration.publish",result,doc,size,0);
         if(text)io->release(text);
         if(result!=FS_OK)return result;
     }
@@ -217,11 +230,22 @@ int FsAccountConfiguration_Edit(const FsStorageIo *io,FsConfiguration *config,co
     if(io->capabilities&FS_STORAGE_READ_ONLY)return error->result=FS_MISSING;
     for(uint32_t i=0;i<count;i++)
         if((edits[i].action!=FS_CONFIG_SET && edits[i].action!=FS_CONFIG_REMOVE_KEY) ||
-            !edits[i].section || (strcmp(edits[i].section,"ticket") && strcmp(edits[i].section,"console")) || !edits[i].key ||
+            !edits[i].section || (strcmp(edits[i].section,"ticket") && strcmp(edits[i].section,"console") &&
+                strcmp(edits[i].section,"custom") && strcmp(edits[i].section,"debug")) || !edits[i].key ||
             (edits[i].action==FS_CONFIG_SET && !edits[i].value))return FS_INVALID;
     int result=FsAccountConfiguration_Load(io,config,error);if(result!=FS_OK)return result;
     uint32_t mask=0;
     for(uint32_t i=0;i<count;i++) {
+        if(!strcmp(edits[i].section,"debug")) {
+            const char *value=edits[i].action==FS_CONFIG_REMOVE_KEY?"false":edits[i].value;
+            if(strcmp(edits[i].key,"enablelog") || !FsConf_Bool(value,&config->enableLog))return FS_INVALID;
+            mask|=1u<<DOC_SHARED;continue;
+        }
+        if(!strcmp(edits[i].section,"custom")) {
+            const char *value=edits[i].action==FS_CONFIG_REMOVE_KEY?"false":edits[i].value;
+            if(!FsCustom_Parse(&config->mover.customOptions,edits[i].key,value))return FS_INVALID;
+            mask|=1u<<DOC_USER;continue;
+        }
         if(!strcmp(edits[i].section,"console")) {
             int valid=0;
             const char *value=edits[i].value;

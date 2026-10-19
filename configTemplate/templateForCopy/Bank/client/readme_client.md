@@ -4,6 +4,17 @@
 
 Use sd:/3ds/Bank/client/client.conf. Missing configuration is generated; valid manually supplied values are used. The example below shows first-use defaults; prefilled registries are read as configured.
 
+`bank.log` and `mover.log` in the `log` subdirectory are recorded only when shared
+`server.conf` has `[debug] enablelog=true;`; the default is off. See the
+[logging switch](../fakeServers/shared/readme_server.md#diagnostic-logging).
+Disabled logging records nothing and leaves existing files untouched.
+An enabled startup overwrites that title's old log without keeping a backup;
+user changes and returns to the title screen keep the current log. Logs exclude
+account names, transaction tokens and file bodies. Log failure does not block normal operations.
+Each log stops growing at 1 MiB and is overwritten on the next launch. Ordinary
+entries are batched, with explicit flushes at request boundaries; abrupt termination
+can lose the last unflushed entries.
+
 ```ini
 [global]
 activeUser=auto;
@@ -64,6 +75,9 @@ sd:/3ds/Bank/
 │   ├── client.conf
 │   ├── client.bak
 │   ├── client.tmp
+│   ├── log/
+│   │   ├── bank.log
+│   │   └── mover.log
 │   ├── readme_client.md
 │   ├── readme_client.zh-cn.md
 │   └── users/
@@ -105,13 +119,9 @@ sd:/3ds/Bank/
     │       ├── LICENSE.badword.txt
     │       ├── nds/
     │       │   ├── checkPokemon.conf
-    │       │   ├── checkPokemon.bak
-    │       │   ├── checkPokemon.tmp
     │       │   └── checkName.conf
     │       └── vc/
     │           ├── checkPokemon.conf
-    │           ├── checkPokemon.bak
-    │           ├── checkPokemon.tmp
     │           └── checkName.conf
     └── users/
         ├── readme_user.md

@@ -19,8 +19,8 @@ The local service is not an HTTP listener, does not establish an official accoun
 The empty template is [configTemplate/templateForCopy/Bank](../configTemplate/templateForCopy/Bank); the complete example is [configTemplate/examples/Bank](../configTemplate/examples/Bank). The game does not read Markdown guides.
 
 - [client.conf](../configTemplate/templateForCopy/Bank/client/readme_client.md): users, selection and migration.
-- [server.conf](../configTemplate/templateForCopy/Bank/fakeServers/shared/readme_server.md): shared free/trial windows, prices, recharge and custom conversion.
-- [user.conf](../configTemplate/templateForCopy/Bank/fakeServers/users/readme_user.md): personal locale, currency, passes, trials and balances.
+- [server.conf](../configTemplate/templateForCopy/Bank/fakeServers/shared/readme_server.md): shared free/trial windows, prices, recharge and optional diagnostic logging.
+- [user.conf](../configTemplate/templateForCopy/Bank/fakeServers/users/readme_user.md): personal locale, currency, passes, trials, balances and custom conversion switches.
 - [gift.conf](../configTemplate/templateForCopy/Bank/fakeServers/shared/gifts/readme_gift.md): switches, dates and gift assets.
 - [checkPokemon.conf](../configTemplate/templateForCopy/Bank/fakeServers/shared/mover/readme_checkPokemon.md): NDS/VC Pokemon screening.
 - [checkName.conf](../configTemplate/templateForCopy/Bank/fakeServers/shared/mover/readme_checkName.md): NDS/VC name matching and exact exceptions.

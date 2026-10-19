@@ -44,7 +44,7 @@ ExactOT
 
 ## 汉字与汉化支持
 
-汉字整只拒绝属于 [checkPokemon](readme_checkPokemon.zh-cn.md#unicodechinese-与默认汉字拒绝)，汉化许可和 VC 转码表见共享 [server.conf](../readme_server.zh-cn.md#自定义选项)。
+汉字整只拒绝属于 [checkPokemon](readme_checkPokemon.zh-cn.md#unicodechinese-与默认汉字拒绝)，账户汉化许可和 VC 转码表见 [user.conf](../../users/readme_user.zh-cn.md#自定义选项)。
 本文件只处理 NGWord 与姓名白名单；没有 `[rule]` 自定义开关段。
 
 ## NGWord 语法

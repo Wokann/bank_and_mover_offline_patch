@@ -54,6 +54,63 @@ Trials also require the stock client's first-bank-creation state, enabled trial,
 
 Annual passes normally add 365 days, extending current validity or starting a new interval when expired; the original flow queries validity again. Free activities, paid validity and trial records coexist. Free access takes precedence while personal pass records remain stored.
 
+## Custom options
+
+Place these project-specific options at the end of the selected account's `user.conf`. Both default off when created or missing, affect only that account, and are not read from shared `server.conf`:
+
+```ini
+[custom]
+enableMoverv1.2=false;
+allowFanTranslationCHN=false;
+```
+
+### enableMoverv1.2
+
+Offline RGBY only: retain constructor-generated random gender using the species ratio,
+rather than overwriting it from Attack DV. Shiny requires Attack DV 10, Defense DV in
+2/3/6/7/10/11/14/15, and Speed/Special DV both 10. The old Japanese/Western character
+maps also apply, including Western 0xE8 period becoming a hyphen, 0xE0 apostrophe becoming
+a space, and unsupported digits/diacritics. Fixed-gender and genderless species remain native.
+
+Off preserves v1.5. Gen2, Gen5 and online paths never enter these wrappers. This does not
+roll back server screening, Bank format, transactions, locale or the whole application,
+and cannot recreate a historical server. See the [conversion reference](https://bulbapedia.bulbagarden.net/wiki/Pok%C3%A9_Transporter#From_Generation_I_and_II), a community source rather than a complete official algorithm specification.
+
+### allowFanTranslationCHN
+
+For this account, the loaded `BanUnicodeChinese` rule is always disabled in RAM, whether the shared file says `enabled=0;` or `enabled=1;`. Shared `checkPokemon.conf` is never changed; no `.bak`/`.tmp`, missing rule or missing file is created. Other accounts retain their own settings and shared-rule behavior. Leave the shared rule at `enabled=1;` to control this exception per account; a shared `enabled=0;` disables that rule for every account.
+
+- NDS already uses UTF-16: retain Chinese nickname/OT, including unnicknamed Han names
+  otherwise replaced by a default species name. The nickname flag itself is not fabricated.
+- VC uses the English Crystal table for raw alphabet 1, Korean Gold/Silver for alphabet 6.
+  Source means string encoding, not UI/console/wrapper region. Korean-based international
+  fan patches still use the Korean table. Ordinary Korean bytes can conflict: leave off
+  for untranslated Korean saves.
+- Only generated candidate names change, not source saves. Unknown/truncated pairs fall
+  back for the whole name, never publishing a partial conversion.
+- NGWord, other screening, native checksums/encryption, callbacks and transactions remain.
+  This permission is independent of checkName being enabled/present. If both custom
+  options are on, the explicit fan table restores Chinese after legacy conversion.
+  A requested nickname/OT correction takes priority: restoration never resurrects that
+  field's rejected name. To retain Chinese without name screening, set enableCheckName=false;
+  in the selected source's checkName.conf [global]. Pokemon screening remains independent.
+
+Conversion options accompany the background Bank download; later policy requests read
+current rule/name files. Mid-operation edits do not retroactively transcode candidates;
+return to the title and reconnect after changing conversion options.
+
+Each table has one project-specific source, not an official encoding specification;
+other hacks, projects and revised tables are not covered:
+
+- [TomJinW/pokecrystal_cn](https://github.com/TomJinW/pokecrystal_cn/tree/f487d44c0d6f75a48a4a4b975ca04bc3914b3f52):
+  pinned [charmap_cn.asm](https://github.com/TomJinW/pokecrystal_cn/blob/f487d44c0d6f75a48a4a4b975ca04bc3914b3f52/constants/charmap_cn.asm), 7615 two-byte mappings.
+- [TomJinW/PKMN_GSCHS](https://github.com/TomJinW/PKMN_GSCHS/tree/c3947b83c6c66a015103e1bc08bbca7f2a862d3b):
+  pinned final [fontTBL.txt](https://github.com/TomJinW/PKMN_GSCHS/blob/c3947b83c6c66a015103e1bc08bbca7f2a862d3b/05_Font/fontTBL.txt), 2350 mappings.
+
+No ROMs, upstream patches or font images are distributed. The NGWord
+GPL text does not automatically license these separate references under the same terms.
+
+
 ## Console locale and currency
 
 The selected user's `[console]` is private. `autoRegion=false` is the default: missing fields are initially captured from application-visible CFG as fixed numbers. Existing valid values do not refresh merely because files move to another console or Luma locale.

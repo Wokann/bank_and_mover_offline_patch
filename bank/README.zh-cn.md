@@ -139,6 +139,8 @@ make -C bank
 make -C bank ARMIPS=/path/to/armips IPS_TOOL=/path/to/flips
 ```
 
+默认显示根目录 `VERSION` 加 Git 提交简写；正式构建须显式使用 `PATCH_RELEASE=1`。补丁版本显示在上屏左上角，官方版本号保持原样和原位置。版本更新及无 Git 源码副本的参数见[统一构建说明](../README.zh-cn.md#从源码构建)。
+
 输出 `release/00040000000C9B00/`。构建自动执行 BPS 还原、原址／模式分派、ExHeader
 和十种语言的静态检查。通常无需先运行 `clean`；它会删除本项目 `build` 和发行输出，
 不要将存档或唯一数据保存在生成目录中。

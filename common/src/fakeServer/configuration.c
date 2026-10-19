@@ -20,15 +20,16 @@ typedef struct ConfigParser {
     uint32_t ticketSeen[2],legacySeen[2],legacyMode,allowRepair,needsRepair,ticketHeader;
     uint32_t inputSize,lastTicketOrder;
     int fromBackup;
-    uint32_t globalSeen,switchSeen,disabled,shortCircuit,wordTag,customSeen;
+    uint32_t globalSeen,switchSeen,disabled,shortCircuit,wordTag,debugSeen;
     FsMoverWordIndex wordIndex;
     uint32_t wordIndexReady;
     char *conditionText;
     uint32_t conditionUsed,conditionCapacity,conditionOpen;
+    uint32_t groupInvalid,groupWindowFirst;
     uint8_t inputHash[FS_TRANSACTION_HASH_SIZE];
 } ConfigParser;
 
-enum { CONFIG_GLOBAL=0xfffffffeu, CONFIG_CUSTOM=0xfffffffdu };
+enum { CONFIG_GLOBAL=0xfffffffeu,CONFIG_DEBUG=0xfffffffdu };
 
 const char *FsConfiguration_Path(uint32_t section,int temporary)
 {
@@ -36,8 +37,7 @@ const char *FsConfiguration_Path(uint32_t section,int temporary)
         "mover/nds/checkName.conf","mover/vc/checkPokemon.conf","mover/vc/checkName.conf"};
     if (section<FS_CONFIG_TICKET || section>FS_CONFIG_WORDS_VC) return 0;
     if(!temporary)return paths[section-1];
-    return section==FS_CONFIG_TICKET?"server.tmp":section==FS_CONFIG_MOVER_NDS?
-        "mover/nds/checkPokemon.tmp":section==FS_CONFIG_MOVER_VC?"mover/vc/checkPokemon.tmp":0;
+    return section==FS_CONFIG_TICKET?"server.tmp":0;
 }
 
 static uint32_t configKind(uint32_t target)
@@ -92,7 +92,8 @@ static int relativePath(const char *value)
                 (size==2 && part[0]=='.' && part[1]=='.')) return 0;
             if (!byte) return 1;
             part=value+1;
-        } else if (byte<32 || byte>126 || byte==':' || byte=='\\') return 0;
+        } else if (byte<32 || byte>126 || byte==':' || byte=='\\' || byte=='*' ||
+            byte=='?' || byte=='"' || byte=='<' || byte=='>' || byte=='|') return 0;
         value++;
     }
 }
@@ -132,12 +133,54 @@ static int reserveRule(ConfigParser *parser)
     return FS_OK;
 }
 
+static void clearCondition(ConfigParser *parser)
+{
+    if (parser->conditionText) parser->storage->release(parser->conditionText);
+    parser->conditionText=0;parser->conditionUsed=0;
+    parser->conditionCapacity=0;parser->conditionOpen=0;
+}
+
+static void disableRule(ConfigParser *parser,FsMoverRule *rule)
+{
+    rule->enabled=0;
+    if (rule->condition) parser->storage->release(rule->condition);
+    rule->condition=0;
+}
+
+static int validGift(FsConfiguration *config,uint32_t index);
+
+/* A broken field invalidates its entire section, never just that condition.
+   Keep its name quarantined so later fields cannot reactivate the section. */
+/* 坏字段使整组失效；保留段名隔离状态，后续 enabled=1 不能重新启用。 */
+static void invalidateGroup(ConfigParser *parser)
+{
+    parser->groupInvalid=1;
+    clearCondition(parser);
+    if (parser->rule) disableRule(parser,parser->rule);
+    if (parser->gift) {
+        parser->gift->enabled=0;
+        parser->configuration->giftWindowCount=parser->groupWindowFirst;
+    }
+}
+
+static void finishGroup(ConfigParser *parser)
+{
+    if (parser->rule && (parser->groupInvalid || parser->conditionOpen ||
+        parser->rule->defined!=7 || !parser->rule->condition)) invalidateGroup(parser);
+    if (parser->gift && (parser->groupInvalid || (parser->seen&7u)!=7u ||
+        !(parser->seen&(32u|128u)) || !validGift(parser->configuration,
+            (uint32_t)(parser->gift-parser->configuration->gifts)))) invalidateGroup(parser);
+    clearCondition(parser);
+    parser->gift=0;parser->rule=0;parser->groupInvalid=0;
+    parser->section=parser->globalSeen?0xffffffffu:0;
+}
+
 static int selectSection(ConfigParser *parser,char *name)
 {
     parser->gift=0;
     parser->rule=0;
-    if(parser->allowedSection==FS_CONFIG_TICKET && equal(name,"custom")) {
-        parser->section=CONFIG_CUSTOM;return FS_OK;
+    if(parser->allowedSection==FS_CONFIG_TICKET && equal(name,"debug")) {
+        parser->section=CONFIG_DEBUG;return FS_OK;
     }
     if (parser->allowedSection==FS_CONFIG_TICKET && equal(name,"ticket")) {
         if (parser->ticketHeader) {
@@ -148,7 +191,9 @@ static int selectSection(ConfigParser *parser,char *name)
     }
     if (parser->allowedSection!=FS_CONFIG_TICKET) {
         if (equal(name,"global")) {
-            if (parser->globalSeen || parser->section) return FS_INVALID;
+            if (parser->globalSeen || parser->section) {
+                parser->section=CONFIG_GLOBAL;return FS_INVALID;
+            }
             parser->globalSeen=1; parser->section=CONFIG_GLOBAL; return FS_OK;
         }
         if (!parser->switchSeen) return FS_INVALID;
@@ -167,7 +212,9 @@ static int selectSection(ConfigParser *parser,char *name)
             if (!((*p>='a' && *p<='z') || (*p>='A' && *p<='Z') || (*p>='0' && *p<='9') || *p=='_')) return FS_INVALID;
         FsMoverPolicy *policy=&parser->configuration->mover;
         for (uint32_t i=0;i<policy->ruleCount;i++)
-            if (policy->rules[i].sources==parser->source && equal(name,policy->rules[i].name)) return FS_INVALID;
+            if (policy->rules[i].sources==parser->source && equal(name,policy->rules[i].name)) {
+                disableRule(parser,policy->rules+i);return FS_INVALID;
+            }
         int reserved=reserveRule(parser);
         if (reserved!=FS_OK) return reserved;
         FsMoverRule *rule=policy->rules+policy->ruleCount;
@@ -187,13 +234,16 @@ static int selectSection(ConfigParser *parser,char *name)
     for (const char *p=name;*p;p++)
         if (!((*p>='a' && *p<='z') || (*p>='0' && *p<='9') || *p=='_')) return FS_INVALID;
     FsConfiguration *config=parser->configuration;
-    if (config->giftCount>=FS_GIFT_LIMIT) return FS_LIMIT;
     for (uint32_t i=0;i<config->giftCount;i++)
-        if (equal(name,config->gifts[i].name)) return FS_INVALID;
+        if (equal(name,config->gifts[i].name)) {
+            config->gifts[i].enabled=0;return FS_INVALID;
+        }
+    if (config->giftCount>=FS_GIFT_LIMIT) return FS_LIMIT;
     FsGift *gift=&config->gifts[config->giftCount];
     if (!copyText(gift->name,sizeof(gift->name),name)) return FS_LIMIT;
     config->giftCount++;
     parser->gift=gift; parser->section=FS_CONFIG_GIFT; parser->seen=0;
+    parser->groupWindowFirst=config->giftWindowCount;
     return FS_OK;
 }
 
@@ -447,17 +497,16 @@ static int ticketEntry(ConfigParser *parser,const char *key,const char *value)
 static int entry(ConfigParser *parser,char *key,char *value)
 {
     uint32_t bit=0,*seen=0,valid=0;
+    if(parser->section==CONFIG_DEBUG) {
+        if(!equal(key,"enablelog") || !FsConf_Bool(value,&parser->configuration->enableLog))return FS_INVALID;
+        parser->debugSeen=1;return FS_OK;
+    }
     if (parser->section==CONFIG_GLOBAL) {
         const char *name=parser->allowedSection==FS_CONFIG_GIFT?"enableGift":
             parser->allowedSection==FS_CONFIG_MOVER?"enableCheckPokemon":"enableCheckName";
         if (!equal(key,name) || parser->switchSeen ||
             (!equal(value,"true") && !equal(value,"false"))) return FS_INVALID;
         parser->switchSeen=1; parser->disabled=equal(value,"false");
-        return FS_OK;
-    }
-    if(parser->section==CONFIG_CUSTOM) {
-        if(!FsCustom_Parse(&parser->configuration->mover.customOptions,key,value))return FS_INVALID;
-        for(uint32_t i=0;i<FS_CUSTOM_COUNT;i++)if(equal(key,FsCustom_Key(i)))parser->customSeen|=1u<<i;
         return FS_OK;
     }
     if (parser->section==FS_CONFIG_TICKET) return ticketEntry(parser,key,value);
@@ -575,7 +624,7 @@ static int line(ConfigParser *parser,char *text)
 
 /* # comments end at the physical newline; quoted OT text is data. */
 /* # 注释仅到本物理行末；OT 引号内的 # 不当作注释。 */
-static int moverLine(ConfigParser *parser,char *text)
+static int stripGroupComment(char *text)
 {
     char quote=0;
     for (char *p=text;*p;p++) {
@@ -583,8 +632,13 @@ static int moverLine(ConfigParser *parser,char *text)
             if (*p=='\\' && p[1]) p++;
             else if (*p==quote) quote=0;
         } else if (*p=='"') quote=*p;
-        else if (*p=='#') { *p=0;break; }
+        else if (*p=='#') { *p=0;return 1; }
     }
+    return 0;
+}
+
+static int moverLine(ConfigParser *parser,char *text)
+{
     text=trim(text);
     if (!*text) return FS_OK;
     if (parser->conditionOpen) return conditionLine(parser,text);
@@ -606,6 +660,31 @@ static int moverLine(ConfigParser *parser,char *text)
     return line(parser,text);
 }
 
+static int groupLine(ConfigParser *parser,char *text,int damaged)
+{
+    if (stripGroupComment(text)) damaged=0;
+    text=trim(text);
+    if (!*text && !damaged) return FS_OK;
+    if (*text=='[') {
+        /* A new header also terminates an unfinished multiline condition. */
+        /* 新段头也会结束上一组未闭合的多行条件，并使上一组失效。 */
+        finishGroup(parser);
+        int result=damaged?damaged:line(parser,text);
+        if (result==FS_OK || result==FS_NO_MEMORY || result==FS_IO_ERROR) return result;
+        if (!parser->switchSeen || parser->section==CONFIG_GLOBAL) return result;
+        invalidateGroup(parser);return FS_OK;
+    }
+    if (parser->groupInvalid) return FS_OK;
+    if (!parser->gift && !parser->rule && parser->section!=CONFIG_GLOBAL)
+        return parser->switchSeen?FS_OK:FS_INVALID;
+    int result=damaged?damaged:moverLine(parser,text);
+    if ((result==FS_INVALID || result==FS_UNSUPPORTED || result==FS_LIMIT) &&
+        parser->section!=CONFIG_GLOBAL && parser->switchSeen) {
+        invalidateGroup(parser);return FS_OK;
+    }
+    return result;
+}
+
 static int configurationLine(ConfigParser *parser,char *text,int damaged)
 {
     if (parser->allowedSection==FS_CONFIG_WORDS) {
@@ -623,8 +702,8 @@ static int configurationLine(ConfigParser *parser,char *text,int damaged)
         }
         return result;
     }
-    if (parser->allowedSection==FS_CONFIG_MOVER)
-        return damaged?damaged:moverLine(parser,text);
+    if (parser->allowedSection==FS_CONFIG_MOVER || parser->allowedSection==FS_CONFIG_GIFT)
+        return groupLine(parser,text,damaged);
     int repair=parser->allowRepair && parser->allowedSection==FS_CONFIG_TICKET;
     if (damaged) {
         if (!repair) return damaged;
@@ -715,6 +794,8 @@ static int readConfigurationBody(const FsStorageIo *io,ConfigParser *parser,
             skipped!=parser->configuration->mover.wordSkipped[parser->source==FS_MOVER_VC])
             parser->configuration->mover.wordSkippedLine[parser->source==FS_MOVER_VC]=lineNumber;
     }
+    if (parser->allowedSection==FS_CONFIG_MOVER || parser->allowedSection==FS_CONFIG_GIFT)
+        finishGroup(parser);
     if (result==FS_OK && parser->conditionOpen) result=FS_INVALID;
     if (parser->conditionText) memory.release(parser->conditionText);
     parser->conditionText=0;parser->conditionUsed=0;parser->conditionCapacity=0;parser->conditionOpen=0;
@@ -766,8 +847,8 @@ static int ticketComplete(const ConfigParser *parser)
 }
 static int completeTicket(ConfigParser *parser)
 {
-    if(parser->customSeen!=((1u<<FS_CUSTOM_COUNT)-1u))parser->needsRepair=1;
     FsConfiguration *config=parser->configuration;
+    if(!parser->debugSeen)parser->needsRepair=1;
     if (legacySeen(parser,0)) {
         uint32_t mode=config->ticket.freeMode;
         if (!ticketSeen(parser,FS_TICKET_FIELD_FREE_ENABLE)) {
@@ -833,58 +914,67 @@ static int completeTicket(ConfigParser *parser)
     return FS_OK;
 }
 
+static int validGift(FsConfiguration *config,uint32_t index)
+{
+    const FsGift *gift=config->gifts+index;
+    int dated=FsDate_Valid(gift->starts) && FsDate_Valid(gift->ends) && gift->starts<=gift->ends;
+    if ((gift->starts && !FsDate_Valid(gift->starts)) || (gift->ends && !FsDate_Valid(gift->ends)) ||
+        (gift->starts && gift->ends && gift->starts>gift->ends)) return 0;
+    for (uint32_t j=0;j<config->giftWindowCount;j++) {
+        FsGiftWindow *window=config->giftWindows+j;
+        if (window->event!=index) continue;
+        if (window->flags&FS_GIFT_WINDOW_DISABLED) {
+            if (!(window->flags&FS_GIFT_WINDOW_EXCLUDE)) dated=1;
+            continue;
+        }
+        if (!window->starts) window->starts=gift->starts;
+        if (!window->ends) window->ends=gift->ends;
+        if (!FsDate_Valid(window->starts) || !FsDate_Valid(window->ends) ||
+            window->starts>window->ends) return 0;
+        if (!(window->flags&FS_GIFT_WINDOW_EXCLUDE)) dated=1;
+    }
+    if (!gift->file[0] || !gift->games || !dated ||
+        (gift->generation!=6 && gift->generation!=7) ||
+        (gift->games&~(gift->generation==6?15u:240u))) return 0;
+    if ((gift->fileList && !gift->folder[0]) || (!gift->fileList && gift->folder[0])) return 0;
+    if (gift->fileList && gift->file[0]) {
+        char path[FS_GIFT_FILE_PATH_SIZE],previous[FS_GIFT_FILE_PATH_SIZE]; uint32_t count=1;
+        for (const char *p=gift->file;*p;p++) if (*p==',') count++;
+        if (count>6) return 0;
+        for (uint32_t j=0;j<count;j++) {
+            if (!FsGift_FilePath(gift,j,path)) return 0;
+            for (uint32_t k=0;k<j;k++) {
+                if (!FsGift_FilePath(gift,k,previous)) return 0;
+                uint32_t n=0;
+                while (path[n] && previous[n]) {
+                    char a=path[n],b=previous[n];
+                    if (a>='A' && a<='Z') a=(char)(a+32);
+                    if (b>='A' && b<='Z') b=(char)(b+32);
+                    if (a!=b) break;
+                    n++;
+                }
+                if (!path[n] && !previous[n]) return 0;
+            }
+        }
+    }
+    return 1;
+}
+
 static int validatePolicy(FsConfiguration *config,uint32_t section)
 {
     if (section==FS_CONFIG_WORDS && !FsMover_ValidateWords(&config->mover)) return FS_INVALID;
     if (section==FS_CONFIG_MOVER) for (uint32_t i=0;i<config->mover.ruleCount;i++) {
-        const FsMoverRule *rule=config->mover.rules+i;
+        FsMoverRule *rule=config->mover.rules+i;
         if (rule->defined!=7 || !rule->condition ||
-            (rule->action!=FS_MOVER_REJECT && rule->action!=FS_MOVER_REQUIRE)) return FS_INVALID;
+            (rule->action!=FS_MOVER_REJECT && rule->action!=FS_MOVER_REQUIRE)) rule->enabled=0;
     }
     if (section==FS_CONFIG_GIFT) for (uint32_t i=0;i<config->giftCount;i++) {
-        const FsGift *gift=config->gifts+i;
-        int dated=FsDate_Valid(gift->starts) && FsDate_Valid(gift->ends) && gift->starts<=gift->ends;
-        if ((gift->starts && !FsDate_Valid(gift->starts)) || (gift->ends && !FsDate_Valid(gift->ends)) ||
-            (gift->starts && gift->ends && gift->starts>gift->ends)) return FS_INVALID;
-        for (uint32_t j=0;j<config->giftWindowCount;j++) {
-            FsGiftWindow *window=config->giftWindows+j;
-            if (window->event!=i) continue;
-            if (window->flags&FS_GIFT_WINDOW_DISABLED) {
-                if (!(window->flags&FS_GIFT_WINDOW_EXCLUDE)) dated=1;
-                continue;
-            }
-            if (!window->starts) window->starts=gift->starts;
-            if (!window->ends) window->ends=gift->ends;
-            if (!FsDate_Valid(window->starts) || !FsDate_Valid(window->ends) ||
-                window->starts>window->ends) return FS_INVALID;
-            if (!(window->flags&FS_GIFT_WINDOW_EXCLUDE)) dated=1;
-        }
-        if (gift->enabled && (!gift->file[0] || !gift->games || !dated ||
-            (gift->generation!=6 && gift->generation!=7) ||
-            (gift->games&~(gift->generation==6?15u:240u)))) return FS_INVALID;
-        if ((gift->fileList && !gift->folder[0]) || (!gift->fileList && gift->folder[0])) return FS_INVALID;
-        if (gift->fileList && gift->file[0]) {
-            char path[FS_GIFT_FILE_PATH_SIZE],previous[FS_GIFT_FILE_PATH_SIZE]; uint32_t count=1;
-            for (const char *p=gift->file;*p;p++) if (*p==',') count++;
-            if (count>6) return FS_INVALID;
-            for (uint32_t j=0;j<count;j++) {
-                if (!FsGift_FilePath(gift,j,path)) return FS_LIMIT;
-                for (uint32_t k=0;k<j;k++) {
-                    if (!FsGift_FilePath(gift,k,previous)) return FS_LIMIT;
-                    uint32_t n=0;
-                    while (path[n] && previous[n]) {
-                        char a=path[n],b=previous[n];
-                        if (a>='A' && a<='Z') a=(char)(a+32);
-                        if (b>='A' && b<='Z') b=(char)(b+32);
-                        if (a!=b) break;
-                        n++;
-                    }
-                    if (!path[n] && !previous[n]) return FS_INVALID;
-                }
-            }
-        }
+        FsGift *gift=config->gifts+i;
+        if (!validGift(config,i)) gift->enabled=0;
         if (gift->nativeId) for (uint32_t j=0;j<i;j++)
-            if (config->gifts[j].nativeId==gift->nativeId) return FS_INVALID;
+            if (config->gifts[j].nativeId==gift->nativeId) {
+                config->gifts[j].enabled=0;gift->enabled=0;
+            }
     }
     return FS_OK;
 }
@@ -935,19 +1025,13 @@ static int loadExtension(const FsStorageIo *io,FsConfiguration *config,uint32_t 
         .source=configSource(target),.shortCircuit=1};
     uint32_t rules=config->mover.ruleCount;
     error->line=0;
-    /* Only the explicitly permitted BanUnicodeChinese edit can publish a
-       screening file. Its previous published image is a valid fallback.
-       Gift and name inputs remain read-only. */
-    /* 仅汉化许可可发布指定规则字段；筛选表可读已发布备份，礼物／姓名表仍只读。 */
-    if(parser.allowedSection==FS_CONFIG_MOVER)parser.backup=parser.source==FS_MOVER_GEN5?
-        "mover/nds/checkPokemon.bak":"mover/vc/checkPokemon.bak";
-    int adjusted=parser.allowedSection==FS_CONFIG_MOVER?
-        FsCustom_ApplyMover(io,config->mover.customOptions,parser.source):FS_OK;
-    if(adjusted!=FS_OK && adjusted!=FS_INVALID){error->path=FsConfiguration_Path(target,0);return error->result=adjusted;}
+    /* Shared optional input is read-only; user exceptions apply only in RAM. */
+    /* 共享附加输入只读，用户例外仅在内存中生效。 */
     int result=readConfiguration(io,&parser,FsConfiguration_Path(target,0),1,error);
     if (result==FS_OK) result=parser.allowedSection==FS_CONFIG_GIFT?
         completeGifts(&parser):validatePolicy(config,parser.allowedSection);
     if (result!=FS_OK || parser.disabled) discardExtension(&parser,rules);
+    else if(parser.allowedSection==FS_CONFIG_MOVER)FsCustom_ApplyMover(&config->mover);
     if (result==FS_INVALID || result==FS_LIMIT || result==FS_MISSING) result=FS_OK;
     error->result=result;
     if (result==FS_OK) { error->line=0; error->path=0; }
@@ -1022,11 +1106,8 @@ static int renderTicket(TicketOutput *output,const ConfigParser *parser)
             !ticketText(output,FsConfiguration_TicketKey(i)) || !ticketText(output,"=") ||
             !ticketText(output,value) || !ticketText(output,";\n")) return 0;
     }
-    if(!ticketText(output,"\n[custom]\n"))return 0;
-    for(uint32_t i=0;i<FS_CUSTOM_COUNT;i++)
-        if(!ticketText(output,FsCustom_Key(i)) || !ticketText(output,"=") ||
-            !ticketText(output,FsCustom_Value(parser->configuration->mover.customOptions,i)) ||
-            !ticketText(output,";\n"))return 0;
+    if(!ticketText(output,parser->configuration->enableLog?
+        "\n[debug]\nenablelog=true;\n":"\n[debug]\nenablelog=false;\n"))return 0;
     uint8_t hash[FS_TRANSACTION_HASH_SIZE]; char seal[sizeof(configurationSeal)+2*FS_TRANSACTION_HASH_SIZE];
     FsHash_Finish(&output->digest,hash);
     for (uint32_t i=0;i<sizeof(configurationSeal)-1;i++) seal[i]=configurationSeal[i];

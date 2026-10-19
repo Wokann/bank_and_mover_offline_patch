@@ -10,8 +10,8 @@ switches. One source never loads the other source's rules.
 | Generation V NDS | [nds/checkPokemon.conf](nds/checkPokemon.conf) |
 | Virtual Console | [vc/checkPokemon.conf](vc/checkPokemon.conf) |
 
-These paths are under `sd:/3ds/Bank/fakeServers/shared/mover/`. Missing/malformed
-optional data discards only that source's additional rules, not the other source's
+These paths are under `sd:/3ds/Bank/fakeServers/shared/mover/`. A missing file or
+invalid global switch disables only that source's additional rules, not the other source's
 policy or the original local checks. This is an editable compatibility preset,
 not a complete extracted official v1.5 server legality table. Guides and licenses
 are external documentation, not loaded by the game.
@@ -19,7 +19,7 @@ are external documentation, not loaded by the game.
 ## Layout and editing
 
 Start with `[global]` and `enableCheckPokemon=true;` or `enableCheckPokemon=false;`.
-False skips the remaining rules during loading. Only shared fan permission may automatically disable BanUnicodeChinese; other rules are not edited. Each rule runs from `[rule.name]` to the next rule header or end of file.
+False skips the remaining rules during loading. Rule files are read-only; account fan permission overrides BanUnicodeChinese only in RAM. Each rule runs from `[rule.name]` to the next rule header or end of file.
 Names accept 1–31 uppercase/lowercase ASCII letters, digits or underscores, are local
 labels only, and are not written into game/bank saves.
 
@@ -28,6 +28,13 @@ Each rule requires exactly three unique fields: `enabled=0/1;`,
 fields end at an unquoted `;`. Conditions may span lines and contain whitespace.
 `#` comments run to the end of the physical line; quoted `#`/`;` are literal text.
 Block comments, backslash continuations and literal newlines inside strings are unsupported.
+
+Each `[rule.xxx]` is validated independently. An invalid/duplicate field, missing
+required field, malformed expression or missing terminating semicolon disables
+the whole group in RAM; loading continues with the next group rather than applying
+partial conditions. Conflicting section names disable all rules involved. The file
+is not rewritten. A valid condition evaluating false for a Pokémon is not a broken
+rule. Actual I/O failures and insufficient memory remain loading errors.
 
 ```ini
 [global]
@@ -100,9 +107,9 @@ condition=
 A hit returns native per-slot rejection 1, excluding the entire Pokémon without a
 rename. NGWord independently uses NDS 250–252 / VC 253–255. Gen5 default rejection is
 supported by the user's hardware observation; the same VC rejection is a custom local
-policy, not a recovered exhaustive official server rule. Shared [fan permission](../readme_server.md#allowfantranslationchn)
-actually writes this rule's enabled=0 with protected publication, without disabling
-other rules. Turning permission off does not re-enable it.
+policy, not a recovered exhaustive official server rule. Account [fan permission](../../users/readme_user.md#allowfantranslationchn)
+disables this rule only in the selected user's loaded policy. Shared files remain
+unchanged; accounts with permission off still use the shared enabled value.
 
 The [Unicode 17 blocks](https://www.unicode.org/Public/17.0.0/ucd/Blocks.txt) include
 reserved positions. Kana, Hangul, PUA, punctuation and radical blocks are not blanket

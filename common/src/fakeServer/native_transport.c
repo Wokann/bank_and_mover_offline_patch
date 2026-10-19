@@ -1,6 +1,8 @@
 #include "fakeServer/native_transport.h"
 #include "fakeServer/sd_adapter.h"
 #include "fake_server_context.h"
+#include "fs_system/storage_notice.h"
+#include "fs_system/diagnostic_log.h"
 #include <string.h>
 
 _Static_assert(FAKE_SERVER_WORKER_ADDRESS==FAKE_SERVER_CONTEXT_ADDRESS+FAKE_SERVER_CONTEXT_SIZE,
@@ -32,6 +34,7 @@ static void reapCancelled(void)
 
 int NativeTransport_Start(void)
 {
+    FsDiag_Startup();
 #ifdef FAKE_SERVER_SOURCE_CONTEXT_ADDRESS
     FsLocalSource *local=(FsLocalSource *)FAKE_SERVER_SOURCE_CONTEXT_ADDRESS;
     if (FsLocalSource_Initialize(local,&FsSdTransactions,(void *)FAKE_SERVER_SOURCE_IMAGE_ADDRESS,
@@ -52,7 +55,15 @@ int NativeTransport_Accept(uintptr_t peer,uintptr_t request,const FsServiceReque
 {
     reapCancelled();
     uint32_t identity;
-    return NativeService_Accept(worker(),peer,request,input,&identity);
+    int result=NativeService_Accept(worker(),peer,request,input,&identity);
+    if(result==FS_ASYNC_ACCEPTED && input->operation==FS_SERVICE_TITLE_USERS) {
+        /* Broker cancellation also ends cached UI acknowledgements. A later
+           SDK allocation may reuse the same peer/job addresses for a new user. */
+        /* 登记表取消时也结束界面确认缓存，防止新用户的 SDK 对象重用旧地址后命中旧结果。 */
+        worker()->ui=(__typeof__(worker()->ui)){0};
+        worker()->ticket=(__typeof__(worker()->ticket)){0};
+    }
+    return result;
 }
 
 int NativeTransport_Poll(uintptr_t peer,uintptr_t request,const FsServiceRequest *input,
@@ -66,7 +77,10 @@ int NativeTransport_PollParts(uintptr_t peer,uintptr_t request,const FsServiceRe
     FsAsyncDelivery *delivery)
 {
     reapCancelled();
-    return NativeService_PollParts(worker(),peer,request,input,body,size,appendInput,appendSize,delivery);
+    int result=NativeService_PollParts(worker(),peer,request,input,body,size,appendInput,appendSize,delivery);
+    if (result==FS_ASYNC_READY)
+        FsStorageNotice_Report(delivery->result,delivery->reply.storageIssue);
+    return result;
 }
 
 int NativeTransport_Release(const FsAsyncDelivery *delivery)

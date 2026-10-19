@@ -5,6 +5,7 @@
 #include "fakeServer/memory.h"
 #include "fakeServer/sd_adapter.h"
 #include "fakeServer/fake_servers.h"
+#include "fakeServer/fake_server_client.h"
 #include "title_user_sdk.h"
 #include "system_time.h"
 #include <string.h>
@@ -95,6 +96,7 @@ static void redraw(void *view)
 }
 void TitleUsers_Initialize(void *view)
 {
+    FakeServerClient_EndSession();
     NativeTransport_Cancel((uintptr_t)&titleUsers);
     /* Reuse only the process-heap allocation, never a previous title's values.
        Allocation/release is serialized with the worker when a reply arrives. */

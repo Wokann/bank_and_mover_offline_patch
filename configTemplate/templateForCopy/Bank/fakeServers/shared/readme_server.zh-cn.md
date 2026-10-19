@@ -7,7 +7,7 @@
 | 相对 sd:/3ds/Bank/ 的文件 | 作用 |
 | --- | --- |
 | `client/client.conf` | 用户表及用户选择，见[客户端说明](../../client/readme_client.zh-cn.md)。 |
-| `fakeServers/shared/server.conf` | 共用免费／试用窗口、年券价格及充值额度。 |
+| `fakeServers/shared/server.conf` | 共用免费／试用窗口、年券价格、充值额度及诊断日志开关。 |
 | `fakeServers/users/<用户ID>/user.conf` | 个人主机地区、币种、购券／试用记录及各币种余额，见[个人说明](../users/readme_user.zh-cn.md)。 |
 
 余额与购券记录保存在同一份 user.conf。礼物、Mover 配置／词表／素材须由玩家手动放入共享目录，缺失则不启用对应附加功能。
@@ -24,7 +24,7 @@ UTF-8 文本，赋值采用 `key=value;`，末尾必须写分号；段名、NGWo
 
 ## 共享 server.conf
 
-票务政策放在 [ticket]，自定义选项放在末尾 [custom]，默认值及顺序见[模板](server.conf)。
+共享票务政策放在 [ticket]，默认值及顺序见[模板](server.conf)。账户自定义选项放在个人 `user.conf`。
 
 ### 免费和试用
 
@@ -66,57 +66,20 @@ UTF-8 文本，赋值采用 `key=value;`，末尾必须写分号；段名、NGWo
 
 $NONE 的 807 为自定数值，代表 Bank 支持的最高图鉴编号；默认年券价格和单次充值额均为 807，个人余额从 0 开始。其他币种金额是项目历史价格预设，不计算税费和实时汇率。USD 499 代表 4.99 美元。币种选择在所选用户 user.conf 的 [ticket] 余额列表上方：autoCurrency=true 按该用户有效区域／国家计算并更新 currentCurrency；false 使用 currentCurrency 的手动值，允许与地区不一致，不按界面语言。手动 NONE 或自动未匹配都用 NONE 政策及个人 NONE 余额；$NONE 支持本地购买和充值。这些不是真实 eShop 资金。手动设置的合法价格／充值额（包括 0）保留，只有缺失或非法分量恢复默认值。
 
-## 自定义选项
-
-以下条目放在共享 `server.conf` 末尾，默认全部关闭，不是官方设置：
+## 诊断日志
 
 ```ini
-[custom]
-enableMoverv1.2=false;
-allowFanTranslationCHN=false;
+[debug]
+enablelog=false;
 ```
 
-### enableMoverv1.2
+这是 Bank／Mover 共用的全局开关，不属于个人账户。默认关闭，不记录事件，也不创建、清空或写入日志文件；已有日志保持不变。改为 `true;` 后，重新启动对应软件才开始记录，启动时覆盖自己的 `client/log/bank.log` 或 `client/log/mover.log`。切换用户和返回标题不重新读取开关，也不清空本次日志。调试结束后建议关闭并重新启动，减少 SD 写入开销。
 
-只影响离线第一世代 RGBY 的转换：保留原构造器按种族性别比例生成的随机性别，
-不再按攻击 DV 覆盖；闪光条件改为攻击 DV=10、防御 DV 为 2/3/6/7/10/11/14/15，
-速度与特殊 DV 都为 10。还使用旧日文／西文字符映射：例如西文 0xE8 句点变连字符、
-0xE0 撇号变空格，以及旧表不支持的数字／重音字符。无性别及固定性别仍由原构造器处理。
+开关缺失或没有合法值时按关闭处理；同名重复项采用最后一个合法的 true/false。正式配置缺失时可读取备份，不采用暂存文件。日志不包含账户名、事务令牌或文件正文，写日志失败不改变业务结果。
 
-关闭时保留 v1.5。金银／水晶、Gen5、在线模式不进入旧版包装；不会回退服务器筛选、
-银行格式、事务、地区设置或整个软件。它只复现已核实的本地转换差异，不恢复历史服务器。
-版本差异见 [Poké Transporter 转换说明](https://bulbapedia.bulbagarden.net/wiki/Pok%C3%A9_Transporter#From_Generation_I_and_II)；这是社区资料，不是官方完整算法规范。
+## 自定义选项
 
-### allowFanTranslationCHN
-
-开启后，在加载所选来源的 `checkPokemon.conf` 前，若存在 `[rule.BanUnicodeChinese]`，
-程序会实际将其 `enabled` 改为 `0;`。缺失／损坏的该字段补为 0，重复字段合并；其他字段、
-条件、注释和其他规则保留。用 `checkPokemon.tmp` 写齐并回读验证，再将旧配置轮替到
-`checkPokemon.bak` 后发布；已为 0 且无需修改时不写盘。正式文件缺失可读已发布备份，
-不采用孤立暂存。没有文件或没有该规则时不凭空创建；关闭许可不自动重新启用，需手动改回。
-
-- NDS：已有姓名是 UTF-16，无需转码；恢复中文昵称／OT，即使没有昵称标记也不让默认
-  种族名覆盖中文，昵称标记本身不伪造。
-- VC：原始英文字母表 1 使用美版《水晶》汉化表，韩文字母表 6 使用韩版《金银》汉化表。
-  指实际字符串来源，不是界面语言、主机地区或外壳地区；基于韩版编码的国际版汉化仍用韩文表。
-- 只修改生成候选的姓名，原存档不改。未知／截断双字节序列整段回退原转换，不交付半截名字。
-  普通韩文可能与汉化码冲突，未汉化的韩文存档应关闭此项。
-- 普通 NGWord、其他筛选、原校验／加密、回调及事务保持。该选项独立于姓名词表开关；
-  关闭 checkName 不会关闭汉化。与旧版选项同时开启时，最后由明确启用的汉化表恢复中文名字。
-  若筛选要求修改昵称／OT，汉化保留不会恢复该字段的旧名字。要保留中文且不做姓名筛选，
-  在对应来源的 checkName.conf 的 [global] 中设置 enableCheckName=false;；其他宝可梦筛选不受影响。
-
-转换选项随后台银行下载结果交给客户端；后续策略请求读取当时的检查／姓名表。
-已生成的候选不会因中途改配置追溯转码，修改选项后应返回标题重新连接。
-
-两个汉化表均只有各自项目这一个来源，不是官方编码规范，不保证其他改版或以后改表兼容：
-
-- [TomJinW/pokecrystal_cn](https://github.com/TomJinW/pokecrystal_cn/tree/f487d44c0d6f75a48a4a4b975ca04bc3914b3f52)：
-  固定 [charmap_cn.asm](https://github.com/TomJinW/pokecrystal_cn/blob/f487d44c0d6f75a48a4a4b975ca04bc3914b3f52/constants/charmap_cn.asm)，7615 个双字节映射。
-- [TomJinW/PKMN_GSCHS](https://github.com/TomJinW/PKMN_GSCHS/tree/c3947b83c6c66a015103e1bc08bbca7f2a862d3b)：
-  固定最终 [fontTBL.txt](https://github.com/TomJinW/PKMN_GSCHS/blob/c3947b83c6c66a015103e1bc08bbca7f2a862d3b/05_Font/fontTBL.txt)，2350 个映射。
-
-不附带 ROM、上游补丁或字体图像；NGWord 的 GPL 文本不自动授予这些独立资料同样的许可。
+这两个开关属于各账户的 `user.conf`，默认关闭，见[用户配置](../users/readme_user.zh-cn.md#自定义选项)。共享 `server.conf` 不读取这些开关。
 
 ## 个人配置
 

@@ -248,7 +248,7 @@
     bl CombinePatch_GiftResourceRequest
 
 .org DisconnectCleanupState_Update
-    b CombinePatch_DisconnectUpdate
+    b CombinePatch_StorageNoticeDisconnectUpdate
 .org 0x002ABDEC
     b CombinePatch_LanguageReturnDestruct
 .org BankNoSaveRollbackState_Update
@@ -278,6 +278,8 @@
     b CombinePatch_AccountInitialize
 .org 0x0022DDCC
     b CombinePatch_AccountUnbind
+.org 0x00114F88
+    bl CombinePatch_AccountRequestReady
 .org 0x0012259C
     bl CombinePatch_AccountSend
 .org 0x002A3868
@@ -1590,6 +1592,15 @@ CombinePatch_RollbackProvider:
     b 0x001D5CA8
     .pool
 
+CombinePatch_StorageNoticeDisconnectUpdate:
+    push {r0,lr}
+    bl BankStorageNotice_Poll
+    cmp r0,#0
+    pop {r0,lr}
+    moveq r0,#0
+    bxeq lr
+    b CombinePatch_DisconnectUpdate
+
 CombinePatch_DisconnectUpdate:
     ldrb r12,[r0,#0x3C]
     cmp r12,#0
@@ -1636,6 +1647,20 @@ CombinePatch_AccountSend:
     moveq r0,r1
     bxeq lr
     b 0x0021EB10
+    .pool
+
+// The provider-null check precedes this hook. Only the local initial request
+// treats its provider as ready; the native transport's initialized byte is
+// neither fabricated nor cleared, including when returning to online modes.
+// 此钩子前已检查提供者非空；仅本地初始请求视为就绪，不伪造或清除原版联网
+// 初始化字节，切回联网模式时仍由原版创建和管理真实会话。
+CombinePatch_AccountRequestReady:
+    ldr r12,=CombinePatch_ModeStorage
+    ldrb r12,[r12,#CombinePatch_SessionModeOffset]
+    cmp r12,#CombinePatch_ModeOffline
+    moveq r0,#1
+    ldrneb r0,[r4]
+    bx lr
     .pool
 
 CombinePatch_CreateProvider:
@@ -1828,6 +1853,9 @@ LanguageSettings_PayloadEnd:
 CombinePatch_PayloadBegin:
 FsHelpers_PayloadBegin:
     .importobj BUILD_DIRECTORY + "/common/fs_system/fs_helpers.o"
+    .importobj BUILD_DIRECTORY + "/common/fs_system/diagnostic_log.o"
+    .importobj BUILD_DIRECTORY + "/common/fs_system/storage_notice.o"
+    .importobj BUILD_DIRECTORY + "/storage_notice.o"
     .importobj BUILD_DIRECTORY + "/common/fs_system/memory.o"
     .importobj BUILD_DIRECTORY + "/common/fs_system/console_settings.o"
     .importobj BUILD_DIRECTORY + "/common/fs_system/console_identity.o"
@@ -2068,7 +2096,7 @@ CodeExpansion_LoaderEnd:
 .org OfflinePatch_VersionStorageStart
 .area OfflinePatch_VersionStorageSize, 0
 OfflinePatch_VersionIdentifier:
-    .asciiz "offline_patch_v0.9.1"
+    .incbin BUILD_DIRECTORY + "/patch-version.bin"
 .endarea
 
 // Dedicated service data, outside code and all original runtime objects.

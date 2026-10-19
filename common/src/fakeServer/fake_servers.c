@@ -1,5 +1,6 @@
 #include "fakeServer/fake_servers.h"
 #include "fs_system/settings_store.h"
+#include "fs_system/diagnostic_log.h"
 #include <string.h>
 
 static int usable(const FsServer *server)
@@ -185,8 +186,11 @@ int FsServer_Open(FsServer *server,uint32_t owner,const FsStorageIo *storage,
     /* Recover file decisions independently from current text configuration. */
     /* 文件事务的恢复独立于当前文本配置，不重新执行此前的筛选或礼物选择。 */
     FsTransactionFingerprint observed={0};
+    FsDiag_Record("server.prepare.begin",0,owner,0,0);
     int prepared=prepareBank(server,&observed);
+    FsDiag_Record("server.prepare.end",prepared,owner,0,0);
     int loaded=FsServer_ReloadConfiguration(server,&applied);
+    FsDiag_Record("server.configuration.end",loaded,owner,applied,0);
     *error=server->configuration.ticketError;
     int result=loaded;
     if (result!=FS_OK && result!=error->result) {
@@ -524,6 +528,7 @@ int FsServer_DownloadBank(FsServer *server,void *data,uint32_t capacity,
 
 int FsServer_CreateBank(FsServer *server,const void *data,uint32_t size)
 {
+    FsDiag_Checkpoint("bank.create.begin",0,size,0,0);
     if (!usable(server) || server->owner!=FS_TRANSACTION_OWNER_BANK ||
         !validBank(data,size)) return FS_INVALID;
     if (!FsTransaction_Guard(server->transactions)) return FS_LOCKED;
@@ -892,6 +897,7 @@ int FsServer_PrepareBank(FsServer *server)
 
 int FsServer_WriteBank(FsServer *server,const void *data,uint32_t size)
 {
+    FsDiag_Checkpoint("bank.export.begin",0,size,0,0);
     if (!usable(server) || !data || size!=FS_BANK_SIZE || !validBank(data,size)) return FS_INVALID;
     FsTransaction_ViewForget(server->transactions,FS_TRANSACTION_BANK);
     if (FsServer_Guard(server)!=FS_OK) return FS_LOCKED;
@@ -1114,6 +1120,9 @@ void FsServer_Disconnect(FsServer *server)
         FsTransaction_ViewClear(server->transactions);
         FsConfiguration_Release(server->storage,&server->configuration);
         server->ready=0; server->bankDownloadToken=0;
+        server->bankDelivered=0;server->ticketReload=0;server->ticketSnapshotReady=0;
+        server->ticketQuery=0;server->ticket.valid=0;
+        server->configurationStatus=FS_INVALID;server->configuration.console.ready=0;
         server->rollbackCodes.candidateCount=0; server->rollbackAuthorized=0;
     }
 }

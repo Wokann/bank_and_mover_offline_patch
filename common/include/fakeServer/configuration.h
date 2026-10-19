@@ -24,6 +24,7 @@ typedef struct FsConfiguration {
     FsConfigError giftError;
     FsTicketSettings ticketSettings;
     FsConsoleProfile console;
+    uint32_t enableLog;
 } FsConfiguration;
 
 /* Initialize to zero before first use. Loads/validation replace prior RAM
@@ -40,9 +41,8 @@ int FsConfiguration_Purchase(const FsStorageIo *,FsConfiguration *,
     const FsTicketPolicy *,uint32_t market,uint32_t balance,uint32_t paidField,FsConfigError *);
 int FsConfiguration_ValidateFile(const FsStorageIo *,FsConfiguration *,uint32_t section,
     const char *path,FsConfigError *);
-/* Gift/name inputs have no staging path. Check tables expose staging only
-   for the explicitly authorized BanUnicodeChinese update, not generic Edit. */
-/* 礼物／姓名表无暂存路径；检查表仅为指定规则字段写回提供暂存，通用 Edit 仍拒绝。 */
+/* Optional gift/name/Pokemon inputs are read-only and have no staging path. */
+/* 附加礼物／姓名／宝可梦筛选输入只读，不提供暂存路径。 */
 const char *FsConfiguration_Path(uint32_t section,int temporary);
 int FsConfiguration_Edit(const FsStorageIo *,FsConfiguration *workspace,uint32_t section,
     const FsConfigEdit *,uint32_t count,FsConfigError *);

@@ -187,7 +187,7 @@ typedef struct BankSourceRecoveryView {
     u8 cancelled;
 } BankSourceRecoveryView;
 typedef struct BankAccountTransportView {
-    u8 initialized;
+    u8 nativeInitialized;
     u8 reserved01[0x127];
     NativeRemoteResult *request;
     u8 reserved12C[8];

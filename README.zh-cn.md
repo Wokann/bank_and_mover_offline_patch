@@ -76,7 +76,7 @@ SD:/3ds/Bank/
 
 - [SD 目录及文件保护](configTemplate/templateForCopy/Bank/readme_fakeServer.zh-cn.md)
 - [用户选择与迁移](configTemplate/templateForCopy/Bank/client/readme_client.zh-cn.md)
-- [服务器政策与可选转换](configTemplate/templateForCopy/Bank/fakeServers/shared/readme_server.zh-cn.md)
+- [服务器政策与诊断日志](configTemplate/templateForCopy/Bank/fakeServers/shared/readme_server.zh-cn.md)
 - [个人地区、币种与使用券](configTemplate/templateForCopy/Bank/fakeServers/users/readme_user.zh-cn.md)
 - [礼物配置](configTemplate/templateForCopy/Bank/fakeServers/shared/gifts/readme_gift.zh-cn.md)
 - [宝可梦筛选及规则来源](configTemplate/templateForCopy/Bank/fakeServers/shared/mover/readme_checkPokemon.zh-cn.md)
@@ -95,6 +95,17 @@ SD:/3ds/Bank/
 ## 从源码构建
 
 Bank 与 Mover 分别使用 GNU Make、Python 3、devkitARM、armips 和 Floating IPS 构建。原始解密／解压代码、ExHeader 及 RomFS 必须自行从合法持有的软件中提取，本仓库不分发这些输入。
+
+上屏左上角以白色显示补丁版本，官方版本号保持原样和原位置。基础版本统一保存在根目录 `VERSION`。普通 `make` 始终采用非正式标识，例如 `Offline Patch v0.9.1-abcdef`；后缀为当前 Git 提交简写，不使用 tag 自动切换为正式版。同一提交下的未提交修改不会产生不同的 Git 后缀。
+
+发布正式版时，先明确更新并提交 `VERSION`，再分别构建：
+
+```sh
+make -C bank PATCH_RELEASE=1
+make -C mover PATCH_RELEASE=1
+```
+
+仅显式的 `PATCH_RELEASE=1` 省略 Git 后缀，显示 `Offline Patch v<版本号>`。`PATCH_VERSION` 可覆盖本次构建的基础版本；没有 Git 元数据的源码副本须显式提供 `PATCH_REVISION=<提交简写>` 才能构建非正式版。构建生成的版本标识不会写回源码，也不修改 SD 卡配置或存档。
 
 - [Bank 构建与实现说明](bank/README.zh-cn.md#独立编译)
 - [Mover 构建与实现说明](mover/README.zh-cn.md#独立编译)

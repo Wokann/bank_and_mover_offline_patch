@@ -13,6 +13,8 @@ import sys
 import zlib
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "common/tools"))
+from patch_version import add_version_arguments, label_from_arguments, label_storage, patch_label as build_patch_label
 
 IMAGE_BASE = 0x00100000
 EXPECTED_BASE_SHA256 = "2DCE4796F54807CF8A67F1CE6297BF472D969B30ED7A7E8E25C2A6C2BDC40ABF"
@@ -60,7 +62,6 @@ TEXT_MAPPED_END = 0x00314000
 VERSION_STORAGE_SIZE = 0x40
 VERSION_STORAGE_START = TEXT_MAPPED_END - VERSION_STORAGE_SIZE
 TAIL_CAVE_END = VERSION_STORAGE_START
-VERSION_IDENTIFIER = b"offline_patch_v0.9.1\0"
 ARM_COND_EQ = 0x0
 ARM_COND_NE = 0x1
 ARM_COND_AL = 0xE
@@ -359,7 +360,7 @@ def verify_expansion(base: bytes, image: bytes, symbols: dict[str, int],
 
 
 def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
-                base_exheader: Path, exheader: Path) -> None:
+                base_exheader: Path, exheader: Path, *, patch_label: str | None = None) -> None:
     image = patched.read_bytes()
     base_image = base.read_bytes()
     base_hash = hashlib.sha256(base_image).hexdigest().upper()
@@ -510,7 +511,8 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
         "combinepatch_disconnectwithlanguagesave",
         "bankdataredirect_createupdate", "bankdataredirect_originalcreateupdate",
         "combinepatch_bankcreateupdate", "combinepatch_accountinitialize",
-        "combinepatch_accountunbind", "combinepatch_accountsend", "combinepatch_createprovider",
+        "combinepatch_accountunbind", "combinepatch_accountsend", "combinepatch_accountrequestready",
+        "combinepatch_createprovider",
         "bankdataredirect_downloadupdate",
         "bankdataredirect_originaldownloadupdate",
         "nativeresponse_createconnection",
@@ -627,7 +629,7 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
     if symbols["offlinepatch_versionidentifier"] != VERSION_STORAGE_START:
         raise ValueError("offline patch version identifier moved")
     version_offset = image_offset(VERSION_STORAGE_START)
-    expected_version_storage = VERSION_IDENTIFIER.ljust(VERSION_STORAGE_SIZE, b"\0")
+    expected_version_storage = label_storage(build_patch_label() if patch_label is None else patch_label)
     if image[version_offset : version_offset + VERSION_STORAGE_SIZE] != expected_version_storage:
         raise ValueError("offline patch version storage is malformed")
     if base_image[version_offset : version_offset + VERSION_STORAGE_SIZE] != bytes(VERSION_STORAGE_SIZE):
@@ -909,6 +911,7 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
         (0x002AE568, "combinepatch_bankcreateupdate", False, ARM_COND_AL, "native create response polling"),
         (0x0011491C, "combinepatch_accountinitialize", False, ARM_COND_AL, "local account provider"),
         (0x0022DDCC, "combinepatch_accountunbind", False, ARM_COND_AL, "local account provider cleanup"),
+        (0x00114F88, "combinepatch_accountrequestready", True, ARM_COND_AL, "local initial request readiness without network state mutation"),
         (0x0012259C, "combinepatch_accountsend", True, ARM_COND_AL, "initial-value request transport"),
         (0x002A3868, "combinepatch_createprovider", False, ARM_COND_AL, "creation request transport"),
         (0x002AF3A0, "combinepatch_connectionconstruct", True, ARM_COND_NE, "connection carrier"),
@@ -941,7 +944,7 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
         (0x002AAF50, "combinepatch_giftresourcerequest", True, ARM_COND_AL, "second gift resource request"),
         (0x002AED3C, "combinepatch_selectpostselectionconnectionmessage", True, ARM_COND_AL, "first-use connection message"),
         (0x002AF1D0, "combinepatch_selectpostselectionconnectionmessage", True, ARM_COND_AL, "network preparation message"),
-        (0x002ABC24, "combinepatch_disconnectupdate", False, ARM_COND_AL, "disconnect"),
+        (0x002ABC24, "combinepatch_storagenoticedisconnectupdate", False, ARM_COND_AL, "storage error acknowledgement before disconnect"),
         (0x002AEB9C, "combinepatch_nosaverollbackupdate", False, ARM_COND_AL, "mode-specific no-save remote rollback"),
         (0x002A57C8, "combinepatch_rewardresult", False, ARM_COND_EQ, "mode-specific reward result"),
         (0x002A56F0, "combinepatch_homeresult", False, ARM_COND_EQ, "HOME redirect"),
@@ -1374,6 +1377,13 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
 
     # These gates isolate system sessions, not native SDK jobs or error results.
     # 分流的是系统会话监控，不是原 SDK 作业或错误结果。
+    request_ready = symbols["combinepatch_accountrequestready"]
+    for offset, word in ((0,0xE59FC010),(4,0xE5DCC000),(8,0xE35C0000),
+                         (12,0x03A00001),(16,0x15D40000),(20,0xE12FFF1E)):
+        expect_word(image,request_ready+offset,word,"initial request readiness without native-state writes")
+    expect_word(image,request_ready+24,symbols["combinepatch_modestorage"],"initial request session mode")
+    expect_bytes(image,0x00114658,base_image[image_offset(0x00114658):image_offset(0x001147A0)],
+                 "real network initialization and its initialized flag remain native")
     monitor = symbols["combinepatch_networkmonitorupdate"]
     worker = symbols["combinepatch_networkmonitorworkeraccount"]
     for entry in (monitor, worker):
@@ -1726,10 +1736,10 @@ def verify_code(base: Path, patched: Path, symbols_path: Path, bps: Path,
         raise ValueError("release code.bps does not reproduce the patched code image")
 
 
-def verify_messages(source_romfs: Path, output_romfs: Path) -> None:
+def verify_messages(source_romfs: Path, output_romfs: Path, *, patch_label: str | None = None) -> None:
     from tools.title_layout import TITLE_LAYOUT_ARCHIVE, patch_title_archive
     relative = Path("a") / TITLE_LAYOUT_ARCHIVE
-    if (output_romfs / relative).read_bytes() != patch_title_archive((source_romfs / relative).read_bytes()):
+    if (output_romfs / relative).read_bytes() != patch_title_archive((source_romfs / relative).read_bytes(), patch_label=patch_label):
         raise ValueError("title language layout differs from its verified builder")
     from title_font import patch_title_fonts
     relative=Path("a/0/2/3")
@@ -1835,7 +1845,9 @@ def verify_messages(source_romfs: Path, output_romfs: Path) -> None:
             raise ValueError(f"portrait/mileage table37 bounds/line14 differ in {archive}")
         if output_lines[module.TITLE_LANGUAGE_LINE] != module.TITLE_LANGUAGE_MESSAGES[archive]:
             raise ValueError(f"title language hint mismatch in {archive}")
-        if len(output_lines)!=132 or module.OFFLINE_MISMATCH_LINE!=131 or module.TICKET_INSUFFICIENT_FUNDS_LINE!=121 or \
+        if tuple(output_lines[132:135])!=module.storage_notice_lines(archive):
+            raise ValueError(f"SD notice translations differ in {archive}")
+        if len(output_lines)!=135 or module.OFFLINE_MISMATCH_LINE!=131 or module.TICKET_INSUFFICIENT_FUNDS_LINE!=121 or \
                 module.TITLE_LANGUAGE_LINE!=122 or module.TITLE_SWITCH_LINE!=127 or \
                 hasattr(module,"TRANSACTION_MESSAGES") or hasattr(module,"TRANSACTION_MESSAGE_BASE"):
             raise ValueError(f"generic table39 bounds differ in {archive}")
@@ -1886,13 +1898,15 @@ def main() -> None:
     parser.add_argument("--exheader", required=True, type=Path)
     parser.add_argument("--source-romfs", required=True, type=Path)
     parser.add_argument("--output-romfs", required=True, type=Path)
+    add_version_arguments(parser)
     args = parser.parse_args()
     subprocess.run([sys.executable, "-B", str(Path(__file__).absolute().parents[2] /
                     "common/tools/check_file_links.py"), "--recursive",
-                    *map(str, vars(args).values())], check=True)
+                    *(str(path) for path in vars(args).values() if isinstance(path, Path))], check=True)
+    patch_label = label_from_arguments(args)
     verify_code(args.base, args.patched, args.symbols, args.bps,
-                args.base_exheader, args.exheader)
-    verify_messages(args.source_romfs, args.output_romfs)
+                args.base_exheader, args.exheader, patch_label=patch_label)
+    verify_messages(args.source_romfs, args.output_romfs, patch_label=patch_label)
     print("combined patch static verification passed")
 
 

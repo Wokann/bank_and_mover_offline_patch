@@ -5,10 +5,15 @@
 Edit [gift.conf](gift.conf) at `sd:/3ds/Bank/fakeServers/shared/gifts/gift.conf`.
 Players edit this configuration manually; the patch only reads it and never writes staging or backups. This README is not read by the game.
 Use UTF-8. Start with `[global]` and `enableGift=true/false`. A false switch closes
-the file early without parsing gift sections or opening assets. Missing/malformed
-optional gift data adds no available gift, rather than terminating the game.
-An already delivered response is not withdrawn by a later edit. Configuration
-editing/publication validates the complete file, including disabled sections.
+the file early without parsing gift sections or opening assets. A missing file or
+invalid global switch disables gifts. Each `[gift.xxx]` is an independent group:
+an invalid/duplicate field, missing required field, or inconsistent dates, asset
+paths, generation or game mask disables that whole group, then loading continues
+with the next group. Invalid conditions are never dropped to make a gift eligible.
+Conflicting section names or batch IDs disable all groups involved. These changes
+affect the loaded RAM state only, not the configuration file. Missing/malformed
+assets supply no gift; an already delivered response is not withdrawn by a later
+edit. Actual I/O failures and insufficient memory are not treated as bad fields.
 
 ## Gift sections
 

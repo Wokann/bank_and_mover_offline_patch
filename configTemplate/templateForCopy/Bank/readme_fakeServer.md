@@ -48,6 +48,9 @@ sd:/3ds/Bank/
 │   ├── client.conf
 │   ├── client.bak
 │   ├── client.tmp
+│   ├── log/
+│   │   ├── bank.log
+│   │   └── mover.log
 │   ├── readme_client.md
 │   ├── readme_client.zh-cn.md
 │   └── users/
@@ -89,13 +92,9 @@ sd:/3ds/Bank/
     │       ├── LICENSE.badword.txt
     │       ├── nds/
     │       │   ├── checkPokemon.conf
-    │       │   ├── checkPokemon.bak
-    │       │   ├── checkPokemon.tmp
     │       │   └── checkName.conf
     │       └── vc/
     │           ├── checkPokemon.conf
-    │           ├── checkPokemon.bak
-    │           ├── checkPokemon.tmp
     │           └── checkName.conf
     └── users/
         ├── readme_user.md
@@ -126,13 +125,14 @@ This inventory covers local runtime data directly maintained or redirected by Ba
 
 | Primary file / object | Backup | Temporary | Publication and retention |
 | --- | --- | --- | --- |
+| `client/log/bank.log`, `client/log/mover.log` | None | None | Recorded only with shared server.conf [debug] enablelog=true;, off by default. Enabled launches overwrite that title's log, not on title returns or user changes. Disabled logging records nothing and leaves old files untouched. No account names, tokens or file bodies are recorded; sink failure does not alter business results. |
 | `client/client.conf` | `client.bak` | `client.tmp` | Common protection; user selection/registry; retain the pre-write version. |
 | `fakeServers/shared/server.conf` | `server.bak` | `server.tmp` | Common protection; shared schedules, prices and recharge amounts; retain the pre-write version. |
 | `fakeServers/users/<userID>/user.conf` | `user.bak` | `user.tmp` | Common protection; pass/trial records and balances publish together; retain the pre-write version. |
 | `client/users/<userID>/sav.bin` | `sav.bak` | `sav.tmp` | Dedicated transaction protection; includes identity/transaction fields; retain the pre-write version, not ordinary configuration fallback. |
 | `fakeServers/users/<userID>/bankdata.bin` | `bankdata.bak` | `bankdata.tmp` | Dedicated Bank transaction protection; retain the version before an actual change; recovery requires transaction/body evidence. |
 | `fakeServers/users/<userID>/transaction.bin` | `transaction.bak` | `transaction.tmp` | Dedicated journal protection; retain the previous published decision; verify record CRC32, format, sequence and transaction phase. |
-| `fakeServers/shared/mover/<nds-or-vc>/checkPokemon.conf` | `checkPokemon.bak` | `checkPokemon.tmp` | Fan permission only: set BanUnicodeChinese enabled to 0; retain pre-edit image; never invent a missing check table. |
+| `fakeServers/shared/mover/<nds-or-vc>/checkPokemon.conf` | None | None | Player-supplied read-only rules; account fan permission overrides the named rule only in RAM. |
 | The selected NDS game's `x.sav`, outside the Bank directory | `x.bak` | `x.tmp` | Source/token-bound transaction protection; retire after saving and token-cleanup saving are acknowledged; preserve on interruption. |
 | Bank's console-save archive; Mover directly accesses its `/turtle` | No additional SD backup | No additional SD staging | Bank retains its original save flow; Mover updates only language fields, commits, reopens and verifies the whole record. |
 | Selected cartridge, 3DS digital and VC game saves | Managed by the original save system | Managed by the original save system | Keep original checks, saving and transaction handling; no common configuration fallback or invented physical paths. |

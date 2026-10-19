@@ -1,4 +1,5 @@
 #include "runtime_environment.h"
+#include "fs_system/diagnostic_log.h"
 
 static int detectAzahar(void)
 {
@@ -71,6 +72,7 @@ const volatile RuntimeEnvironmentView *RuntimeEnvironment_Get(void)
 
 void RuntimeEnvironment_InitializeTicket(void)
 {
+    FsDiag_Startup();
     volatile RuntimeEnvironmentView *environment=RuntimeEnvironment_Storage;
     if (environment->ticket!=RUNTIME_CAPABILITY_UNKNOWN) return;
     if (environment->environment!=RUNTIME_ENVIRONMENT_AZAHAR) {

@@ -3,10 +3,8 @@
 #include "fakeServer/transaction.h"
 #include "fs_system/protected_file.h"
 
-/* This general editor only maintains ticket data. Player-supplied extensions
-   are not editable here; the explicit BanUnicodeChinese update has its own
-   narrow publisher in custom_settings.c. */
-/* 通用编辑器仅处理票务；筛选表只有 custom_settings.c 中指定字段的专用写入。 */
+/* Shared extension input is read-only. Account fields use user.conf. */
+/* 共享附加输入只读，账户字段由 user.conf 管理。 */
 typedef struct ConfigStream {
     const FsStorageIo *io;
     uint32_t input,output,size,position,used,available,written,verify,limit;

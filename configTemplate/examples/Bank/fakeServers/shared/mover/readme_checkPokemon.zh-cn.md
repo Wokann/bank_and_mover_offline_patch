@@ -9,20 +9,25 @@ NDS 与 VC 共用本说明中的语法，但仍分别读取自己的文件及全
 | 第五世代 NDS | [nds/checkPokemon.conf](nds/checkPokemon.conf) |
 | Virtual Console | [vc/checkPokemon.conf](vc/checkPokemon.conf) |
 
-实际路径位于 `sd:/3ds/Bank/fakeServers/shared/mover/` 下。可选文件缺失／损坏仅撤销
-该来源附加规则，不影响另一来源及原版本地检查。这是可编辑的本地兼容预设，
+实际路径位于 `sd:/3ds/Bank/fakeServers/shared/mover/` 下。文件缺失或全局开关损坏时，
+不启用该来源附加规则，不影响另一来源及原版本地检查。这是可编辑的本地兼容预设，
 不是官方 v1.5 完整服务端合法性表的提取结果。说明与许可证为外部资料，游戏不读取。
 
 ## 组织和编辑
 
 开头写 `[global]`、`enableCheckPokemon=true;` 或 `enableCheckPokemon=false;`。
-关闭时跳过后续规则。除共享汉化许可自动关闭 BanUnicodeChinese 的指定字段外，补丁不改其他规则。一条规则从 `[rule.name]`
+关闭时跳过后续规则。补丁不修改规则文件；账户汉化许可仅在内存中覆盖 BanUnicodeChinese。一条规则从 `[rule.name]`
 开始，到下一条规则段或文件末尾结束；名称接受 1–31 个大小写 ASCII 字母、数字或下划线，
 仅是本地标签，不写入游戏／银行存档。
 
 每条恰好三项且不得重复：`enabled=0/1;`、`action=reject/require;`、
 `condition=表达式;`。段名无分号，字段以引号外的 `;` 结束。条件可换行、缩进、加空白。
 `#` 注释到当前物理行末，引号内的 `#`／`;` 是正文；不支持块注释、反斜线续行或引号内直接换行。
+
+每个 `[rule.xxx]` 独立校验。任一字段非法、重复、缺少必要字段、表达式语法错误或
+缺少结束分号时，整组按 `enabled=0;` 处理，不采用不完整的条件，并继续读取下一组。
+同名段涉及的规则均关闭；关闭只作用于内存，不改写玩家文件。正常不满足某只宝可梦的条件
+不属于配置损坏，不会关闭规则。实际读写失败、内存不足仍作为加载错误处理。
 
 ```ini
 [global]
@@ -89,8 +94,8 @@ condition=
 
 命中返回原生逐槽拒绝值 1，整只宝可梦被排除，不调用姓名修正；NGWord 命中则独立使用
 NDS 250–252／VC 253–255。Gen5 默认拒绝有用户实机观察依据，VC 同样拒绝是本地自定义
-策略，并非复原官方完整服务器规则。开启共享 [汉化许可](../readme_server.zh-cn.md#allowfantranslationchn)
-会受保护地实际写回此段 enabled=0；不会禁用其他规则，关闭许可也不会自动重新启用。
+策略，并非复原官方完整服务器规则。账户开启 [汉化许可](../../users/readme_user.zh-cn.md#allowfantranslationchn)
+时，仅在当前用户内存中关闭此规则，共享文件不变；未开启的账户仍按共享 enabled 值读取。
 
 范围依据 [Unicode 17 区块定义](https://www.unicode.org/Public/17.0.0/ucd/Blocks.txt)，包含区块保留码位；
 不把假名、韩文、私用区、标点或部首区整体当作汉字。补充平面按有界 UTF-16 代理对读取。

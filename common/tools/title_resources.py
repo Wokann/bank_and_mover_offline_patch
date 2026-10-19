@@ -34,6 +34,8 @@ MODE_PANE_WIDTH = 320.0 - 2 * MODE_SCREEN_MARGIN
 USER_TEXT_COLOR = bytes((96, 96, 96, 255))
 USER_PANE_WIDTH = 300.0
 USER_STATUS_CENTER_Y, USER_ID_CENTER_Y = 106.0, 82.0
+PATCH_VERSION_WIDTH = 360.0
+PATCH_VERSION_CENTER_Y = 110.0
 # Screen centers: mode 88, START 120, R 156, L 182, HOME 208.
 # 单行原生文字属性、整像素坐标；START／HOME／版权保持当前位置，R/L/HOME 等距。
 # Native credit alpha starts at screen y=220; HOME pane ends at 218 (tested).
@@ -237,6 +239,47 @@ def add_title_panes(layout: bytes, extra_panes: tuple[tuple[bytes, str], ...],
     return bytes(result)
 
 
+def add_patch_version(layout: bytes, *, native_pane: bytes, name: bytes, label: str) -> bytes:
+    """Keep the native version intact; place its static child at the upper left."""
+    chunks = sections(layout)
+    matches = [i for i, (tag, pos, _) in enumerate(chunks)
+               if tag == b"txt1" and layout[pos+12:pos+36].split(b"\0")[0] == native_pane]
+    if len(matches) != 1:
+        raise ValueError("missing unique native upper-screen version pane")
+    index = matches[0]
+    _, pos, size = chunks[index]
+    if index+1 >= len(chunks):
+        raise ValueError("missing native version font-width property")
+    tag, user_pos, user_size = chunks[index+1]
+    if tag != b"usd1" or user_size != 36 or layout[user_pos+28:user_pos+36] != b"g_fw\0\0\0\0":
+        raise ValueError("unsupported native version font-width property")
+    native = layout[pos:pos+size]
+    if (struct.unpack_from("<3f", native, 36) != (-140.0, -110.0, 0.0) or
+            struct.unpack_from("<2f", native, 68) != (120.0, 20.0) or
+            native[9] != 4 or native[84] != 3 or u32(native, 88) != 116):
+        raise ValueError("unsupported native upper-screen version geometry")
+    encoded = (label + "\0").encode("utf-16le")
+    if not label or not label.isascii() or "\0" in label or len(encoded) > MODE_TEXT_CAPACITY:
+        raise ValueError("invalid patch-version title label")
+    pane = bytearray(native[:116] + encoded + bytes((-len(encoded)) % 4))
+    struct.pack_into("<I", pane, 4, len(pane))
+    pane[12:36] = name.ljust(24, b"\0")
+    pane[8] |= 2
+    # Keep the native font/color/fade and integral top-left placement.
+    # 保留原字号／字体／白色／淡入淡出和整像素左上角位置。
+    struct.pack_into("<3f", pane, 36, (PATCH_VERSION_WIDTH-120.0)/2,
+                     PATCH_VERSION_CENTER_Y-struct.unpack_from("<f", native, 40)[0], 0.0)
+    struct.pack_into("<f", pane, 68, PATCH_VERSION_WIDTH)
+    struct.pack_into("<2H", pane, 76, MODE_TEXT_CAPACITY, len(encoded))
+    children = (b"pas1" + struct.pack("<I", 8) + pane + layout[user_pos:user_pos+user_size] +
+                b"pae1" + struct.pack("<I", 8))
+    result = bytearray(layout[:user_pos+user_size] + children + layout[user_pos+user_size:])
+    struct.pack_into("<I", result, 12, len(result))
+    struct.pack_into("<H", result, 16, len(chunks)+4)
+    sections(result)
+    return bytes(result)
+
+
 def package_files(data: bytes) -> tuple[int, int, list[tuple[int, str, int, int]]]:
     if len(data) < 8:
         raise ValueError("truncated title resource package")
@@ -279,6 +322,7 @@ def package_files(data: bytes) -> tuple[int, int, list[tuple[int, str, int, int]
 
 def patch_package(data: bytes, *, native_pane_count: int, lower_layout: str,
                   extra_panes: tuple[tuple[bytes, str], ...], mode_text_color: bytes,
+                  upper_layout: str, native_version_pane: bytes, patch_label: str,
                   native_language_pane: bytes | None = None) -> bytes:
     names, darc, files = package_files(data)
     if u32(data, names) != native_pane_count:
@@ -296,8 +340,18 @@ def patch_package(data: bytes, *, native_pane_count: int, lower_layout: str,
         raise ValueError("missing unique lower title layout")
     entry, _, start, size = target[0]
     layout = reposition_title_hints(data[start:start + size], native_language_pane=native_language_pane)
-    layout = add_title_panes(layout, extra_panes, mode_text_color=mode_text_color)
-    delta = len(layout) - size
+    lower_panes = tuple((name, kind) for name, kind in extra_panes if kind != "patch_version")
+    versions = [name for name, kind in extra_panes if kind == "patch_version"]
+    if len(versions) != 1:
+        raise ValueError("title must add exactly one patch-version pane")
+    layout = add_title_panes(layout, lower_panes, mode_text_color=mode_text_color)
+    replacements = {entry: layout}
+    target = [item for item in files if item[1] == upper_layout]
+    if len(target) != 1:
+        raise ValueError("missing unique upper title layout")
+    upper_entry, _, upper_start, upper_size = target[0]
+    replacements[upper_entry] = add_patch_version(data[upper_start:upper_start+upper_size],
+        native_pane=native_version_pane, name=versions[0], label=patch_label)
     # Mover has only 24 padding bytes, so one 32-byte name moves its DARC by
     # 128 bytes. DARC offsets are relative to DARC, not the outer package.
     # Mover 的名称表余量仅 24 字节，追加名称后按 128 字节重新对齐 DARC。
@@ -306,13 +360,17 @@ def patch_package(data: bytes, *, native_pane_count: int, lower_layout: str,
         prefix.extend(name.ljust(32, b"\0"))
     prefix.extend(bytes((-len(prefix)) % 128))
     struct.pack_into("<I", prefix, names, native_pane_count + len(extra_panes))
-    body = bytearray(data[darc:start] + layout + data[start + size:])
+    body = bytearray(data[darc:])
+    delta = 0
+    for position, _, file_start, file_size in sorted(files, key=lambda item: item[2]):
+        at = file_start-darc+delta
+        if position in replacements:
+            replacement = replacements[position]
+            body[at:at+file_size] = replacement
+            struct.pack_into("<I", body, position-darc+8, len(replacement))
+            delta += len(replacement)-file_size
+        struct.pack_into("<I", body, position-darc+4, at)
     struct.pack_into("<I", body, 12, len(body))
-    for position, _, file_start, _ in files:
-        if position == entry:
-            struct.pack_into("<I", body, position - darc + 8, len(layout))
-        elif file_start >= start + size:
-            struct.pack_into("<I", body, position - darc + 4, file_start - darc + delta)
     result = prefix + body
     package_files(result)
     return bytes(result)
@@ -320,6 +378,7 @@ def patch_package(data: bytes, *, native_pane_count: int, lower_layout: str,
 
 def patch_title_archive(data: bytes, *, native_pane_count: int, lower_layout: str,
                         extra_panes: tuple[tuple[bytes, str], ...], mode_text_color: bytes,
+                        upper_layout: str, native_version_pane: bytes, patch_label: str,
                         native_language_pane: bytes | None = None) -> bytes:
     version, alignment, entries = read_garc(data)
     if len(entries) != 1 or set(entries[0].files) != {0}:
@@ -327,6 +386,7 @@ def patch_title_archive(data: bytes, *, native_pane_count: int, lower_layout: st
     package = patch_package(decompress_lz11(entries[0].files[0]),
                             native_pane_count=native_pane_count, lower_layout=lower_layout,
                             extra_panes=extra_panes, mode_text_color=mode_text_color,
+                            upper_layout=upper_layout, native_version_pane=native_version_pane, patch_label=patch_label,
                             native_language_pane=native_language_pane)
     entries[0].files[0] = compress_lz11(package)
     rebuilt = write_garc(version, alignment, entries)
@@ -338,11 +398,19 @@ def patch_title_archive(data: bytes, *, native_pane_count: int, lower_layout: st
 def build_title_archive(source_romfs: Path, output_romfs: Path, *, archive: str,
                         native_pane_count: int, lower_layout: str,
                         extra_panes: tuple[tuple[bytes, str], ...], mode_text_color: bytes,
+                        upper_layout: str, native_version_pane: bytes, patch_label: str,
                         native_language_pane: bytes | None = None) -> None:
+    from title_font import character_widths
+    fonts = read_garc((source_romfs / "a/0/2/3").read_bytes())[2]
+    for index in range(3):
+        widths = character_widths(fonts[index].files[0])
+        if any(char not in widths for char in patch_label) or sum(widths[char] for char in patch_label) > PATCH_VERSION_WIDTH:
+            raise ValueError("patch-version label has missing glyphs or exceeds its single-line pane")
     relative = Path("a") / archive
     source, output = source_romfs / relative, output_romfs / relative
     patched = patch_title_archive(source.read_bytes(), native_pane_count=native_pane_count,
                                   lower_layout=lower_layout, extra_panes=extra_panes,
+                                  upper_layout=upper_layout, native_version_pane=native_version_pane, patch_label=patch_label,
                                   mode_text_color=mode_text_color, native_language_pane=native_language_pane)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(patched)

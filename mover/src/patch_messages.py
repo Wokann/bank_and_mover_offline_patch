@@ -13,8 +13,10 @@ from pathlib import Path
 
 from tools import message_archive as message_codec
 from tools.title_layout import build_title_archive
+from patch_version import add_version_arguments, label_from_arguments
 from title_font import build_title_fonts
 from title_messages import L_BUTTON, language_hint, mode_messages, mode_switch_hint, USER_LABEL_MESSAGES, USER_SWITCH_HINTS
+from storage_messages import storage_notice_lines, verify_storage_notice_fonts
 
 
 ARCHIVES = ("0/0/4", "0/0/5", "0/0/6", "0/0/7", "0/0/8", "0/0/9",
@@ -130,6 +132,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source-romfs", required=True, type=Path)
     parser.add_argument("--output-romfs", required=True, type=Path)
+    add_version_arguments(parser)
     args = parser.parse_args()
     subprocess.run([sys.executable, "-B", str(Path(__file__).absolute().parents[2] /
                     "common/tools/check_file_links.py"), "--recursive", "--allow-missing",
@@ -173,6 +176,7 @@ def main() -> None:
                 (MISSING_BANK_DISCONNECT_MESSAGES[archive], flags(STOCK_DISCONNECT_LINE)),
                 (USER_LABEL_MESSAGES[archive], flags(TITLE_HOME_LINE)),
                 (USER_SWITCH_HINTS[archive], flags(TITLE_HOME_LINE)),
+                *((text, flags(STOCK_DISCONNECT_LINE)) for text in storage_notice_lines(archive)),
             ),
             # Preserve the original entry's zero padding and flags. Only the
             # one button code unit changes; do not re-encode the displayed string.
@@ -225,8 +229,9 @@ def main() -> None:
         destination.write_bytes(rebuilt)
         print(f"patched {archive} -> {destination}")
 
-    build_title_archive(args.source_romfs, args.output_romfs)
+    build_title_archive(args.source_romfs, args.output_romfs, patch_label=label_from_arguments(args))
     build_title_fonts(args.source_romfs, args.output_romfs)
+    verify_storage_notice_fonts((args.output_romfs / "a/0/2/3").read_bytes())
 
 
 if __name__ == "__main__":

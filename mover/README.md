@@ -156,6 +156,8 @@ make -C mover
 make -C mover ARMIPS=/path/to/armips IPS_TOOL=/path/to/flips
 ```
 
+The default label combines the root `VERSION` with the Git short revision. Release mode requires explicit `PATCH_RELEASE=1`. It appears at the upper screen's top left; the official version is unchanged. See [shared build instructions](../README.md#building-from-source) for version updates and builds without Git metadata.
+
 Output: `release/00040000000C9C00/`. Builds preserve startup initialization,
 place expansion after original BSS, and check BPS, ExHeader, mode branches and
 all ten language archives. A preceding `clean` is unnecessary; it deletes this

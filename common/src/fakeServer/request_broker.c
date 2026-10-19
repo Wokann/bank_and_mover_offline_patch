@@ -55,7 +55,12 @@ int FsAsyncBroker_Accept(FsAsyncBroker *broker,uintptr_t peer,uintptr_t request,
            the job address or an earlier canceled job was never polled again. */
         /* 原远端对象最多持有一个未完成请求；新发送也是精确生命周期边界，
            包括作业地址重用及旧取消请求不再被轮询的情况。 */
-        if (entry->identity && entry->peer==peer)
+        /* The title catalogue/commit is a session boundary. Cancel all older
+           consumers before it can select another user. Running work finishes
+           under the old selection; the serialized title job follows it. */
+        /* 标题用户查询／确认是会话边界，先取消旧消费者；正在执行的任务仍在旧用户
+           下完成，串行的标题任务随后才切换用户，旧结果不再投递给新会话。 */
+        if (entry->identity && (entry->peer==peer || input->operation==FS_SERVICE_TITLE_USERS))
             cancelPeer(broker,entry);
         if (!entry->identity && !slot) slot=entry;
     }

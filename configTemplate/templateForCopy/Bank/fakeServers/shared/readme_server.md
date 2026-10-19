@@ -7,7 +7,7 @@ Three basic files may be supplied manually. Missing files are generated; malform
 | Relative to sd:/3ds/Bank/ | Purpose |
 | --- | --- |
 | `client/client.conf` | User selection and registry; see the [client guide](../../client/readme_client.md). |
-| `fakeServers/shared/server.conf` | Shared free/trial windows, annual prices and recharge amounts. |
+| `fakeServers/shared/server.conf` | Shared free/trial windows, annual prices, recharge amounts and diagnostic logging switch. |
 | `fakeServers/users/<userID>/user.conf` | Personal console locale, currency, pass/trial records and balances; see the [personal guide](../users/readme_user.md). |
 
 Balances share each user's user.conf with pass records. Players supply optional gift/Mover configuration, words and assets themselves; missing extensions remain disabled.
@@ -24,7 +24,7 @@ The three basic configurations verify staging, rotate the old primary to .bak an
 
 ## Shared server.conf
 
-Ticket policy belongs to [ticket], custom options to the final [custom]; see the complete [template](server.conf).
+Shared ticket policy belongs to [ticket]; see the complete [template](server.conf). Account custom options belong to personal `user.conf`.
 
 ### Free and trial windows
 
@@ -66,67 +66,20 @@ Unsuffixed entries are common defaults. Region suffixes include .JPN/.USA/.EUR/.
 
 For $NONE, 807 is a custom value representing the highest Pokedex number supported by Bank; both the default annual price and recharge amount are 807, while the personal balance starts at zero. Other currencies use project historical-price presets, without taxes or live exchange rates. USD 499 means $4.99. Currency selection belongs to [ticket] in the selected user's user.conf, immediately above the balances: autoCurrency=true derives currentCurrency from the user's effective region/country; false uses currentCurrency manually, even if it conflicts with the region. The UI language is not used. Manual NONE and unsupported automatic mappings use NONE policy and personal NONE balance. $NONE supports local purchases/recharges. Balances are not real eShop funds. Valid manually configured prices/recharge amounts, including zero, are retained; only missing or invalid components reset to defaults.
 
-## Custom options
-
-Place these project-specific options at the end of shared `server.conf`; both default off:
+## Diagnostic logging
 
 ```ini
-[custom]
-enableMoverv1.2=false;
-allowFanTranslationCHN=false;
+[debug]
+enablelog=false;
 ```
 
-### enableMoverv1.2
+This global switch is shared by Bank and Mover, not stored per account. Logging is off by default: no events are recorded and no log file is created, truncated or written; existing logs remain untouched. Set it to `true;` and restart the title to record diagnostics. An enabled launch overwrites that title's `client/log/bank.log` or `client/log/mover.log`. User changes and title-screen returns neither reload the switch nor clear the current log. Disable it and restart after debugging to reduce SD writes.
 
-Offline RGBY only: retain constructor-generated random gender using the species ratio,
-rather than overwriting it from Attack DV. Shiny requires Attack DV 10, Defense DV in
-2/3/6/7/10/11/14/15, and Speed/Special DV both 10. The old Japanese/Western character
-maps also apply, including Western 0xE8 period becoming a hyphen, 0xE0 apostrophe becoming
-a space, and unsupported digits/diacritics. Fixed-gender and genderless species remain native.
+Missing switches or switches with no valid value mean off; the last valid true/false duplicate wins. A missing primary configuration may read its backup, never staging. Logs exclude account names, transaction tokens and file bodies; logging failure does not change business results.
 
-Off preserves v1.5. Gen2, Gen5 and online paths never enter these wrappers. This does not
-roll back server screening, Bank format, transactions, locale or the whole application,
-and cannot recreate a historical server. See the [conversion reference](https://bulbapedia.bulbagarden.net/wiki/Pok%C3%A9_Transporter#From_Generation_I_and_II), a community source rather than a complete official algorithm specification.
+## Custom options
 
-### allowFanTranslationCHN
-
-Before loading the selected source's `checkPokemon.conf`, this option actually writes
-`enabled=0;` in an existing `[rule.BanUnicodeChinese]`. Missing/damaged enabled fields
-become zero; duplicates merge. Other fields, expressions, comments and rules are retained.
-Publication verifies `checkPokemon.tmp`, rotates the previous file to `checkPokemon.bak`,
-then publishes staging. An already-disabled unchanged rule causes no write. Missing primary
-may read published backup; orphan staging is not authority. Missing files/rules are not
-invented. Turning permission off never silently re-enables the rule; edit it manually.
-
-- NDS already uses UTF-16: retain Chinese nickname/OT, including unnicknamed Han names
-  otherwise replaced by a default species name. The nickname flag itself is not fabricated.
-- VC uses the English Crystal table for raw alphabet 1, Korean Gold/Silver for alphabet 6.
-  Source means string encoding, not UI/console/wrapper region. Korean-based international
-  fan patches still use the Korean table. Ordinary Korean bytes can conflict: leave off
-  for untranslated Korean saves.
-- Only generated candidate names change, not source saves. Unknown/truncated pairs fall
-  back for the whole name, never publishing a partial conversion.
-- NGWord, other screening, native checksums/encryption, callbacks and transactions remain.
-  This permission is independent of checkName being enabled/present. If both custom
-  options are on, the explicit fan table restores Chinese after legacy conversion.
-  A requested nickname/OT correction takes priority: restoration never resurrects that
-  field's rejected name. To retain Chinese without name screening, set enableCheckName=false;
-  in the selected source's checkName.conf [global]. Pokemon screening remains independent.
-
-Conversion options accompany the background Bank download; later policy requests read
-current rule/name files. Mid-operation edits do not retroactively transcode candidates;
-return to the title and reconnect after changing conversion options.
-
-Each table has one project-specific source, not an official encoding specification;
-other hacks, projects and revised tables are not covered:
-
-- [TomJinW/pokecrystal_cn](https://github.com/TomJinW/pokecrystal_cn/tree/f487d44c0d6f75a48a4a4b975ca04bc3914b3f52):
-  pinned [charmap_cn.asm](https://github.com/TomJinW/pokecrystal_cn/blob/f487d44c0d6f75a48a4a4b975ca04bc3914b3f52/constants/charmap_cn.asm), 7615 two-byte mappings.
-- [TomJinW/PKMN_GSCHS](https://github.com/TomJinW/PKMN_GSCHS/tree/c3947b83c6c66a015103e1bc08bbca7f2a862d3b):
-  pinned final [fontTBL.txt](https://github.com/TomJinW/PKMN_GSCHS/blob/c3947b83c6c66a015103e1bc08bbca7f2a862d3b/05_Font/fontTBL.txt), 2350 mappings.
-
-No ROMs, upstream patches or font images are distributed. The NGWord
-GPL text does not automatically license these separate references under the same terms.
+These account-specific switches belong to `user.conf` and default off. See [user configuration](../users/readme_user.md#custom-options). Shared `server.conf` does not read them.
 
 ## Personal configuration
 

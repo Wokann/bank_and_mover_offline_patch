@@ -53,6 +53,55 @@ balance.$ZAR=0;
 
 年券一般增加 365 天，有效期未结束则接续，否则新起算；购买后沿原流程重查。免费活动、已购期限和试用记录可以并存，免费期优先显示免费使用权，个人购券记录保留。
 
+## 自定义选项
+
+以下条目放在当前账户的 `user.conf` 末尾，首次生成或缺失时默认全部关闭，不是官方设置。仅影响这个账户，不从共享 `server.conf` 读取：
+
+```ini
+[custom]
+enableMoverv1.2=false;
+allowFanTranslationCHN=false;
+```
+
+### enableMoverv1.2
+
+只影响离线第一世代 RGBY 的转换：保留原构造器按种族性别比例生成的随机性别，
+不再按攻击 DV 覆盖；闪光条件改为攻击 DV=10、防御 DV 为 2/3/6/7/10/11/14/15，
+速度与特殊 DV 都为 10。还使用旧日文／西文字符映射：例如西文 0xE8 句点变连字符、
+0xE0 撇号变空格，以及旧表不支持的数字／重音字符。无性别及固定性别仍由原构造器处理。
+
+关闭时保留 v1.5。金银／水晶、Gen5、在线模式不进入旧版包装；不会回退服务器筛选、
+银行格式、事务、地区设置或整个软件。它只复现已核实的本地转换差异，不恢复历史服务器。
+版本差异见 [Poké Transporter 转换说明](https://bulbapedia.bulbagarden.net/wiki/Pok%C3%A9_Transporter#From_Generation_I_and_II)；这是社区资料，不是官方完整算法规范。
+
+### allowFanTranslationCHN
+
+开启后，当前账户载入的 `BanUnicodeChinese` 规则在内存中一律按关闭处理，不论共享文件中的 `enabled` 是 0 还是 1。共享 `checkPokemon.conf` 不修改，不生成其 `.bak`／`.tmp`，也不新建缺少的规则或文件。其他账户保持各自开关和共享规则的配置。若要按账户决定是否拒绝汉字，共享规则应保留 `enabled=1;`；共享规则写为 0 会对所有账户关闭该规则。
+
+- NDS：已有姓名是 UTF-16，无需转码；恢复中文昵称／OT，即使没有昵称标记也不让默认
+  种族名覆盖中文，昵称标记本身不伪造。
+- VC：原始英文字母表 1 使用美版《水晶》汉化表，韩文字母表 6 使用韩版《金银》汉化表。
+  指实际字符串来源，不是界面语言、主机地区或外壳地区；基于韩版编码的国际版汉化仍用韩文表。
+- 只修改生成候选的姓名，原存档不改。未知／截断双字节序列整段回退原转换，不交付半截名字。
+  普通韩文可能与汉化码冲突，未汉化的韩文存档应关闭此项。
+- 普通 NGWord、其他筛选、原校验／加密、回调及事务保持。该选项独立于姓名词表开关；
+  关闭 checkName 不会关闭汉化。与旧版选项同时开启时，最后由明确启用的汉化表恢复中文名字。
+  若筛选要求修改昵称／OT，汉化保留不会恢复该字段的旧名字。要保留中文且不做姓名筛选，
+  在对应来源的 checkName.conf 的 [global] 中设置 enableCheckName=false;；其他宝可梦筛选不受影响。
+
+转换选项随后台银行下载结果交给客户端；后续策略请求读取当时的检查／姓名表。
+已生成的候选不会因中途改配置追溯转码，修改选项后应返回标题重新连接。
+
+两个汉化表均只有各自项目这一个来源，不是官方编码规范，不保证其他改版或以后改表兼容：
+
+- [TomJinW/pokecrystal_cn](https://github.com/TomJinW/pokecrystal_cn/tree/f487d44c0d6f75a48a4a4b975ca04bc3914b3f52)：
+  固定 [charmap_cn.asm](https://github.com/TomJinW/pokecrystal_cn/blob/f487d44c0d6f75a48a4a4b975ca04bc3914b3f52/constants/charmap_cn.asm)，7615 个双字节映射。
+- [TomJinW/PKMN_GSCHS](https://github.com/TomJinW/PKMN_GSCHS/tree/c3947b83c6c66a015103e1bc08bbca7f2a862d3b)：
+  固定最终 [fontTBL.txt](https://github.com/TomJinW/PKMN_GSCHS/blob/c3947b83c6c66a015103e1bc08bbca7f2a862d3b/05_Font/fontTBL.txt)，2350 个映射。
+
+不附带 ROM、上游补丁或字体图像；NGWord 的 GPL 文本不自动授予这些独立资料同样的许可。
+
+
 ## 主机地区与币种
 
 `[console]` 属于所选用户。默认 `autoRegion=false`：首次生成／缺损时从应用可见的 CFG 取得四项固定数值，已有合法值不因更换主机或 Luma 改区而刷新。

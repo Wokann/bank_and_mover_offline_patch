@@ -3,6 +3,7 @@
 #include "fakeServer/numbers.h"
 #include "fakeServer/conf_text.h"
 #include "fs_system/utf_path.h"
+#include "fs_system/diagnostic_log.h"
 #include <string.h>
 
 static int number(const char *text,uint32_t *out)
@@ -334,10 +335,12 @@ static int selectUser(const FsProfileIo *io,FsUserProfile *user,int initialize)
     if(initialize && user->ready==FS_USER_UNINITIALIZED)user->ready=0;
     if(user->ready)return FS_OK;
     FsClientConfig config;int result=FsClient_Load(io->files,&config);
+    FsDiag_Checkpoint("user.select.config",result,(uint32_t)initialize,0,0);
     if(result!=FS_OK)return result;
     Scan scan={io->files,&config,0,FS_OK};
     int left=io->directories(FS_CLIENT_USERS,directory,&scan);
     int right=io->directories(FS_SERVER_USERS,directory,&scan);
+    FsDiag_Record("user.select.scan",scan.result,(uint32_t)left,(uint32_t)right,scan.any);
     if(left<0 || right<0 || scan.result!=FS_OK){result=FS_IO_ERROR;goto done;}
     FsUserProfile selected={0};
     result=configuredUser(io,&config,&selected,initialize,&scan.any);if(result!=FS_OK)goto done;
@@ -369,12 +372,14 @@ static int selectUser(const FsProfileIo *io,FsUserProfile *user,int initialize)
     static const char *const roots[]={"/3ds","/3ds/Bank","/3ds/Bank/client",FS_CLIENT_USERS,
         "/3ds/Bank/fakeServers",FS_SERVER_USERS,"/3ds/Bank/fakeServers/shared"};
     for(uint32_t i=0;i<sizeof(roots)/sizeof(*roots);i++)if(!io->mkdir(roots[i])){result=FS_IO_ERROR;goto done;}
+    FsDiag_Checkpoint("user.select.roots.ready",FS_OK,selected.number,0,0);
     if(!FsUser_Path(&selected,1,"",path) || !io->mkdir(path) ||
         !FsUser_Path(&selected,0,"",path) || !io->mkdir(path)){result=FS_IO_ERROR;goto done;}
     if(!scan.any){result=migrateLegacy(io,&selected);if(result!=FS_OK)goto done;}
     result=FsClient_Save(io->files,&config);
     if(result==FS_OK){selected.ready=FS_USER_READY;*user=selected;}
 done:
+    FsDiag_Record("user.select.end",result,(uint32_t)initialize,0,0);
     FsClient_Release(io->files,&config);return result;
 }
 

@@ -48,6 +48,9 @@ sd:/3ds/Bank/
 │   ├── client.conf
 │   ├── client.bak
 │   ├── client.tmp
+│   ├── log/
+│   │   ├── bank.log
+│   │   └── mover.log
 │   ├── readme_client.md
 │   ├── readme_client.zh-cn.md
 │   └── users/
@@ -89,13 +92,9 @@ sd:/3ds/Bank/
     │       ├── LICENSE.badword.txt
     │       ├── nds/
     │       │   ├── checkPokemon.conf
-    │       │   ├── checkPokemon.bak
-    │       │   ├── checkPokemon.tmp
     │       │   └── checkName.conf
     │       └── vc/
     │           ├── checkPokemon.conf
-    │           ├── checkPokemon.bak
-    │           ├── checkPokemon.tmp
     │           └── checkName.conf
     └── users/
         ├── readme_user.md
@@ -126,13 +125,14 @@ sd:/3ds/Bank/
 
 | 主文件／对象 | 备份文件 | 暂存文件 | 发布与保留策略 |
 | --- | --- | --- | --- |
+| `client/log/bank.log`、`client/log/mover.log` | 无 | 无 | 仅在共享 server.conf 的 [debug] enablelog=true; 时记录，默认关闭。启用后，对应软件每次启动覆盖自己的旧日志，返回标题和切换用户不清空；关闭时保留旧文件，不记录或写入。不记录账户名、令牌或文件正文，写入失败不改变业务结果。 |
 | `client/client.conf` | `client.bak` | `client.tmp` | 通用保护；保存用户选择及用户表，保留写入前一版。 |
 | `fakeServers/shared/server.conf` | `server.bak` | `server.tmp` | 通用保护；保存共享窗口、价格及充值额，保留写入前一版。 |
 | `fakeServers/users/<userID>/user.conf` | `user.bak` | `user.tmp` | 通用保护；个人购券／试用记录与余额作为一份文件一起发布，保留写入前一版。 |
 | `client/users/<userID>/sav.bin` | `sav.bak` | `sav.tmp` | 专用事务保护；包括身份和事务字段，保留写入前一版，不按普通配置回退。 |
 | `fakeServers/users/<userID>/bankdata.bin` | `bankdata.bak` | `bankdata.tmp` | 专用银行事务保护；保留实际修改前一版，恢复须符合事务及正文检查。 |
 | `fakeServers/users/<userID>/transaction.bin` | `transaction.bak` | `transaction.tmp` | 专用日志保护；保留上一条已发布日志，核对记录 CRC32、格式、序号与事务阶段。 |
-| `fakeServers/shared/mover/<nds或vc>/checkPokemon.conf` | `checkPokemon.bak` | `checkPokemon.tmp` | 仅汉化许可把 BanUnicodeChinese 的 enabled 写为 0；保留修改前一版，不生成缺失检查表。 |
+| `fakeServers/shared/mover/<nds或vc>/checkPokemon.conf` | 无 | 无 | 玩家提供的只读筛选配置；账户汉化许可仅在内存中覆盖指定规则。 |
 | 所选 NDS 游戏旁的 `x.sav`，不在 Bank 目录内 | `x.bak` | `x.tmp` | 来源及令牌约束的事务保护；确认保存及清令牌保存完成后清理，意外中断时保留。 |
 | Bank 主机存档，Mover 直接访问其中的 `/turtle` | 不额外增加 SD 备份 | 不额外增加 SD 暂存 | Bank 沿原存档流程；Mover 仅更新语言字段，提交后重新打开并核对整份记录。 |
 | 所选卡带、3DS 数字版及 VC 游戏存档 | 由原存档系统管理 | 由原存档系统管理 | 保留原版校验、保存及事务流程，不套用通用配置回退，不臆造物理文件路径。 |

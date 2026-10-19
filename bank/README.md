@@ -175,6 +175,8 @@ make -C bank
 make -C bank ARMIPS=/path/to/armips IPS_TOOL=/path/to/flips
 ```
 
+The default label combines the root `VERSION` with the Git short revision. Release mode requires explicit `PATCH_RELEASE=1`. It appears at the upper screen's top left; the official version is unchanged. See [shared build instructions](../README.md#building-from-source) for version updates and builds without Git metadata.
+
 Output: `release/00040000000C9B00/`. Builds verify BPS reconstruction, native
 hooks/modes, ExHeader and all ten language archives. A preceding `clean` is
 normally unnecessary; it deletes this title's build/release outputs. Do not

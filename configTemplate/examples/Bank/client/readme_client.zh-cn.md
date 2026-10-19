@@ -4,6 +4,14 @@
 
 配置为 sd:/3ds/Bank/client/client.conf；缺失自动生成，手动放入的合法值直接使用。下面展示初次使用的默认格式；已预填的用户表按实际条目读取。
 
+`log` 子目录中的 `bank.log`、`mover.log` 仅在共享 `server.conf` 的
+`[debug] enablelog=true;` 时记录，默认关闭；见[日志开关说明](../fakeServers/shared/readme_server.zh-cn.md#诊断日志)。
+关闭时不记录、不写日志，已有文件保持不变。启用后，每次启动对应软件
+覆盖自己的旧日志，不生成日志备份；切换用户或返回标题不清空本次日志。日志不含账户名、
+事务令牌或文件正文；写日志失败不会阻止正常业务。
+单次日志上限为 1 MiB，达到上限后停止追加，下一次启动重新覆盖。普通记录合批写入，
+请求开始与结束时刷新；意外中断时末尾尚未刷新的记录可能缺失。
+
 ```ini
 [global]
 activeUser=auto;
@@ -64,6 +72,9 @@ sd:/3ds/Bank/
 │   ├── client.conf
 │   ├── client.bak
 │   ├── client.tmp
+│   ├── log/
+│   │   ├── bank.log
+│   │   └── mover.log
 │   ├── readme_client.md
 │   ├── readme_client.zh-cn.md
 │   └── users/
@@ -105,13 +116,9 @@ sd:/3ds/Bank/
     │       ├── LICENSE.badword.txt
     │       ├── nds/
     │       │   ├── checkPokemon.conf
-    │       │   ├── checkPokemon.bak
-    │       │   ├── checkPokemon.tmp
     │       │   └── checkName.conf
     │       └── vc/
     │           ├── checkPokemon.conf
-    │           ├── checkPokemon.bak
-    │           ├── checkPokemon.tmp
     │           └── checkName.conf
     └── users/
         ├── readme_user.md
@@ -130,7 +137,7 @@ sd:/3ds/Bank/
 
 上图同时列出分发文件及运行时可能出现的用户／临时文件，不要求预先创建。`<userID>` 代表每个独立用户；根目录的 bankdata 和 sav 文件仅在旧数据迁移前可能存在。分类说明见[统一目录说明](../readme_fakeServer.zh-cn.md)。
 
-Bank/Mover 共用同一用户表及所选用户数据。三份基础配置可自动生成；礼物、Mover 配置／词表／素材由玩家手动放入。除汉化许可主动关闭指定 BanUnicodeChinese 规则字段外，附加输入保持只读，详见共享服务器说明。
+Bank/Mover 共用同一用户表及所选用户数据。三份基础配置可自动生成；礼物、Mover 配置／词表／素材由玩家手动放入。附加输入保持只读；汉化许可仅影响当前账户的内存规则，详见用户配置说明。
 
 请先用 Bank 完成离线用户初始化及银行创建或迁移。离线 Mover 不代建银行，也不触发旧文件迁移：若当前用户目录尚不存在，它只在内存读取共享配置／默认值，不创建目录或改写配置，不影响之后 Bank 的首次自动迁移。银行正文缺失按原下载失败流程结束，不显示“服务器被锁定”，也不继续传送保存。已有用户的正常配置修复及银行备份恢复不受影响。
 

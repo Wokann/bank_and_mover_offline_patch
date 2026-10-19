@@ -1,5 +1,7 @@
 #include "fakeServer/service_request.h"
 #include "fakeServer/fake_servers.h"
+#include "fs_system/diagnostic_log.h"
+#include "fs_system/storage_notice.h"
 #include <stddef.h>
 #include <string.h>
 #if defined(__arm__)
@@ -14,6 +16,8 @@
 #else
 #define SERVICE_HAS_LOCAL_SOURCE 0
 #endif
+
+static int executeRequest(void *,const void *,uint32_t,void *,uint32_t,uint32_t *,void *,uint32_t);
 
 _Static_assert(sizeof(FsServiceRequest)<=FS_ASYNC_SMALL_CAPACITY,"service input exceeds task capacity");
 _Static_assert(sizeof(FsServiceReply)<=FS_ASYNC_SMALL_CAPACITY,"service output exceeds task capacity");
@@ -112,8 +116,11 @@ static int ensureServer(FsServiceContext *context)
 {
     if (FsServer_Connected(context->server)) return FS_OK;
     FsConfigError error;
-    (void)FakeServerApi_Connect(context->server,context->capacity,context->owner,0,
+    int connected=FakeServerApi_Connect(context->server,context->capacity,context->owner,0,
         context->storage,context->transactions,&error);
+    FsDiag_Record("server.connect.result",connected,context->owner,
+        FsServer_Connected(context->server),0);
+    (void)connected;
     /* As in the existing client Get, pending recovery does not make the local
        storage disappear. The requested endpoint still checks its own policy,
        authority and transaction state; no success is fabricated here. */
@@ -144,7 +151,7 @@ static int observeSnapshot(uint32_t index,FsMoverCandidate *candidate,FsMoverDet
     return FS_OK;
 }
 
-int FsService_Execute(void *opaque,const void *input,uint32_t inputSize,
+static int executeRequest(void *opaque,const void *input,uint32_t inputSize,
     void *output,uint32_t outputCapacity,uint32_t *outputSize,void *body,uint32_t bodySize)
 {
     if (outputSize) *outputSize=0;
@@ -170,14 +177,20 @@ int FsService_Execute(void *opaque,const void *input,uint32_t inputSize,
     if(request->operation==FS_SERVICE_TITLE_USERS) {
 #if defined(__arm__)
         if(context->storage!=&FsSdStorage)return FS_UNSUPPORTED;
+        /* Retire source evidence even if the server never opened successfully.
+           No persistent participant or interrupted transaction is removed. */
+        /* 即使服务器未成功打开也清除旧来源依据；不删除任何持久化文件或未决事务。 */
+#if SERVICE_HAS_LOCAL_SOURCE
+        if(context->localSource)FsLocalSource_Discard(context->localSource);
+#endif
+        FsServer_Disconnect(context->server);
+        FsSd_ResetUser();
         int result=FsSd_UserMenu(request->input.users.action,request->input.users.activeUser,
             body,bodySize,&reply->output.users,&reply->bodySize);
         /* Even a read-only title refresh may discover a different auto/manual
            mapping from startup. Retire only volatile old-session state, so
            later settings reads and server opens use the displayed account. */
         /* 纯查询也可能发现映射已变化；仅丢弃旧会话内存，防止显示新用户却仍读旧路径。 */
-        if(FsServer_Connected(context->server))FsServer_Disconnect(context->server);
-        FsSd_ResetUser();
         return result;
 #else
         return FS_UNSUPPORTED;
@@ -220,15 +233,18 @@ int FsService_Execute(void *opaque,const void *input,uint32_t inputSize,
         (context->owner!=FS_TRANSACTION_OWNER_BANK || request->input.shop.onlineFallback))
         return FS_UNSUPPORTED;
     if (request->operation==FS_SERVICE_OPEN) {
-#if defined(__arm__)
-        if(context->storage==&FsSdStorage && !FsServer_Connected(context->server))FsSd_ResetUser();
-#endif
+        /* Settings/source reads may already have pinned the confirmed user.
+           Keep that selection until disconnect or the next title boundary. */
+        /* 设置／来源读取可能已锁定确认的用户，不能在连接时再次改选；仅标题或断开重置。 */
         FsConfigError error;
         return FakeServerApi_Connect(context->server,context->capacity,context->owner,0,
             context->storage,context->transactions,&error);
     }
     if (request->operation==FS_SERVICE_DISCONNECT) {
         FsServer_Connection(context->server,1,&reply->output.connection);
+#if SERVICE_HAS_LOCAL_SOURCE
+        if(context->localSource)FsLocalSource_Discard(context->localSource);
+#endif
 #if defined(__arm__)
         if(context->storage==&FsSdStorage)FsSd_ResetUser();
 #endif
@@ -440,4 +456,14 @@ int FsService_Execute(void *opaque,const void *input,uint32_t inputSize,
     default:
         return FS_UNSUPPORTED;
     }
+}
+
+int FsService_Execute(void *opaque,const void *input,uint32_t inputSize,
+    void *output,uint32_t outputCapacity,uint32_t *outputSize,void *body,uint32_t bodySize)
+{
+    FsStorageNotice_BeginRequest();
+    int result=executeRequest(opaque,input,inputSize,output,outputCapacity,outputSize,body,bodySize);
+    if (output && outputSize && *outputSize==sizeof(FsServiceReply))
+        ((FsServiceReply *)output)->storageIssue=FsStorageNotice_RequestIssue(result);
+    return result;
 }

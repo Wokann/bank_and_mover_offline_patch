@@ -77,10 +77,10 @@ CRC32 用于本地版本识别与偶发损坏检查，不提供抗恶意篡改�
 
 `FsServer_EditConfiguration` 提供基础配置的批量键／段编辑，不是游戏内编辑菜单。
 配置发布先写暂存、校验和回读，再保留旧主文件并改名发布；相同内容不写入。
-姓名词表、礼物和筛选规则不开放通用写入；仅汉化许可可将已有
-`rule.BanUnicodeChinese` 的 `enabled` 写为 `0`。没有该配置时不生造整份规则表。
+姓名词表、礼物和筛选规则保持只读；用户汉化许可仅在内存中将
+`rule.BanUnicodeChinese` 视为关闭，不修改共享规则，也不生造缺失配置。
 
-基础配置和该指定字段使用 [`protected_file`](../../include/fs_system/protected_file.h) 的公共发布机制。
+基础配置使用 [`protected_file`](../../include/fs_system/protected_file.h) 的公共发布机制。
 主文件缺失时可读取其备份；孤立暂存不是正式内容。I/O 失败不等于文件缺失。
 普通配置备份不能代替银行或游戏事务恢复。完整文件清单见
 [写入文件与保护策略](../../../configTemplate/templateForCopy/Bank/readme_fakeServer.zh-cn.md#写入文件与保护策略)。
@@ -151,8 +151,8 @@ NDS 与 VC 分别使用 `checkPokemon.conf` 和 `checkName.conf`。全局关闭�
 | 拒绝 | `1` | `1` |
 | 改昵称／OT／两者 | `250/251/252` | `253/254/255` |
 
-`allowFanTranslationCHN` 默认关闭。开启时使用指定美版／韩版 VC 汉化码表，保留
-Gen5 已有的 UTF-16 中文，并将 Unicode 汉字拒绝规则写为关闭；普通筛选和 NGWord 仍有效。
+`user.conf` 的 `[custom]` 属于当前账户，两个选项默认关闭。`allowFanTranslationCHN`开启时使用指定美版／韩版 VC 汉化码表，保留
+Gen5 已有的 UTF-16 中文，并仅在当前账户内存中关闭 Unicode 汉字拒绝规则；普通筛选和 NGWord 仍有效。
 `enableMoverv1.2` 也默认关闭，仅切换离线 RGBY 的旧性别、闪光和姓名转换机制。
 详细字段、编码范围及数据来源见
 [宝可梦筛选说明](../../../configTemplate/templateForCopy/Bank/fakeServers/shared/mover/readme_checkPokemon.zh-cn.md)与

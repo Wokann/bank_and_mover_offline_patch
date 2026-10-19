@@ -3,6 +3,8 @@
 #include "fs_system/console_identity.h"
 #include "fs_system/console_settings.h"
 #include "fs_system/utf_path.h"
+#include "fs_system/diagnostic_log.h"
+#include "fs_system/storage_notice.h"
 #include "fakeServer/user_profiles.h"
 #include "fakeServer/numbers.h"
 #include "fake_server_context.h"
@@ -103,18 +105,26 @@ static s32 openPath(const FsPathView *path,u32 flags,u32 *handle)
     if (path->type==FS_PATH_TYPE_ASCII)
         return openFile(path->data,path->size,flags,handle);
     const u32 empty=0;
-    return FSUSER_OpenFileDirectly(FSUSER_HandleSlot,handle,0,FS_ARCHIVE_ID_SDMC,
+    FsDiag_Checkpoint("file.open16.begin",0,FsDiag_Path(path->type,path->data,path->size),flags,path->size);
+    s32 result=FSUSER_OpenFileDirectly(FSUSER_HandleSlot,handle,0,FS_ARCHIVE_ID_SDMC,
         FS_PATH_TYPE_EMPTY,&empty,1,path->type,path->data,path->size,flags,0);
+    FsDiag_Record("file.open16.end",result,FsDiag_Path(path->type,path->data,path->size),
+        flags,result?0:*handle);
+    return result;
 }
 
 static int openReadPath(const FsPathView *path,u32 flags,uint32_t *handle,uint64_t *size)
 {
     u32 nativeHandle=0;
     s32 result=openPath(path,flags,&nativeHandle);
-    if (result) return resultIsNotFound(result)?0:-1;
+    if (result) {
+        if (resultIsNotFound(result)) return 0;
+        FsStorageNotice_Mark(FS_STORAGE_ISSUE_IO);return -1;
+    }
     u64 nativeSize=0;
     result=FSFILE_GetSize(&nativeHandle,&nativeSize);
-    if (result) { closeFile(nativeHandle); return -1; }
+    FsDiag_Record("file.size",result,nativeHandle,(u32)nativeSize,(u32)(nativeSize>>32));
+    if (result) { closeFile(nativeHandle);FsStorageNotice_Mark(FS_STORAGE_ISSUE_IO);return -1; }
     *handle=nativeHandle; *size=nativeSize;
     return 1;
 }
@@ -122,31 +132,37 @@ static int openReadPath(const FsPathView *path,u32 flags,uint32_t *handle,uint64
 static int openWritePath(const FsPathView *path,uint32_t *handle)
 {
     u32 nativeHandle=0;
-    if (openPath(path,OPEN_READ|OPEN_WRITE|OPEN_CREATE,&nativeHandle)) return 0;
+    if (!FsStorageNotice_CheckIo(!openPath(path,OPEN_READ|OPEN_WRITE|OPEN_CREATE,&nativeHandle))) return 0;
     *handle=nativeHandle;
     return 1;
 }
 
 static int sdSetSize(uint32_t handle,uint64_t size)
 {
-    return !setSize(handle,size);
+    return FsStorageNotice_CheckIo(!setSize(handle,size));
 }
 
 static int sdRead(uint32_t handle,uint64_t offset,void *data,uint32_t size)
 {
     u32 nativeHandle=handle,actual=0;
-    return !FSFILE_Read(&nativeHandle,&actual,offset,data,size) && actual==size;
+    FsDiag_Checkpoint("file.read.begin",0,handle,(u32)offset,size);
+    s32 result=FSFILE_Read(&nativeHandle,&actual,offset,data,size);
+    FsDiag_Record("file.read.end",result,handle,size,actual);
+    return FsStorageNotice_CheckIo(!result && actual==size);
 }
 
 static int sdWrite(uint32_t handle,uint64_t offset,const void *data,uint32_t size)
 {
     u32 nativeHandle=handle,actual=0;
-    return !FSFILE_Write(&nativeHandle,&actual,offset,data,size,WRITE_FLUSH) && actual==size;
+    FsDiag_Checkpoint("file.write.begin",0,handle,(u32)offset,size);
+    s32 result=FSFILE_Write(&nativeHandle,&actual,offset,data,size,WRITE_FLUSH);
+    FsDiag_Record("file.write.end",result,handle,size,actual);
+    return FsStorageNotice_CheckIo(!result && actual==size);
 }
 
 static int sdClose(uint32_t handle)
 {
-    return !closeFile(handle);
+    return FsStorageNotice_CheckIo(!closeFile(handle));
 }
 
 static int removePath(const FsPathView *path)
@@ -155,7 +171,7 @@ static int removePath(const FsPathView *path)
     if(!nativePath(path,&native,unicode))return 0;
     path=&native;
     u64 archive=0;
-    if (openArchive(&archive)) return 0;
+    if (!FsStorageNotice_CheckIo(!openArchive(&archive))) return 0;
     s32 result;
     if (path->type==FS_PATH_TYPE_ASCII)
         result=pathCommand(FSUSER_CMD_DELETE_FILE,archive,path->data,path->size);
@@ -170,7 +186,7 @@ static int removePath(const FsPathView *path)
     }
     int ok=!result || resultIsNotFound(result);
     s32 closed=closeArchive(archive);
-    return ok && !closed;
+    return FsStorageNotice_CheckIo(ok && !closed);
 }
 
 static int renamePaths(const FsPathView *from,const FsPathView *to)
@@ -179,7 +195,7 @@ static int renamePaths(const FsPathView *from,const FsPathView *to)
     if(!nativePath(from,&a,left) || !nativePath(to,&b,right))return 0;
     from=&a;to=&b;
     u64 archive=0;
-    if (openArchive(&archive)) return 0;
+    if (!FsStorageNotice_CheckIo(!openArchive(&archive))) return 0;
     s32 result;
     if (from->type==FS_PATH_TYPE_ASCII && to->type==FS_PATH_TYPE_ASCII)
         result=renamePath(archive,from->data,from->size,to->data,to->size);
@@ -196,7 +212,7 @@ static int renamePaths(const FsPathView *from,const FsPathView *to)
         if (!result) result=(s32)command[1];
     }
     s32 closed=closeArchive(archive);
-    return !result && !closed;
+    return FsStorageNotice_CheckIo(!result && !closed);
 }
 
 static int storageOpenRead(const char *relative,uint32_t *handle,uint32_t *size)
@@ -294,18 +310,36 @@ static int transactionRename(uint32_t from,uint32_t to,const FsTransactionRecord
         renamePaths(&fromPath,&toPath);
 }
 
+/* ARM provides the 32 x 32 -> 64 multiply without a runtime-library helper. */
+/* ARM 指令可直接完成 32 位乘数的 64 位积，不依赖运行库辅助函数。 */
+__attribute__((target("arm"),noinline))
 static int transactionFreeBytes(uint64_t *bytes)
 {
-    u64 archive=0;
-    if (openArchive(&archive)) return 0;
+    if (!bytes) return 0;
+    *bytes=0;
+    FsDiag_Checkpoint("space.begin",0,0,0,0);
     volatile u32 *command=fsCommandBuffer();
-    command[0]=FSUSER_CMD_GET_FREE_BYTES;
-    command[1]=(u32)archive; command[2]=(u32)(archive>>32);
+    command[0]=FSUSER_CMD_GET_SDMC_ARCHIVE_RESOURCE;
     s32 result=fsSync(*FSUSER_HandleSlot);
     if (!result) result=(s32)command[1];
-    if (!result) *bytes=(u64)command[2]|((u64)command[3]<<32);
-    s32 closed=closeArchive(archive);
-    return !result && !closed;
+    u32 sectorSize=0,clusterSize=0,totalClusters=0,freeClusters=0;
+    if (!result) {
+        sectorSize=command[2]; clusterSize=command[3];
+        totalClusters=command[4]; freeClusters=command[5];
+    }
+    int valid=!result && sectorSize && !(sectorSize&(sectorSize-1)) &&
+        clusterSize>=sectorSize && !(clusterSize&(sectorSize-1)) &&
+        totalClusters && freeClusters<=totalClusters;
+    /* SDMC capacity comes from its media resource, not GetFreeBytes on a save
+       archive. clusterSize is already in bytes; widen before multiplying so
+       FAT32 volumes with more than 4 GiB free are not truncated. */
+    /* SDMC 容量取自介质资源，不对存档归档调用 GetFreeBytes。clusterSize 已为
+       字节数，乘法前提升为 64 位，避免 FAT32 大容量卷的空闲空间被截断。 */
+    if (valid) *bytes=(uint64_t)clusterSize*freeClusters;
+    FsDiag_Record("space.resource",result,sectorSize,clusterSize,totalClusters);
+    FsDiag_Record("space.result",result,(u32)*bytes,(u32)(*bytes>>32),freeClusters);
+    if (!result && !valid) FsDiag_Record("space.resource.invalid",FS_INVALID,0,0,0);
+    return valid;
 }
 
 /* Retail GFL heap ABI, independently checked in both binaries. Its public
@@ -364,7 +398,12 @@ FsStorageIo FsSdStorage={
 static int transactionRandomBytes(void *data,uint32_t size)
 {
     u32 handle=0;
-    if (!data || !size || size>0xffffu || SRV_GetServiceHandle(&handle,"ps:ps",5,1)) return 0;
+    if (!data || !size || size>0xffffu) return 0;
+    FsDiag_Checkpoint("random.open.begin",0,size,0,0);
+    s32 opened=SRV_GetServiceHandle(&handle,"ps:ps",5,1);
+    FsDiag_Record("random.open.end",opened,size,handle,0);
+    if(opened)return 0;
+    FsDiag_Checkpoint("random.generate.begin",0,size,0,0);
     volatile u32 *command=fsCommandBuffer();
     command[0]=0x000D0042u;
     command[1]=size;
@@ -372,6 +411,7 @@ static int transactionRandomBytes(void *data,uint32_t size)
     command[3]=(u32)data;
     s32 result=fsSync(handle);
     if (!result) result=(s32)command[1];
+    FsDiag_Record("random.result",result,size,0,0);
     s32 closed=fsCloseHandle(handle);
     return !result && !closed;
 }
@@ -410,23 +450,31 @@ static const FsStorageIo profileStorage={rawOpenRead,rawOpenWrite,storageRead,st
 
 static int openDirectory(const char *path,u32 *handle)
 {
+    FsDiag_Checkpoint("directory.open.begin",0,
+        FsDiag_Path(FS_PATH_TYPE_ASCII,path,pathSize(path)),0,0);
     u16 unicode[FS_USER_PATH_SIZE];FsPathView input={FS_PATH_TYPE_ASCII,pathSize(path),path},native;
     if(!nativePath(&input,&native,unicode))return -1;
-    u64 archive=0;if(openArchive(&archive))return -1;
+    u64 archive=0;if(!FsStorageNotice_CheckIo(!openArchive(&archive)))return -1;
     u32 size=native.size;volatile u32 *c=fsCommandBuffer();
     c[0]=FSUSER_CMD_OPEN_DIRECTORY;c[1]=(u32)archive;c[2]=(u32)(archive>>32);
     c[3]=native.type;c[4]=size;c[5]=(size<<14)|2;c[6]=(u32)native.data;
     s32 result=fsSync(*FSUSER_HandleSlot);if(!result)result=(s32)c[1];
     if(!result)*handle=c[3];
+    FsDiag_Record("directory.open.end",result,
+        FsDiag_Path(native.type,native.data,native.size),result?0:*handle,0);
     s32 closed=closeArchive(archive);
-    if(closed && !result){fsCloseHandle(*handle);return -1;}
-    return !result?1:resultIsNotFound(result)?0:-1;
+    if(closed && !result){fsCloseHandle(*handle);FsStorageNotice_Mark(FS_STORAGE_ISSUE_IO);return -1;}
+    if(!result)return 1;
+    if(resultIsNotFound(result))return 0;
+    FsStorageNotice_Mark(FS_STORAGE_ISSUE_IO);return -1;
 }
 static int closeDirectory(u32 handle)
 {
+    FsDiag_Checkpoint("directory.close.begin",0,handle,0,0);
     volatile u32 *c=fsCommandBuffer();c[0]=FSDIR_CMD_CLOSE;
     s32 result=fsSync(handle);if(!result)result=(s32)c[1];
-    s32 closed=fsCloseHandle(handle);return !result && !closed;
+    FsDiag_Record("directory.close",result,handle,0,0);
+    s32 closed=fsCloseHandle(handle);return FsStorageNotice_CheckIo(!result && !closed);
 }
 static int profileDirectories(const char *path,FsUserVisitor visit,void *context)
 {
@@ -436,9 +484,9 @@ static int profileDirectories(const char *path,FsUserVisitor visit,void *context
         FsDirectoryEntry entry;volatile u32 *c=fsCommandBuffer();
         c[0]=FSDIR_CMD_READ;c[1]=1;c[2]=(sizeof(entry)<<4)|0xCu;c[3]=(u32)&entry;
         s32 result=fsSync(handle);if(!result)result=(s32)c[1];
-        if(result){ok=0;break;}
+        if(result){FsStorageNotice_Mark(FS_STORAGE_ISSUE_IO);ok=0;break;}
         if(!c[2])break;
-        if(c[2]!=1){ok=0;break;}
+        if(c[2]!=1){FsStorageNotice_Mark(FS_STORAGE_ISSUE_IO);ok=0;break;}
         if(!(entry.attributes&FS_ATTRIBUTE_DIRECTORY))continue;
         char name[FS_USER_ID_SIZE];u32 n=0;
         while(n<sizeof(entry.name)/sizeof(*entry.name) && entry.name[n])n++;
@@ -451,16 +499,23 @@ static int profileDirectories(const char *path,FsUserVisitor visit,void *context
 }
 static int profileMkdir(const char *path)
 {
+    FsDiag_Checkpoint("directory.ensure.begin",0,
+        FsDiag_Path(FS_PATH_TYPE_ASCII,path,pathSize(path)),0,0);
     u16 unicode[FS_USER_PATH_SIZE];FsPathView input={FS_PATH_TYPE_ASCII,pathSize(path),path},native;
     if(!nativePath(&input,&native,unicode))return 0;
-    u64 archive=0;if(openArchive(&archive))return 0;
+    u64 archive=0;if(!FsStorageNotice_CheckIo(!openArchive(&archive)))return 0;
     u32 size=native.size;volatile u32 *c=fsCommandBuffer();
     c[0]=FSUSER_CMD_CREATE_DIRECTORY;c[1]=0;c[2]=(u32)archive;c[3]=(u32)(archive>>32);
     c[4]=native.type;c[5]=size;c[6]=0;c[7]=(size<<14)|2;c[8]=(u32)native.data;
     s32 result=fsSync(*FSUSER_HandleSlot);if(!result)result=(s32)c[1];
-    if(closeArchive(archive))return 0;
+    FsDiag_Record("directory.create.result",result,
+        FsDiag_Path(native.type,native.data,native.size),native.type,native.size);
+    if(!FsStorageNotice_CheckIo(!closeArchive(archive)))return 0;
     if(!result)return 1;
-    u32 directory=0;return openDirectory(path,&directory)==1 && closeDirectory(directory);
+    u32 directory=0;int ok=openDirectory(path,&directory)==1 && closeDirectory(directory);
+    FsDiag_Record("directory.ensure.end",ok?0:-1,
+        FsDiag_Path(FS_PATH_TYPE_ASCII,path,pathSize(path)),0,0);
+    return FsStorageNotice_CheckIo(ok);
 }
 typedef struct ConsoleStartupUser {
     struct ConsoleStartupUser *next;
@@ -473,6 +528,8 @@ static struct {uint32_t captured;ConsoleStartupUser *users;} consoleStartup
     __attribute__((section(".data.console_startup_users")))={0};
 int FsSd_SelectUser(void)
 {
+    FsDiag_Record("user.resolve.begin",0,FAKE_SERVER_CLIENT_OWNER,CombinePatch_ModeStorage[0],
+        selectedUser.ready);
     if(!consoleStartup.captured) {
         FsConsoleProfile host;ConsoleSettings_GetProfile(&host);FsConsole_SetHost(&host);
         consoleStartup.captured=1;
@@ -485,6 +542,7 @@ int FsSd_SelectUser(void)
     int defer=FAKE_SERVER_CLIENT_OWNER==FS_TRANSACTION_OWNER_MOVER && !CombinePatch_ModeStorage[0];
     if(!defer && selectedUser.ready==FS_USER_UNINITIALIZED)selectedUser.ready=0;
     int result=defer?FsUser_SelectExisting(&io,&selectedUser):FsUser_Select(&io,&selectedUser);
+    FsDiag_Record("user.resolve.end",result,selectedUser.number,selectedUser.ready,(u32)defer);
     if(result==FS_OK) {
         ConsoleStartupUser *entry=consoleStartup.users;
         while(entry && strcmp(entry->id,selectedUser.id))entry=entry->next;
@@ -500,7 +558,12 @@ int FsSd_SelectUser(void)
     return result;
 }
 void FsSd_ResetUser(void)
-{ selectedUser.ready=0;FsSdStorage.capabilities=FS_STORAGE_ACCOUNT_LAYOUT; }
+{
+    FsTransaction_ViewClear(&FsSdTransactions);
+    memset(&selectedUser,0,sizeof(selectedUser));
+    FsConsole_SelectStartup(0);
+    FsSdStorage.capabilities=FS_STORAGE_ACCOUNT_LAYOUT;
+}
 
 int FsSd_UserMenu(uint32_t action,uint32_t activeUser,void *body,uint32_t size,
     FsUserMenu *menu,uint32_t *outputSize)

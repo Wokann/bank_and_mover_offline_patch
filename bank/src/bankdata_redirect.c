@@ -4,6 +4,7 @@
 #include "unlock_mode.h"
 #include "runtime_environment.h"
 #include "fs_system/title_users.h"
+#include "fs_system/diagnostic_log.h"
 #include <string.h>
 
 /* Bankdata redirection and local-file transaction implementation. */
@@ -92,12 +93,9 @@ int BankdataRedirect_InitializeAccount(BankAccountTransportView *transport)
         if (!storage) return 0;
         transport->provider=BankAccount_Construct(storage);
     }
-    /* The native initial-parameter request requires this flag, which also
-       enables real-network monitoring. Offline mode gates both monitor
-       consumers; this does not assert that a system session exists. */
-    /* 原初始参数请求依赖此标志，但它也启用真实网络监控；离线在两个监控消费者
-       分流，不将该标志视为已建立系统会话。 */
-    transport->initialized=1;
+    /* Offline readiness is checked only at the initial-parameter entry.
+       Never claim that the native network transport has been initialized. */
+    /* 离线就绪只在初始参数入口检查，不能冒充原版联网载体已经初始化。 */
     return transport->provider!=0;
 }
 
@@ -172,6 +170,7 @@ void BankdataRedirect_CancelDownloaded(uintptr_t peer)
 __attribute__((used,noinline,section(".text.offline")))
 int BankdataRedirect_CaptureDownloaded(BankStateView *state,BankRuntimeObjectView *object)
 {
+    FsDiag_Record("download.capture.begin",0,BANK_FILE_SIZE,0,0);
     BankdataRedirect_CancelDownloaded(downloadedBank.peer);
     /* Native loading already expanded legacy data. Empty banks remain valid;
        all format/transaction decisions belong to the worker endpoint. */
@@ -183,6 +182,7 @@ int BankdataRedirect_CaptureDownloaded(BankStateView *state,BankRuntimeObjectVie
     memcpy(snapshot,&object->record,BANK_FILE_SIZE);
     downloadedBank.peer=(uintptr_t)state;
     downloadedBank.snapshot=snapshot;
+    FsDiag_Record("download.capture.end",0,BANK_FILE_SIZE,0,0);
     return 1;
 }
 
@@ -212,6 +212,7 @@ int BankdataRedirect_ExportDownloadUpdate(BankStateView *state)
         BankdataRedirect_CancelDownloaded((uintptr_t)state);
         *BankDownload_CaptureStatusStorage=status==FS_OK?
             BANK_DOWNLOAD_CAPTURE_COMPLETE:BANK_DOWNLOAD_CAPTURE_FAILED;
+        FsDiag_Checkpoint("download.export.end",status,state->substate,0,0);
     }
     /* The download's original metadata, success/error and cleanup remain
        native; this local acknowledgement cannot approve an online request. */

@@ -119,6 +119,7 @@ typedef struct FsServiceReply {
         FsUserMenu users;
     } output;
     uint32_t customOptions;
+    uint32_t storageIssue;
 } FsServiceReply;
 
 /* Context and I/O tables are process-owned. A task must never retain a remote

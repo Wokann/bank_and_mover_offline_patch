@@ -131,6 +131,8 @@ make -C mover
 make -C mover ARMIPS=/path/to/armips IPS_TOOL=/path/to/flips
 ```
 
+默认显示根目录 `VERSION` 加 Git 提交简写；正式构建须显式使用 `PATCH_RELEASE=1`。补丁版本显示在上屏左上角，官方版本号保持原样和原位置。版本更新及无 Git 源码副本的参数见[统一构建说明](../README.zh-cn.md#从源码构建)。
+
 输出 `release/00040000000C9C00/`。构建保留原初始化，把新增区放在原 BSS 之后，
 并校验 BPS、ExHeader、模式跳转和十种语言。默认无需先运行 `clean`；
 它会删除此软件的 `build` 和发行输出，不要在其中保存存档或唯一数据。

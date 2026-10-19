@@ -19,8 +19,8 @@ Bank 和 Mover 分别编译同一套本地服务与存储代码。客户端负�
 空模板位于 [configTemplate/templateForCopy/Bank](../configTemplate/templateForCopy/Bank)，完整演示位于 [configTemplate/examples/Bank](../configTemplate/examples/Bank)。游戏不读取 Markdown 说明。
 
 - [client.conf](../configTemplate/templateForCopy/Bank/client/readme_client.zh-cn.md)：用户表、选择和迁移。
-- [server.conf](../configTemplate/templateForCopy/Bank/fakeServers/shared/readme_server.zh-cn.md)：共享免费／试用期、价格、充值额与自定义转换。
-- [user.conf](../configTemplate/templateForCopy/Bank/fakeServers/users/readme_user.zh-cn.md)：个人地区、币种、购券、试用与余额。
+- [server.conf](../configTemplate/templateForCopy/Bank/fakeServers/shared/readme_server.zh-cn.md)：共享免费／试用期、价格、充值额与可选诊断日志。
+- [user.conf](../configTemplate/templateForCopy/Bank/fakeServers/users/readme_user.zh-cn.md)：个人地区、币种、购券、试用、余额与自定义转换开关。
 - [gift.conf](../configTemplate/templateForCopy/Bank/fakeServers/shared/gifts/readme_gift.zh-cn.md)：活动开关、日期与礼物素材。
 - [checkPokemon.conf](../configTemplate/templateForCopy/Bank/fakeServers/shared/mover/readme_checkPokemon.zh-cn.md)：NDS／VC 宝可梦筛选。
 - [checkName.conf](../configTemplate/templateForCopy/Bank/fakeServers/shared/mover/readme_checkName.zh-cn.md)：NDS／VC 姓名匹配与白名单。

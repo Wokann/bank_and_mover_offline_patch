@@ -114,7 +114,9 @@ class FontResource:
 def required_name_codepoints():
     """Use name characters, never the viewer's human-decoded private glyph map."""
     root = Path(__file__).resolve().parents[2]
+    from storage_messages import STORAGE_NOTICE_MESSAGES
     required = {ord(c) for c in '群组組盒子银行銀行'}
+    required.update(ord(c) for texts in STORAGE_NOTICE_MESSAGES.values() for text in texts for c in text if c!='\n')
     resources = sorted((root/'ViewerForBankdata/resources').glob('species_*.json'))
     if len(resources) != 10:
         raise ValueError('missing native-language species name resources')

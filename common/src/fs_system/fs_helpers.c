@@ -1,5 +1,6 @@
 #include "fs_system/fs_helpers.h"
 #include "fs_system/patch_paths.h"
+#include "fs_system/diagnostic_log.h"
 
 /* Checked SD operations using the calling title's SDK address map. */
 /* 带检查的 SD 操作，使用调用软件自己的 SDK 地址表。 */
@@ -12,9 +13,15 @@ volatile u32 *fsCommandBuffer(void)
 
 s32 fsSync(u32 handle)
 {
+#if FS_LOCAL_IO_TRACE
+    u32 sent=fsCommandBuffer()[0];
+#endif
     register u32 r0 __asm__("r0") = handle;
     __asm__ volatile("svc 0x32" : "+r"(r0) : : "r1", "r2", "r3", "r12", "memory", "cc");
-    return (s32)r0;
+    s32 result=(s32)r0;
+    FsDiag_Record("ipc",result?result:(s32)fsCommandBuffer()[1],
+        sent,(u32)result,handle);
+    return result;
 }
 
 s32 fsCloseHandle(u32 handle)
@@ -30,8 +37,11 @@ s32 closeFile(u32 handle)
     u32 localHandle=handle;
     s32 result,closeResult;
     if (!handle) return 0;
+    FsDiag_Checkpoint("file.close.begin",0,handle,0,0);
     result=FSFILE_Close(&localHandle);
+    FsDiag_Record("file.close",result,handle,0,0);
     closeResult=fsCloseHandle(handle);
+    FsDiag_Record("handle.close",closeResult,handle,0,0);
     return result?result:closeResult;
 }
 
@@ -48,6 +58,7 @@ s32 openArchive(u64 *archive)
 
 s32 closeArchive(u64 archive)
 {
+    FsDiag_Checkpoint("archive.close.begin",0,0,0,0);
     volatile u32 *c=fsCommandBuffer();
     s32 result;
     c[0]=FSUSER_CMD_CLOSE_ARCHIVE; c[1]=(u32)archive; c[2]=(u32)(archive>>32);
@@ -57,6 +68,7 @@ s32 closeArchive(u64 archive)
 
 s32 pathCommand(u32 command,u64 archive,const char *path,u32 pathSize)
 {
+    FsDiag_Checkpoint("path.command",0,command,FsDiag_Path(FS_PATH_TYPE_ASCII,path,pathSize),pathSize);
     volatile u32 *c=fsCommandBuffer(); s32 result;
     c[0]=command; c[1]=0; c[2]=(u32)archive; c[3]=(u32)(archive>>32);
     c[4]=FS_PATH_TYPE_ASCII; c[5]=pathSize; c[6]=(pathSize<<14)|2u; c[7]=(u32)path;
@@ -66,6 +78,8 @@ s32 pathCommand(u32 command,u64 archive,const char *path,u32 pathSize)
 
 s32 renamePath(u64 archive,const char *from,u32 fromSize,const char *to,u32 toSize)
 {
+    FsDiag_Checkpoint("path.rename",0,FsDiag_Path(FS_PATH_TYPE_ASCII,from,fromSize),
+        FsDiag_Path(FS_PATH_TYPE_ASCII,to,toSize),0);
     volatile u32 *c=fsCommandBuffer(); s32 result;
     c[0]=FSUSER_CMD_RENAME_FILE; c[1]=0; c[2]=(u32)archive; c[3]=(u32)(archive>>32);
     c[4]=FS_PATH_TYPE_ASCII; c[5]=fromSize; c[6]=(u32)archive; c[7]=(u32)(archive>>32);
@@ -77,6 +91,7 @@ s32 renamePath(u64 archive,const char *from,u32 fromSize,const char *to,u32 toSi
 
 s32 setSize(u32 handle,u64 size)
 {
+    FsDiag_Checkpoint("file.resize",0,handle,(u32)size,(u32)(size>>32));
     volatile u32 *c=fsCommandBuffer(); s32 result;
     c[0]=FSFILE_CMD_SET_SIZE; c[1]=(u32)size; c[2]=(u32)(size>>32);
     result=fsSync(handle);
@@ -85,8 +100,12 @@ s32 setSize(u32 handle,u64 size)
 
 s32 openFile(const char *path,u32 pathSize,u32 flags,u32 *handle)
 {
-    return FSUSER_OpenFileDirectly(FSUSER_HandleSlot,handle,0,FS_ARCHIVE_ID_SDMC,
+    FsDiag_Checkpoint("file.open.begin",0,FsDiag_Path(FS_PATH_TYPE_ASCII,path,pathSize),flags,pathSize);
+    s32 result=FSUSER_OpenFileDirectly(FSUSER_HandleSlot,handle,0,FS_ARCHIVE_ID_SDMC,
         FS_PATH_TYPE_EMPTY,emptyPath,1,FS_PATH_TYPE_ASCII,path,pathSize,flags,0);
+    FsDiag_Record("file.open.end",result,FsDiag_Path(FS_PATH_TYPE_ASCII,path,pathSize),
+        flags,result?0:*handle);
+    return result;
 }
 
 int resultIsNotFound(s32 result)

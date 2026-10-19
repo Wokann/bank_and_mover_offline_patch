@@ -1,4 +1,6 @@
 #include "fakeServer/async_task.h"
+#include "fs_system/diagnostic_log.h"
+#include "fakeServer/service_request.h"
 #include <string.h>
 
 _Static_assert(sizeof(FsAsyncTask)<0x1000u,"task control must fit its reserved page");
@@ -129,8 +131,16 @@ int FsAsyncTask_Run(FsAsyncTask *task)
     unlock(task);
 
     uint32_t size=0;
+    FsDiag_Checkpoint("request.begin",0,
+        task->inputSize==sizeof(FsServiceRequest)?((const FsServiceRequest *)task->input)->operation:0,
+        task->bodySize,task->generation);
+    FsDiag_Flush();
     int result=task->work(task->context,task->input,task->inputSize,task->output,
         sizeof(task->output),&size,task->body,task->bodySize);
+    FsDiag_Checkpoint("request.end",result,
+        task->inputSize==sizeof(FsServiceRequest)?((const FsServiceRequest *)task->input)->operation:0,
+        size,task->generation);
+    FsDiag_Flush();
     /* Only the worker may publish DONE. Other callers only alter cancelled;
        neither cancellation nor a new submission can recycle RUNNING storage. */
     /* 仅工作线程发布 DONE；其他调用方只能标记取消，不能回收 RUNNING 的存储。 */

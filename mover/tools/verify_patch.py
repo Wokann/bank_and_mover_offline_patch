@@ -14,6 +14,8 @@ import sys
 import zlib
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "common/tools"))
+from patch_version import add_version_arguments, label_from_arguments, label_storage
 
 IMAGE_BASE = 0x00100000
 EXPECTED_BASE_SHA256 = "001C20ADA74016507C969BB44A0A50F8EDF803EC06A3FC46834263BA8DF0FD2F"
@@ -26,7 +28,6 @@ TEXT_MAPPED_END = 0x0028E000
 LAYEREDFS_RESERVED_SIZE = 0x130
 VERSION_STORAGE_SIZE = 0x40
 VERSION_STORAGE_START = TEXT_MAPPED_END - VERSION_STORAGE_SIZE
-VERSION_IDENTIFIER = b"offline_patch_v0.9.1\0"
 PAYLOAD_START = 0x0028D2E0
 EXPANDED_PAYLOAD_START = 0x00365000
 EXPANDED_PAYLOAD_SIZE = 0x2BF000
@@ -221,10 +222,12 @@ def main() -> None:
     parser.add_argument("--output-romfs", required=True, type=Path)
     parser.add_argument("--exheader", required=True, type=Path)
     parser.add_argument("--base-exheader", required=True, type=Path)
+    add_version_arguments(parser)
     args = parser.parse_args()
     subprocess.run([sys.executable, "-B", str(Path(__file__).absolute().parents[2] /
                     "common/tools/check_file_links.py"), "--recursive",
-                    *(str(path) for path in vars(args).values() if path is not None)], check=True)
+                    *(str(path) for path in vars(args).values() if isinstance(path, Path))], check=True)
+    patch_label = label_from_arguments(args)
 
     base = args.base.read_bytes()
     patched = args.patched.read_bytes()
@@ -475,7 +478,7 @@ def main() -> None:
     if sym["offlinepatch_versionidentifier"] != VERSION_STORAGE_START:
         raise ValueError("offline patch version identifier moved")
     version_offset = VERSION_STORAGE_START - IMAGE_BASE
-    expected_version_storage = VERSION_IDENTIFIER.ljust(VERSION_STORAGE_SIZE, b"\0")
+    expected_version_storage = label_storage(patch_label)
     if patched[version_offset:version_offset + VERSION_STORAGE_SIZE] != expected_version_storage:
         raise ValueError("offline patch version storage is malformed")
     if base[version_offset:version_offset + VERSION_STORAGE_SIZE] != bytes(VERSION_STORAGE_SIZE):
@@ -647,6 +650,7 @@ def main() -> None:
                 word(patched, start + 16) != word(base, address) or \
                 branch_target(patched, start + 20) != (address + 4, False, 0xE):
             raise ValueError(f"{wrapper} must replay and resume native preparation")
+    hooks[0x0024709C] = ("combinepatch_storagenoticedisconnectupdate", False, 0xE)
     for address, (name, link, condition) in hooks.items():
         target, actual_link, actual_condition = branch_target(patched, address)
         if (target, actual_link, actual_condition) != (sym[name], link, condition):
@@ -1173,12 +1177,15 @@ def main() -> None:
         raise ValueError("confirmed language selection does not interwork to Thumb")
     language_wait = sym["combinepatch_languagereturnexit"]
     for offset, expected in ((0,0xE92D4010),(4,0xE1A04000),(12,0xE12FFF3C),
-                             (16,0xE3500000),(20,0xE1A00004),(24,0xE8BD4010),
-                             (28,0x03A00000),(32,0x012FFF1E),(36,0xE92D41F0)):
+                             (16,0xE3500000),(24,0xE1A00004),(32,0xE3500000),
+                             (36,0xE1A00004),(40,0xE8BD4010),
+                             (44,0x03A00000),(48,0x012FFF1E),(52,0xE92D41F0)):
         if word(patched,language_wait+offset)!=expected:
             raise ValueError("language return wait does not preserve the native exit/stack")
     if arm_literal_value(patched,language_wait+8,12)!=sym["languagesettings_pollsynchronization"]+1 or \
-            branch_target(patched,language_wait+40)!=(0x002470F8,False,0xE):
+            branch_target(patched,language_wait+20)!=(language_wait+36,False,0) or \
+            branch_target(patched,language_wait+28)!=(sym["moverstoragenotice_poll"],True,0xE) or \
+            branch_target(patched,language_wait+56)!=(0x002470F8,False,0xE):
         raise ValueError("language synchronization does not wait in the animated return exit")
     language_destroy = sym["combinepatch_languagereturndestroy"]
     if (word(patched,language_destroy)!=0xE92D4001 or
@@ -1203,13 +1210,21 @@ def main() -> None:
         if patched[start-IMAGE_BASE:end-IMAGE_BASE]!=base[start-IMAGE_BASE:end-IMAGE_BASE]:
             raise ValueError("native disconnect exit changed outside the language/timing hooks")
     for start, end in ((0x00240D28,0x00240E50),(0x0022AF28, 0x0022AFD8), (0x0022C06C, 0x0022C078),
-                       (0x0024538C,0x002453A8),(0x00245450,0x00245460),(0x0024709C,0x002470F4)):
+                       (0x0024538C,0x002453A8),(0x00245450,0x00245460),(0x002470A0,0x002470F4)):
         if patched[start - IMAGE_BASE:end - IMAGE_BASE] != base[start - IMAGE_BASE:end - IMAGE_BASE]:
             raise ValueError("native language resource binding or selection setter changed")
+    notice=sym["combinepatch_storagenoticedisconnectupdate"]
+    if branch_target(patched,notice+4)!=(sym["moverstoragenotice_poll"],True,0xE) or \
+            branch_target(patched,notice+28)!=(0x002470A0,False,0xE):
+        raise ValueError("SD notice does not resume the native disconnect update")
+    for offset,value in ((0,0xE92D4001),(8,0xE3500000),(12,0xE8BD4001),
+                         (16,0x03A00000),(20,0x012FFF1E),(24,0xE92D4010)):
+        if word(patched,notice+offset)!=value:
+            raise ValueError("SD notice does not preserve the disconnect stack/acknowledgement gate")
 
     from tools.title_layout import TITLE_LAYOUT_ARCHIVE, patch_title_archive
     relative = Path("a") / TITLE_LAYOUT_ARCHIVE
-    if (args.output_romfs / relative).read_bytes() != patch_title_archive((args.source_romfs / relative).read_bytes()):
+    if (args.output_romfs / relative).read_bytes() != patch_title_archive((args.source_romfs / relative).read_bytes(), patch_label=patch_label):
         raise ValueError("Mover title mode layout differs from its verified builder")
     from title_font import patch_title_fonts
     relative=Path("a/0/2/3")
@@ -1230,7 +1245,7 @@ def main() -> None:
         output_lines = messages.message_codec.read_message_values(
             output_entries[messages.MESSAGE_FILE_INDEX].files[0]
         )
-        if messages.MESSAGE_FILE_INDEX!=23 or len(source_lines)!=67 or len(output_lines)!=77 or \
+        if messages.MESSAGE_FILE_INDEX!=23 or len(source_lines)!=67 or len(output_lines)!=80 or \
                 messages.GAME_TITLE_FILE_INDEX!=24:
             raise ValueError(f"text table identity/bounds changed in {archive}")
         expected_native = list(source_lines)
@@ -1242,10 +1257,12 @@ def main() -> None:
             language_flags)
         if output_lines[:len(source_lines)] != expected_native:
             raise ValueError(f"stock messages changed beyond the L-button glyph in {archive}")
-        if len(output_lines) != messages.TITLE_USER_HINT_LINE + 1:
+        if len(output_lines) != messages.TITLE_USER_HINT_LINE + 4:
             raise ValueError(f"unexpected appended line count in {archive}")
         output_text = messages.message_codec.read_message_lines(
             output_entries[messages.MESSAGE_FILE_INDEX].files[0])
+        if tuple(output_text[77:80])!=messages.storage_notice_lines(archive):
+            raise ValueError(f"SD notice translations differ in {archive}")
         for line, expected in ((messages.TITLE_OFFLINE_LINE, messages.TITLE_OFFLINE[archive]),
                                (messages.TITLE_ONLINE_LINE, messages.TITLE_ONLINE[archive]),
                                (messages.TITLE_SWITCH_LINE, messages.TITLE_SWITCH_MESSAGES[archive]),

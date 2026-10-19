@@ -12,8 +12,10 @@ from pathlib import Path
 
 from tools import message_archive as message_codec
 from tools.title_layout import build_title_archive
+from patch_version import add_version_arguments, label_from_arguments
 from title_font import build_title_fonts, character_widths
 from title_messages import L_BUTTON, language_hint, mode_messages, mode_switch_hint, USER_LABEL_MESSAGES, USER_SWITCH_HINTS
+from storage_messages import storage_notice_lines, verify_storage_notice_fonts
 
 
 ARCHIVES = (
@@ -710,6 +712,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source-romfs", required=True, type=Path)
     parser.add_argument("--output-romfs", required=True, type=Path)
+    add_version_arguments(parser)
     parser.add_argument(
         "--title-r-glyph-test",
         action="store_true",
@@ -722,8 +725,9 @@ def main() -> None:
     verify_localized_server_messages()
     verify_kana_archive_messages()
     verify_force_unlock_layout(args.source_romfs)
-    build_title_archive(args.source_romfs, args.output_romfs)
+    build_title_archive(args.source_romfs, args.output_romfs, patch_label=label_from_arguments(args))
     build_title_fonts(args.source_romfs, args.output_romfs)
+    verify_storage_notice_fonts((args.output_romfs / "a/0/2/3").read_bytes())
 
     for archive in ARCHIVES:
         source = args.source_romfs / "a" / Path(archive)
@@ -859,6 +863,8 @@ def main() -> None:
                 (finish_message_values(text_code_units(build_invalid_support_label(archive, original_lines))),
                  message_codec.u16(original, section_offset + 4 + 43 * 8 + 6)),
                 (offline_mismatch, mismatch_flags),
+                *((finish_message_values(text_code_units(text)), game_selection_flags)
+                  for text in storage_notice_lines(archive)),
             ),
         )
         greeting_entry = entries[MENU_MESSAGE_FILE_INDEX]

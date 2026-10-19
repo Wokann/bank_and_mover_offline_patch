@@ -1,5 +1,6 @@
 #include "fs_system/native_worker.h"
 #include "fs_sdk.h"
+#include "fs_system/diagnostic_log.h"
 
 _Static_assert(sizeof(void *)==4,"SDK worker argument ABI is ARM32");
 
@@ -61,6 +62,7 @@ int NativeWorker_Start(NativeWorker *worker,NativeWorkerEntry entry,void *argume
         /* 两端独立复核的 SDK 均把参数 0x18 转为内核优先级 0x38；
            此处直接填 0x38 会转换成无效值，不能混用 SDK 与内核参数。 */
         (uint32_t)((uintptr_t)stack+stackSize),0x18,-2,0);
+    FsDiag_Record("worker.create",status,stackSize,worker->thread[0],0);
     if (status<0 || !worker->thread[0]) goto failure;
     __sync_synchronize();
     worker->state=NATIVE_WORKER_READY;

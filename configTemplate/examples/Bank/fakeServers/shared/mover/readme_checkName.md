@@ -52,7 +52,7 @@ the next recognized header. A missing/invalid global switch does not enable a li
 
 ## Han characters and fan translations
 
-Whole-Pokémon Han rejection belongs to [checkPokemon](readme_checkPokemon.md#unicodechinese-and-the-default-han-rule). Fan permission and VC transcoding tables belong to shared [server.conf](../readme_server.md#custom-options).
+Whole-Pokémon Han rejection belongs to [checkPokemon](readme_checkPokemon.md#unicodechinese-and-the-default-han-rule). Account fan permission and VC transcoding tables are described under [user.conf](../../users/readme_user.md#custom-options).
 This file only provides NGWord and name exceptions, not a custom `[rule]` options section.
 
 ## NGWord syntax
