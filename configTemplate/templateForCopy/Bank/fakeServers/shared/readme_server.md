@@ -18,7 +18,9 @@ See the [shared layout guide](../../readme_fakeServer.md) for the complete Bank 
 
 Use UTF-8 `key=value;`, true/false switches and non-negative decimal amounts/counters. End assignments with a semicolon; headers, NGWord patterns and exact-name entries do not gain one. Basic configuration readers retain valid older unterminated values and publish canonical terminated assignments. Valid values survive. Missing, empty or malformed entries reset to built-in defaults and canonical section/order. The last valid duplicate wins; later invalid values do not erase valid ones. Shop components are repaired independently. Normalization removes unknown keys/sections and general comments; only the shop-format comment is generated.
 
-New relevant requests read current files without changing delivered replies. User selection stays pinned within a session; leave and re-enter to switch users. Purchases/recharges do not change shared prices or recharge policy.
+Every basic-configuration read checks the current schema; upgrades and damage repair use one process: initialize the current patch's default template in memory, then migrate recognized, well-formed, in-range old values. Missing or invalid entries retain defaults; unknown or retired entries are omitted. Every valid dynamic user entry in `client.conf` survives, without substituting demonstration users. Optional gift, name and Pokemon-filter configuration is excluded.
+
+Background title-catalogue refresh repairs existing basic configuration, so new `[custom]` or `[debug]` entries do not require an initial offline connection. This stage does not provision missing accounts or Bank data, migrate old Bank files, or replace valid locale/current-currency values with host settings; damaged or missing fields still recover defaults. Missing basic configuration is generated when the selected account is first used. Relevant service requests still read current files without changing delivered replies. User selection stays pinned within a session; leave and re-enter to switch users. Purchases/recharges do not change shared prices or recharge policy.
 
 The three basic configurations verify staging, rotate the old primary to .bak and publish the new primary; unchanged content is not written. Missing primaries read backup before using defaults. Orphan .tmp files are not adopted. Valid current values survive per-entry repair; genuine I/O failure is not success or an empty Bank. See the [file-protection inventory](../../readme_fakeServer.md#files-written-and-protection-policies).
 
@@ -75,7 +77,7 @@ enablelog=false;
 
 This global switch is shared by Bank and Mover, not stored per account. Logging is off by default: no events are recorded and no log file is created, truncated or written; existing logs remain untouched. Set it to `true;` and restart the title to record diagnostics. An enabled launch overwrites that title's `client/log/bank.log` or `client/log/mover.log`. User changes and title-screen returns neither reload the switch nor clear the current log. Disable it and restart after debugging to reduce SD writes.
 
-Missing switches or switches with no valid value mean off; the last valid true/false duplicate wins. A missing primary configuration may read its backup, never staging. Logs exclude account names, transaction tokens and file bodies; logging failure does not change business results.
+Startup log-setting reads use the same configuration repair without selecting or creating an account. Missing switches or switches with no valid value are supplemented as off; the last valid true/false duplicate wins. A missing primary configuration may read its backup, never staging. Logs exclude account names, transaction tokens and file bodies; logging failure does not change business results.
 
 ## Custom options
 

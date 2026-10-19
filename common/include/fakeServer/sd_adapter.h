@@ -13,6 +13,8 @@
 extern FsStorageIo FsSdStorage;
 extern const FsTransactionIo FsSdTransactions;
 int FsSd_SelectUser(void);
+/* Shared configuration only; safe before selecting/provisioning any account. */
+int FsSd_ReadLogSetting(uint32_t *);
 void FsSd_ResetUser(void);
 int FsSd_UserMenu(uint32_t action,uint32_t activeUser,void *body,uint32_t bodySize,
     FsUserMenu *,uint32_t *outputSize);

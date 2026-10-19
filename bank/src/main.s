@@ -23,7 +23,7 @@
 .definelabel OfflinePatch_VersionStorageSize, 0x40
 .definelabel OfflinePatch_VersionStorageStart, TextMappedEnd - OfflinePatch_VersionStorageSize
 .definelabel CodeExpansion_PayloadStart, 0x003FC000
-.definelabel CODE_EXPANSION_PAYLOAD_SIZE, 0x238000
+.definelabel CODE_EXPANSION_PAYLOAD_SIZE, 0x23A000
 .definelabel FakeServer_ContextSize, 0x104000
 .definelabel FakeServer_RuntimeSize, 0x216000
 .definelabel CombinePatch_CodeStart, CodeExpansion_PayloadStart

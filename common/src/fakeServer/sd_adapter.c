@@ -6,6 +6,7 @@
 #include "fs_system/diagnostic_log.h"
 #include "fs_system/storage_notice.h"
 #include "fakeServer/user_profiles.h"
+#include "fakeServer/account_configuration.h"
 #include "fakeServer/numbers.h"
 #include "fake_server_context.h"
 #include <stddef.h>
@@ -448,6 +449,12 @@ static int rawRename(const char *from,const char *to)
 static const FsStorageIo profileStorage={rawOpenRead,rawOpenWrite,storageRead,storageWrite,
     sdClose,rawRemove,rawRename,storageAllocate,storageRelease,0};
 
+int FsSd_ReadLogSetting(uint32_t *enabled)
+{
+    return FsAccountConfiguration_ReadLogSetting(&profileStorage,
+        "/3ds/Bank/fakeServers/shared/server.conf","/3ds/Bank/fakeServers/shared/server.tmp",enabled);
+}
+
 static int openDirectory(const char *path,u32 *handle)
 {
     FsDiag_Checkpoint("directory.open.begin",0,
@@ -576,6 +583,25 @@ int FsSd_UserMenu(uint32_t action,uint32_t activeUser,void *body,uint32_t size,
     FsClientConfig config;
     int result=FsUser_Catalogue(&io,&config,menu);
     if(result!=FS_OK)return result;
+    FsConfigError error;
+    result=FsAccountConfiguration_RepairPublished(io.files,
+        "/3ds/Bank/fakeServers/shared/server.conf","/3ds/Bank/fakeServers/shared/server.tmp",
+        FS_ACCOUNT_SHARED,0,&error);
+    if(result==FS_MISSING)result=FS_OK;
+    FsConsoleProfile factory;ConsoleSettings_GetProfile(&factory);
+    /* Upgrade only published account configuration. Do not resolve/provision
+       a user, touch Bank/settings/journals or consume automatic boot refresh. */
+    /* 仅升级既有正式用户配置；不解析／创建活动用户，不碰银行、存档和事务，不消耗启动刷新。 */
+    for(uint32_t i=0;result==FS_OK && i<config.count;i++) {
+        FsUserProfile user={0};char path[FS_USER_PATH_SIZE],temp[FS_USER_PATH_SIZE];
+        strcpy(user.id,config.users[i].id);
+        if(!FsUser_Path(&user,0,"user.conf",path) || !FsUser_Path(&user,0,"user.tmp",temp)) {
+            result=FS_INVALID;break;
+        }
+        result=FsAccountConfiguration_RepairPublished(io.files,path,temp,FS_ACCOUNT_USER,&factory,&error);
+        if(result==FS_MISSING)result=FS_OK;
+    }
+    if(result!=FS_OK){FsClient_Release(io.files,&config);return result;}
     if(config.count>capacity)result=FS_NO_MEMORY;
     else {
         *outputSize=config.count*sizeof(FsUserEntry);

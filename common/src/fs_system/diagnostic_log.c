@@ -3,7 +3,7 @@
 #if FS_LOCAL_IO_TRACE
 #include "fs_system/fs_helpers.h"
 #include "fakeServer/fake_servers.h"
-#include "fakeServer/conf_text.h"
+#include "fakeServer/sd_adapter.h"
 #include "fake_server_context.h"
 #include "system_time.h"
 #include <string.h>
@@ -35,82 +35,19 @@ static TraceState *state(void)
 
 static uint32_t logEnabled __attribute__((section(".data.diagnostic_log")))=0;
 
-static char *trim(char *text)
-{
-    while(*text==' ' || *text=='\t')text++;
-    char *end=text+strlen(text);
-    while(end>text && (end[-1]==' ' || end[-1]=='\t' || end[-1]=='\r'))*--end=0;
-    return text;
-}
-
-static void logSettingLine(char *line,uint32_t *section,uint32_t *enabled)
-{
-    char *comment=strchr(line,'#');if(comment)*comment=0;
-    line=trim(line);
-    if(*line=='[') {*section=!strcmp(line,"[debug]");return;}
-    if(!*section)return;
-    char *value=strchr(line,'=');if(!value)return;
-    *value++=0;line=trim(line);value=trim(value);
-    if(strcmp(line,"enablelog"))return;
-    FsConf_Value(value);(void)FsConf_Bool(value,enabled);
-}
-
-/* Read shared policy once without selecting/provisioning an account or using
-   traced storage. A missing primary may use its published backup, never tmp.
-   Missing, unreadable or oversized input leaves logging off. */
-/* 每次进程只读一次共享开关，不选择／创建账户，也不经过被记录的存储层。
-   正式文件缺失才读备份，不接纳 tmp；缺失、不可读或超限时保持关闭。 */
-static uint32_t loadLogSetting(void)
-{
-    static const char *const paths[]={
-        "/3ds/Bank/fakeServers/shared/server.conf","/3ds/Bank/fakeServers/shared/server.bak"};
-    u32 handle=0;int32_t error=0;
-    for(uint32_t i=0;i<2;i++) {
-        error=FSUSER_OpenFileDirectly(FSUSER_HandleSlot,&handle,0,FS_ARCHIVE_ID_SDMC,
-            FS_PATH_TYPE_EMPTY,"",1,FS_PATH_TYPE_ASCII,paths[i],(uint32_t)strlen(paths[i])+1u,OPEN_READ,0);
-        if(!error)break;
-        if(i || !resultIsNotFound(error))return 0;
-    }
-    uint64_t size=0;uint32_t section=0,enabled=0,used=0,first=1;int damaged=0;
-    error=FSFILE_GetSize(&handle,&size);
-    if(!error && size>FS_CONFIG_FILE_LIMIT)error=-1;
-    uint8_t chunk[1024];char line[FS_CONFIG_LINE_SIZE];
-    for(uint32_t offset=0;!error && offset<size;) {
-        u32 actual=0,amount=(u32)size-offset;if(amount>sizeof(chunk))amount=sizeof(chunk);
-        error=FSFILE_Read(&handle,&actual,offset,chunk,amount);
-        if(error || actual!=amount){if(!error)error=-1;break;}
-        offset+=amount;
-        for(uint32_t i=0;i<amount;i++) {
-            if(chunk[i]=='\n') {
-                line[used]=0;
-                char *text=line;
-                if(first && used>=3 && (uint8_t)text[0]==0xef &&
-                    (uint8_t)text[1]==0xbb && (uint8_t)text[2]==0xbf)text+=3;
-                if(!damaged)logSettingLine(text,&section,&enabled);
-                else if(*trim(text)=='[')section=0;
-                used=0;damaged=0;first=0;
-            } else if(!chunk[i] || used+1u>=sizeof(line))damaged=1;
-            else if(!damaged)line[used++]=(char)chunk[i];
-        }
-    }
-    if(!error && !damaged && used) {
-        line[used]=0;char *text=line;
-        if(first && used>=3 && (uint8_t)text[0]==0xef &&
-            (uint8_t)text[1]==0xbb && (uint8_t)text[2]==0xbf)text+=3;
-        logSettingLine(text,&section,&enabled);
-    }
-    u32 local=handle;
-    int32_t closed=FSFILE_Close(&local),released=fsCloseHandle(handle);
-    return error || closed || released?0:enabled;
-}
+/* Bootstrap reads use the same fixed-schema repair as service reads, without
+   selecting a user. Logging remains disabled during that read/publication. */
+/* 启动读取也走同一基础配置修复，不选择账户；读取及发布期间日志仍保持关闭。 */
 
 void FsDiag_Startup(void)
 {
     static uint32_t started __attribute__((section(".data.diagnostic_log")))=0;
     if (__sync_lock_test_and_set(&started,1)) return;
-    __atomic_store_n(&logEnabled,loadLogSetting(),__ATOMIC_RELEASE);
+    uint32_t enabled=0;int loaded=FsSd_ReadLogSetting(&enabled);
+    __atomic_store_n(&logEnabled,enabled,__ATOMIC_RELEASE);
     if(!__atomic_load_n(&logEnabled,__ATOMIC_ACQUIRE))return;
     FsDiag_Record("process.start",0,FAKE_SERVER_CLIENT_OWNER,0,0);
+    if(loaded!=FS_OK)FsDiag_Record("configuration.startup",loaded,0,0,0);
     FsDiag_Flush();
 }
 

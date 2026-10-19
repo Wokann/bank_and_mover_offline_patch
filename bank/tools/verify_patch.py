@@ -50,7 +50,7 @@ RESTORED_HOME_START = 0x002A7BF0
 RESTORED_HOME_END = 0x002A8760
 TEXT_ACTUAL_END = 0x00313910
 EXPANDED_PAYLOAD_START = 0x003FC000
-EXPANDED_PAYLOAD_SIZE = 0x238000
+EXPANDED_PAYLOAD_SIZE = 0x23A000
 SERVER_CONTEXT_SIZE = 0x104000
 SERVER_RUNTIME_SIZE = 0x216000
 DATA_ACTUAL_END = 0x003ABACC
@@ -277,10 +277,16 @@ def verify_expansion(base: bytes, image: bytes, symbols: dict[str, int],
     rotation = ((context_load >> 8) & 15) * 2
     immediate = context_load & 255
     context_value = ((immediate >> rotation) | (immediate << (32 - rotation))) & 0xFFFFFFFF
-    thumb_move = int.from_bytes(client[:2], "little")
-    thumb_shift = int.from_bytes(client[4:6], "little")
-    thumb_context = (thumb_move & 0xFF00 == 0x2000 and thumb_shift & 0xF83F == 0 and
-                     (thumb_move & 255) << ((thumb_shift >> 6) & 31) == context_start)
+    thumb_context = False
+    for offset in range(0, len(client) - 3, 2):
+        move = int.from_bytes(client[offset:offset + 2], "little")
+        shift = int.from_bytes(client[offset + 2:offset + 4], "little")
+        register = (move >> 8) & 7
+        if (move & 0xF800 == 0x2000 and shift & 0xF800 == 0 and
+                shift & 7 == register and (shift >> 3) & 7 == register and
+                (move & 255) << ((shift >> 6) & 31) == context_start):
+            thumb_context = True
+            break
     if (context_start.to_bytes(4, "little") not in client and
             not thumb_context and
             not (context_load & 0xFFFFF000 == 0xE3A00000 and
@@ -338,7 +344,7 @@ def verify_expansion(base: bytes, image: bytes, symbols: dict[str, int],
     expect_branch(image, 0x00100010, startup, True, ARM_COND_AL, "expansion startup hook")
     expect_word(image, startup, 0xE92D5FFF, "startup register preservation")
     expect_word(image, startup + 4, 0xE3A009FF, "added-page address")
-    expect_word(image, startup + 8, 0xE3A01A22, "executable-only page size")
+    expect_word(image, startup + 8, 0xE3A01909, "executable-only page size")
     expect_branch(image, startup + 12, symbols["codeexpansion_enable"],
                   True, ARM_COND_AL, "enable added pages")
     expect_word(image, startup + 16, 0xE3500000, "loader result check")

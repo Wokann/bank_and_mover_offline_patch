@@ -172,8 +172,9 @@ static int executeRequest(void *opaque,const void *input,uint32_t inputSize,
         return FS_UNSUPPORTED;
     for (uint32_t i=0;i<sizeof(*reply);i++) ((uint8_t *)reply)[i]=0;
     *outputSize=sizeof(*reply);
-    /* Title account selection is client-side and must not connect/recover the
-       server, provision a Mover profile or migrate legacy Bank data. */
+    /* Title account selection may repair published fixed-schema configuration,
+       but must not connect/recover the server, provision a Mover profile or
+       migrate legacy Bank data. */
     if(request->operation==FS_SERVICE_TITLE_USERS) {
 #if defined(__arm__)
         if(context->storage!=&FsSdStorage)return FS_UNSUPPORTED;
@@ -187,10 +188,10 @@ static int executeRequest(void *opaque,const void *input,uint32_t inputSize,
         FsSd_ResetUser();
         int result=FsSd_UserMenu(request->input.users.action,request->input.users.activeUser,
             body,bodySize,&reply->output.users,&reply->bodySize);
-        /* Even a read-only title refresh may discover a different auto/manual
+        /* Even a title catalogue refresh may discover a different auto/manual
            mapping from startup. Retire only volatile old-session state, so
            later settings reads and server opens use the displayed account. */
-        /* 纯查询也可能发现映射已变化；仅丢弃旧会话内存，防止显示新用户却仍读旧路径。 */
+        /* 目录刷新也可能发现映射已变化；仅丢弃旧会话内存，防止显示新用户却仍读旧路径。 */
         return result;
 #else
         return FS_UNSUPPORTED;

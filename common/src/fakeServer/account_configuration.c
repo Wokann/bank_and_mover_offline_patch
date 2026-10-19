@@ -5,7 +5,7 @@
 #include "fs_system/diagnostic_log.h"
 #include <string.h>
 
-enum { DOC_SHARED,DOC_USER };
+enum { DOC_SHARED=FS_ACCOUNT_SHARED,DOC_USER=FS_ACCOUNT_USER };
 static const char *const paths[]={"server.conf","user.conf"};
 static const char *const temps[]={"server.tmp","user.tmp"};
 
@@ -43,7 +43,7 @@ static void parseDocument(FsConfiguration *config,uint32_t doc,char *text,uint32
         char *line=cursor;int damaged=0;
         while(cursor<text+size && *cursor!='\n'){if(!*cursor)damaged=1;cursor++;}
         if(cursor<text+size)*cursor++=0;
-        if(damaged)continue;
+        if(damaged){if(*trim(line)=='[')section=0;continue;}
         char *comment=strchr(line,'#');if(comment)*comment=0;line=trim(line);
         if(*line=='[') {
             /* 只读取旧余额分段以保留已有金额；写回统一合入 [ticket]。 */
@@ -188,6 +188,48 @@ static int saveDocuments(const FsStorageIo *io,FsConfiguration *config,uint32_t 
         if(result!=FS_OK)return result;
     }
     return FS_OK;
+}
+static int rebuildPublished(const FsStorageIo *io,const char *path,const char *temp,
+    uint32_t doc,const FsConsoleProfile *factory,FsConfigError *error,uint32_t *enableLog)
+{
+    if(!io || !path || !temp || !error || doc>DOC_USER || !io->allocate || !io->release ||
+        !io->openRead || !io->read || !io->close || !io->openWrite || !io->write ||
+        !io->remove || !io->rename)
+        return FS_INVALID;
+    *error=(FsConfigError){.path=path};
+    char *old=0;uint32_t oldSize=0;
+    int result=FsText_Read(io,path,&old,&oldSize);
+    if(result!=FS_OK)return error->result=result;
+    FsConfiguration *config=io->allocate(sizeof(*config));
+    if(!config){io->release(old);return error->result=FS_NO_MEMORY;}
+    memset(config,0,sizeof(*config));defaults(config);
+    if(doc==DOC_USER) {
+        if(factory)config->console=*factory;
+        else FsConsole_Default(&config->console);
+        config->console.autoRegion=0;config->console.ready=1;
+    }
+    /* Defaults are the new template. Only recognized, valid old assignments
+       override them; schema repair must not apply a user's startup options. */
+    /* 先建立新版默认模板，仅迁移已识别且合法的旧值；结构修复不执行账户启动选项。 */
+    parseDocument(config,doc,old,oldSize);io->release(old);
+    if(enableLog)*enableLog=config->enableLog;
+    char *text=0;uint32_t size=0;
+    result=render(io,config,doc,&text,&size);
+    if(result==FS_OK)result=FsText_Publish(io,path,temp,text,size);
+    if(text)io->release(text);
+    io->release(config);
+    if(result==FS_OK)*error=(FsConfigError){0};else error->result=result;
+    return result;
+}
+int FsAccountConfiguration_RepairPublished(const FsStorageIo *io,const char *path,const char *temp,
+    uint32_t doc,const FsConsoleProfile *factory,FsConfigError *error)
+{ return rebuildPublished(io,path,temp,doc,factory,error,0); }
+int FsAccountConfiguration_ReadLogSetting(const FsStorageIo *io,const char *path,const char *temp,
+    uint32_t *enableLog)
+{
+    if(!enableLog)return FS_INVALID;
+    *enableLog=0;FsConfigError error;
+    return rebuildPublished(io,path,temp,DOC_SHARED,0,&error,enableLog);
 }
 static void complete(FsConfiguration *config)
 {

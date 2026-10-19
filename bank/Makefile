@@ -109,7 +109,7 @@ $(BUILD)/%.o: $(SRC)/%.c | $(BUILD) check-files
 	"$(OBJDUMP)" -dr -z "$@" > "$(@:.o=.s)"
 
 $(PREPARED_BASE): FORCE $(BASE) $(EXHEADER) $(TOOLS)/prepare_expanded_code.py | $(BUILD) check-files
-	"$(PYTHON)" -B -m tools.prepare_expanded_code prepare --base-code "$(BASE)" --base-exheader "$(EXHEADER)" --output-code "$@" --output-exheader "$(EXPANDED_EXHEADER)" --payload-start 0x003FC000 --payload-size 0x238000
+	"$(PYTHON)" -B -m tools.prepare_expanded_code prepare --base-code "$(BASE)" --base-exheader "$(EXHEADER)" --output-code "$@" --output-exheader "$(EXPANDED_EXHEADER)" --payload-start 0x003FC000 --payload-size 0x23A000
 
 $(VERSION_DATA): FORCE ../VERSION $(COMMON)/tools/patch_version.py | $(BUILD) check-files
 	"$(PYTHON)" -B $(COMMON)/tools/patch_version.py $(PATCH_VERSION_ARGS) --output "$@"

@@ -45,9 +45,10 @@ int FsClient_LoadFile(const FsStorageIo *,const char *,FsClientConfig *);
 int FsClient_SaveFile(const FsStorageIo *,const char *,const char *,const FsClientConfig *);
 void FsClient_Release(const FsStorageIo *,FsClientConfig *);
 int FsUser_Select(const FsProfileIo *,FsUserProfile *);
-/* Resolve without provisioning, registration writes or legacy migration.
+/* Resolve without provisioning, new registry bindings or legacy migration.
+   Existing fixed-schema registry content is still repaired on read.
    A missing profile is a memory-only view, preserving Bank's first migration. */
-/* 只读选择，不创建目录、写注册表或迁移旧档；缺少用户时保留内存视图，留给 Bank 首次迁移。 */
+/* 不创建目录、登记新绑定或迁移旧档；仍修复已有注册表结构。缺少用户时留给 Bank 首次迁移。 */
 int FsUser_SelectExisting(const FsProfileIo *,FsUserProfile *);
 /* Read a title-lifetime catalogue once. Caller releases it with FsClient_Release.
    menu.activeUser is persisted selection; number/id describe auto's resolution.

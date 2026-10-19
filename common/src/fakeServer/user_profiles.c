@@ -93,7 +93,7 @@ int FsClient_LoadFile(const FsStorageIo *io,const char *path,FsClientConfig *con
         char *line=cursor;int damaged=0;
         while(cursor<text+size && *cursor!='\n'){if(!*cursor)damaged=1;cursor++;}
         if(cursor<text+size)*cursor++=0;
-        if(damaged)continue;
+        if(damaged){if(*trim(line)=='[')section=0;continue;}
         char *comment=strchr(line,'#');if(comment)*comment=0;line=trim(line);
         if(!strcmp(line,"[global]")){section=1;continue;}
         if(!strcmp(line,"[users]")){section=2;continue;}
@@ -119,7 +119,14 @@ int FsClient_LoadFile(const FsStorageIo *io,const char *path,FsClientConfig *con
         int found=0;for(uint32_t i=0;i<config->count;i++)if(config->users[i].number==config->activeUser)found=1;
         if(!found)config->activeUser=0;
     }
-    return FS_OK;
+    char temp[FS_USER_PATH_SIZE];
+    if(!FsFile_BackupPath(path,temp,sizeof(temp)))result=FS_INVALID;
+    else {
+        strcpy(temp+strlen(temp)-4,".tmp");
+        result=FsClient_SaveFile(io,path,temp,config);
+    }
+    if(result!=FS_OK)FsClient_Release(io,config);
+    return result;
 }
 int FsClient_SaveFile(const FsStorageIo *io,const char *path,const char *temp,const FsClientConfig *config)
 {
