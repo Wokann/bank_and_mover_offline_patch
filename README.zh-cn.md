@@ -118,6 +118,12 @@ make -C mover PATCH_RELEASE=1
 - [Mover 构建与实现说明](mover/README.zh-cn.md#独立编译)
 - [共用服务与存储](common/README.zh-cn.md)
 
+## 许可证
+
+本项目采用 GNU 通用公共许可证第 3 版或任何后续版本（`GPL-3.0-or-later`），详见 [LICENSE](LICENSE)。
+
+引用的第三方代码、工具、数据及素材保留各自的许可证与版权声明，详见相应文件及说明。本项目的许可证不替代或扩大第三方授权。
+
 ## 鸣谢
 
 本项目使用 [Luma3DS](https://github.com/LumaTeam/Luma3DS)、[devkitPro/libctru](https://github.com/devkitPro/libctru)、[armips](https://github.com/Kingcom/armips) 和 [Floating IPS](https://github.com/Sir-Walrus/Flips)。[GodMode9](https://github.com/d0k3/GodMode9) 用于软件数据提取；词表、筛选规则和礼物素材的来源及许可证列在对应配置说明中。

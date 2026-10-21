@@ -119,6 +119,15 @@ Only explicit `PATCH_RELEASE=1` omits the Git suffix, displaying `Offline Patch 
 - [Mover build instructions and implementation](mover/README.md#independent-build)
 - [Shared service and storage](common/README.md)
 
+## License
+
+This project is licensed under the GNU General Public License, version 3 or any
+later version (`GPL-3.0-or-later`). See [LICENSE](LICENSE).
+
+Third-party code, tools, data and assets retain their respective licenses and
+copyright notices; see the corresponding files and documentation. This project's
+license does not replace or extend third-party permissions.
+
 ## Acknowledgements
 
 Built with [Luma3DS](https://github.com/LumaTeam/Luma3DS), [devkitPro/libctru](https://github.com/devkitPro/libctru), [armips](https://github.com/Kingcom/armips) and [Floating IPS](https://github.com/Sir-Walrus/Flips). [GodMode9](https://github.com/d0k3/GodMode9) supplies the title-dumping workflow. Configuration guides identify the sources and licenses for filtering data and gift assets.
