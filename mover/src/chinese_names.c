@@ -4,9 +4,8 @@
 #include "vc_chinese_us.inc"
 #include "vc_chinese_ko.inc"
 
-static int custom(u32 source)
+static int custom(void)
 {
-    (void)source;
     return !CombinePatch_ModeStorage[0] &&
         (FakeServerClient_CustomOptions()&FS_CUSTOM_ALLOW_FAN_TRANSLATION_CHN);
 }
@@ -53,79 +52,59 @@ static void copyName(u16 *out,const u16 *raw,u32 units)
     for(;i<13;i++)out[i]=0;
 }
 
-static void storeNames(MoverVcCandidateView *candidate,const u16 *nickname,const u16 *trainer)
+/* Select text before the native setter runs. Never reopen a converted record
+   to undo an earlier default-name write or change its nickname flag.
+   在原版写入前选定字符串，不重开已转换对象补写，也不修改昵称标记。 */
+int MoverNames_Gen5Default(void *out,const u16 *nickname,u32 decision)
 {
-    if(!candidate || !candidate->record || (!nickname && !trainer))return;
-    void *record=candidate->record;
-    Pokemon_BeginAccess(record);
-    if(*(const u16 *)Pokemon_GetGrowthBlock(record,0)) {
-        /* Writing accessors mark the native record dirty; EndAccess performs
-           its original checksum/encryption. Keep the native nickname flag. */
-        /* 写访问器登记修改，EndAccess 沿用原校验／加密；不伪造昵称标志。 */
-        if(nickname)copyName((u16 *)Pokemon_GetMoveBlock(record,1),nickname,12);
-        if(trainer)copyName((u16 *)Pokemon_GetTrainerBlock(record,1),trainer,12);
+    if(!out || !nickname || !custom() || decision==FS_NAME_FIX_NICKNAME ||
+        decision==FS_NAME_FIX_BOTH)return 0;
+    u16 text[13];
+    copyName(text,nickname,10);
+    /* Keep the native Gen5 glyph/control normalization when selecting source
+       text instead of a database name; Han characters themselves are unchanged.
+       选择原文仍沿用 Gen5 的特殊字形／控制符处理，汉字本身不改。 */
+    for(u32 i=0;i<10 && text[i];i++) {
+        if(text[i]<0x20) { text[i]=0;break; }
+        for(u32 j=0;j<41;j++)if(text[i]==MoverGen5_NameCharacters[j]) {
+            text[i]=MoverGen5_NameCharacters[41+j];break;
+        }
     }
-    Pokemon_EndAccess(record);
+    if(!FsMover_HasHan(text,13))return 0;
+    MoverNames_AssignText(out,text);
+    return 1;
 }
 
-static MoverVcCandidateView *convertGen5(void *context,MoverGen5RecordView *raw,u32 decision)
-{
-    MoverVcCandidateView *result=MoverNames_OriginalGen5(context,raw);
-    if(!result || !raw || !custom(FS_MOVER_GEN5) || !(raw->control&MOVER_GEN5_BODY_DECODED))return result;
-    const u8 *row=MoverGen5_BlockOrderTable+4*((raw->pid>>13)&31);
-    const u8 *body=(const u8 *)raw->body;
-    u16 nickname[13],trainer[13];
-    copyName(nickname,(const u16 *)(body+row[2]),10);
-    copyName(trainer,(const u16 *)(body+row[3]),7);
-    /* Native screening clears a rejected nickname's flag, not its source
-       text. Do not mistake that for an unnicknamed fan-translation name.
-       原筛选会清昵称标志但保留旧文本；不得当成无昵称汉化名再次恢复。 */
-    storeNames(result,decision!=FS_NAME_FIX_NICKNAME && decision!=FS_NAME_FIX_BOTH &&
-        FsMover_HasHan(nickname,13)?nickname:0,
-        decision!=FS_NAME_FIX_TRAINER && decision!=FS_NAME_FIX_BOTH &&
-        FsMover_HasHan(trainer,13)?trainer:0);
-    return result;
-}
+/* The fifth argument remains on this call's stack throughout the intact
+   native body. Its name-choice bridge reads only this slot's decision.
+   第五参数随本次调用保留在栈中，命名桥只读取本槽判定，不使用全局槽位状态。 */
 MoverVcCandidateView *MoverNames_ConvertGen5(void *context,MoverGen5RecordView *raw)
-{ return convertGen5(context,raw,FS_NAME_UNCHANGED); }
+{ return MoverNames_OriginalGen5(context,raw,0,0,FS_NAME_UNCHANGED); }
 
 MoverVcCandidateView *MoverNames_ConvertGen5Checked(void *context,MoverGen5RecordView *raw,u32 decision)
-{ return convertGen5(context,raw,decision); }
+{ return MoverNames_OriginalGen5(context,raw,0,0,decision); }
 
-/* Run only after each complete native bulk conversion. Ownership, rejection,
-   metadata and callbacks remain native; no pointer is sent to a worker here. */
-/* 仅在原批量转换返回后更新候选名字；对象所有权、筛选、元数据、回调均保留。 */
-static void convertVc(void *output,const u8 *trainer,const u8 *nickname,u32 count,u32 alphabet)
+/* The native comparison still decides whether the source is nicknamed. Its
+   string temporary is changed only at the subsequent write call, including
+   the special Mew branch. Source bytes and comparison inputs stay untouched.
+   保留原版昵称比较；只在随后的写入调用选择文本，亦覆盖梦幻专用分支，
+   不改来源字节或此前的比较输入。 */
+static void selectVcText(void *out,const u8 *raw,u32 alphabet)
 {
-    if(!custom(FS_MOVER_VC) || !output || !trainer || !nickname ||
-        count>30 || (alphabet!=1 && alphabet!=6))return;
+    if(!custom() || !out || !raw || (alphabet!=1 && alphabet!=6))return;
     u32 stride=((const u32 *)0x002be948u)[alphabet]-1;
     if(!stride || stride>11)return;
-    MoverVcCandidateView *const *candidates=output;
-    for(u32 i=0;i<count;i++) {
-        u16 nick[13],ot[13];
-        int n=MoverNames_DecodeVc(nickname+i*stride,stride,alphabet,nick);
-        int t=MoverNames_DecodeVc(trainer+i*stride,stride,alphabet,ot);
-        storeNames(candidates[i],n==1?nick:0,t==1?ot:0);
-    }
+    u16 text[13];
+    if(MoverNames_DecodeVc(raw,stride,alphabet,text)==1)MoverNames_AssignText(out,text);
 }
 
-void MoverNames_ConvertVcA(void *a,u32 b,void *out,const void *mon,
-    const u8 *ot,const u8 *nick,u32 count,u32 alphabet,const void *species)
+void MoverNames_SetVcNickname(void *candidate,void *text,const u8 *raw,u32 alphabet)
 {
-    MoverNames_OriginalVcA(a,b,out,mon,ot,nick,count,alphabet,species);
-    convertVc(out,ot,nick,count,alphabet);
+    selectVcText(text,raw,alphabet);
+    MoverNames_OriginalSetNickname(candidate,text);
 }
-u32 MoverNames_ConvertVcB(void *a,u32 b,void *out,const void *mon,
-    u32 extra,const u8 *ot,const u8 *nick,u32 count,u32 alphabet)
+void MoverNames_SetVcTrainer(void *candidate,void *text,const u8 *raw,u32 alphabet)
 {
-    u32 result=MoverNames_OriginalVcB(a,b,out,mon,extra,ot,nick,count,alphabet);
-    convertVc(out,ot,nick,count,alphabet);
-    return result;
-}
-void MoverNames_ConvertVcC(void *a,u32 b,void *out,const void *mon,
-    const u8 *ot,const u8 *nick,u32 count,u32 alphabet,const void *species)
-{
-    MoverNames_OriginalVcC(a,b,out,mon,ot,nick,count,alphabet,species);
-    convertVc(out,ot,nick,count,alphabet);
+    selectVcText(text,raw,alphabet);
+    MoverNames_OriginalSetTrainer(candidate,text);
 }

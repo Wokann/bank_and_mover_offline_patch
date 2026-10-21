@@ -88,15 +88,20 @@ For this account, the loaded `BanUnicodeChinese` rule is always disabled in RAM,
   for untranslated Korean saves.
 - Only generated candidate names change, not source saves. Unknown/truncated pairs fall
   back for the whole name, never publishing a partial conversion.
+- Name screening receives Unicode text: NDS supplies its existing UTF-16 Chinese;
+  VC fan codes are converted to UTF-16 before screening. Unnicknamed Chinese names
+  are also checked, rather than substituting a database species name first.
 - NGWord, other screening, native checksums/encryption, callbacks and transactions remain.
   This permission is independent of checkName being enabled/present. If both custom
-  options are on, the explicit fan table restores Chinese after legacy conversion.
-  A requested nickname/OT correction takes priority: restoration never resurrects that
+  options are on, native name writes use the explicit fan table while other legacy
+  conversion behavior remains. A requested nickname/OT correction takes priority:
+  Chinese preservation never resurrects that
   field's rejected name. To retain Chinese without name screening, set enableCheckName=false;
   in the selected source's checkName.conf [global]. Pokemon screening remains independent.
 
-Conversion options accompany the background Bank download; later policy requests read
-current rule/name files. Mid-operation edits do not retroactively transcode candidates;
+The successful connection response delivers this account's conversion options before
+candidate conversion; later policy requests read current rule/name files.
+Mid-operation edits do not retroactively transcode candidates;
 return to the title and reconnect after changing conversion options.
 
 Each table has one project-specific source, not an official encoding specification;

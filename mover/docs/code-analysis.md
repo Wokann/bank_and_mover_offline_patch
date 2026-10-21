@@ -517,7 +517,7 @@ code and all three message lines remain unchanged.
 
 ### Gen 5 remote and local results
 
-With the optional name policy enabled and Han not permitted, a Gen5 nickname or
+With the `BanUnicodeChinese` Pokemon rule enabled and Han not permitted, a Gen5 nickname or
 OT containing a restricted Han character returns per-slot rejection `1` before
 word/exception matching, not `250–252`. `allowFanTranslationCHN` implicitly permits
 Han. This follows the user's hardware observation; `1` is a native-recognized
@@ -953,16 +953,28 @@ retains the original console-settings calls.
 
 ## Optional offline Chinese name conversion
 
-`allowFanTranslationCHN=false;` defaults off. When enabled, the local server
-uses the configured US/Korean VC fan-translation tables and writes the existing
-BanUnicodeChinese rule as disabled. Other Pokemon and NGWord screening remains active.
+`allowFanTranslationCHN=false;` in the user's `user.conf` defaults off. The successful
+connection response delivers that user's custom options before candidate conversion.
+When enabled, the configured US/Korean VC fan-translation tables apply, and the
+BanUnicodeChinese rule is disabled in memory without changing shared configuration.
+Other Pokemon and NGWord screening remains active.
 
-Gen5 names are already UTF-16. Permitted Chinese nicknames and OT names survive
-native conversion, including a default name whose nickname flag is clear.
-The per-slot name-correction result is retained: a name rejected by NGWord is not
-restored later by Chinese preservation. VC conversion uses the specified fan
-alphabet only when explicitly enabled, otherwise the native alphabet remains.
+Gen5 names are already UTF-16. Before the default-name write, the converter
+selects a permitted original Chinese nickname and skips that database-name lookup,
+retaining native special-glyph and control-character normalization.
+Native conversion of already-nicknamed text and OT names remains. The per-slot
+name-correction code travels on the current call's stack: a server-requested
+nickname correction cannot enter the preservation branch, and the nickname flag
+is not changed by that branch.
+
+VC selects the specified US/Korean fan-translation text at the native nickname/OT
+write calls, including all three conversion paths and the special Mew renaming
+branch. Native string comparisons still determine the nickname flag; no converted
+record is reopened to replace an already-written default name. The resulting
+UTF-16 names are subsequently screened by the service, with name corrections
+applied by the native consumer. Disabled options or invalid/incomplete fan codes
+retain native text, and no global candidate pointer is kept.
 
 `enableMoverv1.2=false;` independently controls old offline RGBY conversion;
 it does not change Gen2, Gen5 or online paths. See [version compatibility](version-compatibility.md)
-and [custom settings](../../configTemplate/templateForCopy/Bank/fakeServers/shared/readme_server.md#custom-options).
+and [custom settings](../../configTemplate/templateForCopy/Bank/fakeServers/users/readme_user.md).

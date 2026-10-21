@@ -59,7 +59,10 @@ void *NativeResponse_CreateConnection(void *storage,u32 kind,NativeResponseRelea
 {
     NativeConnectionJob *job=storage;
     if (!job) return 0;
-    if (kind!=2) missingBankNotice=0;
+    if (kind!=2) {
+        missingBankNotice=0;
+        if(FAKE_SERVER_CLIENT_OWNER==FS_TRANSACTION_OWNER_MOVER)FakeServerClient_SetCustomOptions(0);
+    }
     for (u32 i=0;i<sizeof(*job);i++) ((volatile u8 *)job)[i]=0;
     job->vtable=(void *)connectionVtable;
     job->release=release;
@@ -81,10 +84,13 @@ u32 NativeResponse_PollConnection(NativeConnectionJob *job)
         int received=NativeTransport_Poll((uintptr_t)job,(uintptr_t)job,&input,0,0,&delivery);
         if (received==FS_ASYNC_ACCEPTED || received==FS_ASYNC_BUSY) return 0;
         if (received==FS_ASYNC_READY) {
+            uint32_t options=delivery.result==FS_OK?delivery.reply.customOptions:0;
             int released=NativeTransport_Release(&delivery);
             if (released==FS_ASYNC_BUSY) return 0;
             job->reply=released==FS_ASYNC_ACCEPTED && delivery.result==FS_OK?delivery.reply.output.connection:
                 (FsConnectionResponse){2,0};
+            if(FAKE_SERVER_CLIENT_OWNER==FS_TRANSACTION_OWNER_MOVER && job->kind!=2)
+                FakeServerClient_SetCustomOptions(job->reply.result==1?options:0);
         } else job->reply=(FsConnectionResponse){2,0};
         job->errorCode=job->reply.errorCode;
         if (job->kind==2 && job->reply.result==1) FakeServerClient_EndSession();
@@ -245,7 +251,6 @@ int NativeResponse_AcceptOperation(NativeRemoteView *remote,NativeRemoteResult *
         NativeTransport_Accept((uintptr_t)remote,(uintptr_t)job,&input)==FS_ASYNC_ACCEPTED;
     if (accepted && operation==FS_SERVICE_DOWNLOAD_BANK) {
         missingBankNotice=0;
-        if(FAKE_SERVER_CLIENT_OWNER==FS_TRANSACTION_OWNER_MOVER)FakeServerClient_SetCustomOptions(0);
     }
     return accepted;
 }

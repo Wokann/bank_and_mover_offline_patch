@@ -964,14 +964,11 @@ def main() -> None:
         if patched[start - IMAGE_BASE:end - IMAGE_BASE] != base[start - IMAGE_BASE:end - IMAGE_BASE]:
             raise ValueError("native remote query consumer/destructor changed")
 
-    # Conversion bodies are intact apart from locale calls and checked entry
-    # wrappers; the displaced prologues must be replayed exactly.
-    # 转换体仅允许地区调用及入口包装，入口覆盖的序言必须原样重放。
+    # Conversion bodies may change only at checked locale/name callsites.
+    # The Gen5 entry replays its displaced prologue; VC entries stay native.
+    # 转换体只允许核对的地区／命名接点变化，Gen5 重放序言，VC 入口保留原版。
     name_hooks={
         0x00241574:("gen5",0xE92D4FF3),
-        0x0024E48C:("vca",0xE92D4FFF),
-        0x0024F428:("vcb",0xE92D4FFF),
-        0x002508B4:("vcc",0xE92D4FFF),
     }
     for address,(kind,prologue) in name_hooks.items():
         target=sym["movernames_convert"+kind]
@@ -979,6 +976,47 @@ def main() -> None:
         if (word(base,address)!=prologue or branch_target(patched,address)!=(target,False,0xE) or
                 word(patched,original)!=prologue or branch_target(patched,original+4)!=(address+4,False,0xE)):
             raise ValueError(f"invalid native name conversion wrapper: {address:08X}")
+    for address in (0x0024E48C,0x0024F428,0x002508B4):
+        if word(patched,address)!=word(base,address):
+            raise ValueError("VC conversion must not use post-conversion name wrappers")
+    name_choice_hooks={0x00241FF4:"movernames_gen5defaultentry"}
+    characters=sym["movergen5_namecharacters"]
+    if (word(base,0x00242128)!=characters or
+            patched[characters-IMAGE_BASE:characters-IMAGE_BASE+164]!=
+            base[characters-IMAGE_BASE:characters-IMAGE_BASE+164]):
+        raise ValueError("Gen5 source-name selection must retain the native glyph conversion table")
+    choice=sym["movernames_gen5defaultentry"]
+    if (word(base,0x00241FF4)!=0xE5D6000F or
+            branch_target(patched,0x00241FF4)!=(choice,False,0xE) or
+            [word(patched,choice+offset) for offset in (0,4,8,12,20,24,32)]!=
+            [0xE92D500F,0xE28D0068,0xE1A0100B,0xE59D21B0,0xE3500000,0xE8BD500F,0xE5D6000F] or
+            branch_target(patched,choice+16)!=(sym["movernames_gen5default"],True,0xE) or
+            branch_target(patched,choice+28)!=(0x00242020,False,0x1) or
+            branch_target(patched,choice+36)!=(0x00241FF8,False,0xE)):
+        raise ValueError("Gen5 must choose the name before lookup/write and preserve its per-call decision")
+    vc_name_hooks={
+        **{address:(0x0019C8D0,"movernames_setvcnicknameentry") for address in
+            (0x0024ECC4,0x0024ED80,0x0024EDC0,0x002510D0,0x00251190,0x002511D0)},
+        **{address:(0x00235FF0,"movernames_setvctrainerentry") for address in
+            (0x0024ED48,0x00251148)},
+        **{address:(0x0019C8D0,"movernames_setvcbnicknameentry") for address in
+            (0x0024FA74,0x0024FB24,0x0024FB64)},
+        0x0024FAF0:(0x00235FF0,"movernames_setvcbtrainerentry"),
+    }
+    for address,(original,target) in vc_name_hooks.items():
+        if (branch_target(base,address)!=(original,True,0xE) or
+                branch_target(patched,address)!=(sym[target],True,0xE)):
+            raise ValueError(f"invalid pre-write VC name hook: {address:08X}")
+    for entry,offset,target in (
+            ("movernames_setvcnicknameentry",0x114,"movernames_setvcnickname"),
+            ("movernames_setvctrainerentry",0x110,"movernames_setvctrainer"),
+            ("movernames_setvcbnicknameentry",0x110,"movernames_setvcnickname"),
+            ("movernames_setvcbtrainerentry",0x10C,"movernames_setvctrainer")):
+        address=sym[entry]
+        if (word(patched,address)!=(0xE59D2000|offset) or
+                word(patched,address+4)!=0xE1A03006 or
+                branch_target(patched,address+8)!=(sym[target],False,0xE)):
+            raise ValueError("VC name selection must use this slot's frame, not global candidate state")
     legacy_hooks={
         0x0024F6B0:(0x0019CD3C,"moverlegacy_createvcb"),
         **{address:(0x00198D60,"moverlegacy_decode") for address in (0x0024F470,0x0024F968,0x0024FAE4)},
@@ -1023,7 +1061,8 @@ def main() -> None:
                        (0x00245728, 0x00246A2C), (0x0023CBC0, 0x0023D298),
                        (0x002401F0, 0x00240300), (0x0025C62C, 0x0025C734)):
         expected=bytearray(base[start-IMAGE_BASE:end-IMAGE_BASE])
-        for address in (*locale_hooks,*name_hooks,*legacy_hooks,*checked_name_hooks):
+        for address in (*locale_hooks,*name_hooks,*legacy_hooks,*checked_name_hooks,
+                        *name_choice_hooks,*vc_name_hooks):
             if start<=address<end:
                 expected[address-start:address-start+4]=patched[address-IMAGE_BASE:address-IMAGE_BASE+4]
         if patched[start - IMAGE_BASE:end - IMAGE_BASE] != expected:

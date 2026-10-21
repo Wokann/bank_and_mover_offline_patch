@@ -40,4 +40,4 @@
 
 - [Bulbapedia：第一／二世代转换](https://bulbapedia.bulbagarden.net/wiki/Pok%C3%A9_Transporter#From_Generation_I_and_II)介绍历史性别、闪光与姓名转换变化；这是社区资料，不是官方完整算法。
 - 兼容选项包装 RGBY 转换体 `0x0024F428`，仍使用当前原生对象、存档格式及事务。
-- [服务器配置](../../configTemplate/templateForCopy/Bank/fakeServers/shared/readme_server.zh-cn.md#enablemoverv12)说明开启方式及与汉化支持的关系。
+- [用户配置](../../configTemplate/templateForCopy/Bank/fakeServers/users/readme_user.zh-cn.md)说明开启方式及与汉化支持的关系。

@@ -37,18 +37,39 @@
 
 .open INPUT_CODE, OUTPUT_CODE, 0x00100000
 
-// Optional, offline-only name restoration around intact native converters.
-// 可选离线姓名适配；原转换体不改写，仅在返回后恢复所选汉化名字。
+// Optional offline name selection happens before native text setters. The
+// fifth Gen5 call argument carries this slot's screening result on its stack.
+// 可选离线姓名在原写入前选定；Gen5 第五参数在本次调用栈中携带本槽判定。
 .org 0x00241574
     b MoverNames_ConvertGen5
-.org 0x0024E48C
-    b MoverNames_ConvertVcA
-.org 0x0024F428
-    b MoverNames_ConvertVcB
-.org 0x002508B4
-    b MoverNames_ConvertVcC
 .org 0x00245F14
     bl MoverNames_ConvertGen5CheckedEntry
+.org 0x00241FF4
+    b MoverNames_Gen5DefaultEntry
+.org 0x0024ECC4
+    bl MoverNames_SetVcNicknameEntry
+.org 0x0024ED80
+    bl MoverNames_SetVcNicknameEntry
+.org 0x0024EDC0
+    bl MoverNames_SetVcNicknameEntry
+.org 0x0024ED48
+    bl MoverNames_SetVcTrainerEntry
+.org 0x0024FA74
+    bl MoverNames_SetVcBNicknameEntry
+.org 0x0024FB24
+    bl MoverNames_SetVcBNicknameEntry
+.org 0x0024FB64
+    bl MoverNames_SetVcBNicknameEntry
+.org 0x0024FAF0
+    bl MoverNames_SetVcBTrainerEntry
+.org 0x002510D0
+    bl MoverNames_SetVcNicknameEntry
+.org 0x00251190
+    bl MoverNames_SetVcNicknameEntry
+.org 0x002511D0
+    bl MoverNames_SetVcNicknameEntry
+.org 0x00251148
+    bl MoverNames_SetVcTrainerEntry
 
 // VC-only construction and gender correction callsites. Default/online paths
 // call the original functions; no Gen5 or other conversion code is replaced.
@@ -1092,6 +1113,39 @@ MoverNames_ConvertGen5CheckedEntry:
     add r2,r2,#0x48
     ldr r2,[r2,r8,lsl #2]
     b MoverNames_ConvertGen5Checked
+// Native Gen5 frame: 0x198 bytes, name temporary at +0x50, raw name in r11.
+// Keep all live volatile registers and use the untouched caller stack slot.
+// Gen5 原帧为 0x198 字节；临时字符串 +0x50，原名 r11。保留原活跃寄存器。
+MoverNames_Gen5DefaultEntry:
+    push {r0-r3,r12,lr}
+    add r0,sp,#0x68
+    mov r1,r11
+    ldr r2,[sp,#0x1B0]
+    bl MoverNames_Gen5Default
+    cmp r0,#0
+    pop {r0-r3,r12,lr}
+    bne 0x00242020
+    ldrb r0,[r6,#0xF]
+    b 0x00241FF8
+// The current raw name pointer advances in the native frame after each slot.
+// No global candidate, source pointer or per-slot decision is retained.
+// 每槽原名指针由原帧推进，不留全局候选、来源指针或逐槽判定。
+MoverNames_SetVcNicknameEntry:
+    ldr r2,[sp,#0x114]
+    mov r3,r6
+    b MoverNames_SetVcNickname
+MoverNames_SetVcTrainerEntry:
+    ldr r2,[sp,#0x110]
+    mov r3,r6
+    b MoverNames_SetVcTrainer
+MoverNames_SetVcBNicknameEntry:
+    ldr r2,[sp,#0x110]
+    mov r3,r6
+    b MoverNames_SetVcNickname
+MoverNames_SetVcBTrainerEntry:
+    ldr r2,[sp,#0x10C]
+    mov r3,r6
+    b MoverNames_SetVcTrainer
 MoverLegacy_CreateVcB:
     push {r4,lr}
     ldrb r12,[r4,#0x1C]
@@ -1107,18 +1161,13 @@ MoverLegacy_CreateVcB:
 .definelabel MoverLegacy_OriginalDecode,0x00198D60
 .definelabel MoverLegacy_AssignText,0x0019C93C
 .definelabel MoverLegacy_NormalizeKana,0x0024DC88
+.definelabel MoverNames_AssignText,0x0019C93C
+.definelabel MoverGen5_NameCharacters,0x002B0600
+.definelabel MoverNames_OriginalSetNickname,0x0019C8D0
+.definelabel MoverNames_OriginalSetTrainer,0x00235FF0
 MoverNames_OriginalGen5:
     push {r0,r1,r4-r11,lr}
     b 0x00241578
-MoverNames_OriginalVcA:
-    push {r0-r11,lr}
-    b 0x0024E490
-MoverNames_OriginalVcB:
-    push {r0-r11,lr}
-    b 0x0024F42C
-MoverNames_OriginalVcC:
-    push {r0-r11,lr}
-    b 0x002508B8
     .importobj BUILD_DIRECTORY + "/server_validation.o"
     .importobj BUILD_DIRECTORY + "/console_profile.o"
     .importobj BUILD_DIRECTORY + "/chinese_names.o"

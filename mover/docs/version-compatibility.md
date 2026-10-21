@@ -41,4 +41,4 @@ Pokémon screening remain in force; this switch does not make arbitrary specimen
 
 - [Bulbapedia: Generation I and II conversion](https://bulbapedia.bulbagarden.net/wiki/Pok%C3%A9_Transporter#From_Generation_I_and_II) describes the historical gender, shiny and text-conversion changes. It is community documentation, not an official complete algorithm.
 - The compatibility option wraps RGBY converter `0x0024F428`; current native objects, save format and transactions remain in use.
-- [Server configuration](../../configTemplate/templateForCopy/Bank/fakeServers/shared/readme_server.md#enablemoverv12) describes activation and interactions with fan-translation support.
+- [User configuration](../../configTemplate/templateForCopy/Bank/fakeServers/users/readme_user.md) describes activation and interactions with fan-translation support.

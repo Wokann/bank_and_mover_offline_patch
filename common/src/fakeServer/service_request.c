@@ -401,6 +401,13 @@ static int executeRequest(void *opaque,const void *input,uint32_t inputSize,
     }
     case FS_SERVICE_CONNECT:
         FsServer_Connection(server,0,&reply->output.connection);
+        /* Mover converts candidates before downloading Bank data. Deliver
+           the confirmed account's conversion policy with connection success,
+           not only with the later Bank body. */
+        /* Mover 先转换候选再下载银行；连接成功时即交付确认用户的转换策略，
+           不能等后续银行正文下载完毕才让客户端取得开关。 */
+        if(context->owner==FS_TRANSACTION_OWNER_MOVER && reply->output.connection.result==1)
+            reply->customOptions=server->configuration.mover.customOptions;
         return FS_OK;
     case FS_SERVICE_QUERY_BANK:
         return FsServer_QueryRemoteStatus(server,&reply->output.bank);
