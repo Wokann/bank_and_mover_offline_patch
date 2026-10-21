@@ -1,8 +1,8 @@
 # Mover v1.2 转换兼容范围
 
-[English](version-compatibility.md) · [配置用法](../../configTemplate/templateForCopy/Bank/fakeServers/shared/readme_server.zh-cn.md#enablemoverv12)
+[English](version-compatibility.md) · [配置用法](../../configTemplate/templateForCopy/Bank/fakeServers/users/readme_user.zh-cn.md#enablemoverv12)
 
-共享 `[custom] enableMoverv1.2=false;` 默认关闭。开启只改变离线 RGBY 的已核实转换差异，
+个人 `user.conf` 的 `[custom] enableMoverv1.2=false;` 默认关闭。开启只改变离线 RGBY 的已核实转换差异，
 不是安装旧程序或回退全部客户端／服务器。金银／水晶、Gen5、在线模式均保留 v1.5。
 
 ## 已确认并切换的差异
@@ -33,8 +33,10 @@
 | 梦幻处理 | 命运相遇、五项满 IV、默认名等原特殊分支保留；不恢复历史服务器接纳规则 |
 | PK7、日期、校验、事务 | 保留 v1.5 对象、原校验／加密、回调与保存，不复制旧对象布局 |
 
-开启汉化许可时，明确选用的美版／韩版汉化表在原转换完成后恢复中文；普通 NGWord
-与宝可梦筛选仍有效，不因 v1.2 开关放行任意个体。
+开启汉化许可时，在原版姓名写入前选择汉化字符串，不在转换完成后补写对象。
+英、法、意、德、西文来源使用美版汉化表，西欧单字节字符保留来源语言的 v1.5 解读；
+韩版金银使用韩版表，日文来源不转码。普通 NGWord 与宝可梦筛选仍有效，
+不因 v1.2 开关放行任意个体。
 
 ## 参考资料
 

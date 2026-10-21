@@ -967,7 +967,13 @@ name-correction code travels on the current call's stack: a server-requested
 nickname correction cannot enter the preservation branch, and the nickname flag
 is not changed by that branch.
 
-VC selects the specified US/Korean fan-translation text at the native nickname/OT
+English, French, Italian, German and Spanish VC sources use the English fan table
+for two-byte sequences and retain each source language's native single-byte meanings.
+The byte-prefix ranges do not overlap. Korean Gold/Silver independently uses the
+Korean table with mixed single-byte support; Japanese sources are excluded. Source
+classification follows the native selected-game version/language mapping, not names
+or console locale.
+VC selects the appropriate fan-translation text at the native nickname/OT
 write calls, including all three conversion paths and the special Mew renaming
 branch. Native string comparisons still determine the nickname flag; no converted
 record is reopened to replace an already-written default name. The resulting

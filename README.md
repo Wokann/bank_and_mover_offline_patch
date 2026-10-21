@@ -94,7 +94,15 @@ See [Bank usage](bank/README.md) and [Mover usage](mover/README.md) for recovery
 
 ## Building from source
 
-Build Bank and Mover separately with GNU Make, Python 3, devkitARM, armips and Floating IPS. Original decrypted/decompressed code, ExHeader and RomFS inputs must come from your own titles and are not distributed here.
+Build with GNU Make, Python 3, devkitARM, armips and Floating IPS. Original decrypted/decompressed code, ExHeader and RomFS inputs must come from your own titles and are not distributed here.
+
+Run `make` from the repository root to build and verify both titles. `make package` also uses
+7-Zip ZIP/LZMA at maximum compression to create
+`release/Offline Patch v<version>-<revision>-<YYYYMMDDHHmm>.zip`; the timestamp uses Beijing
+time (UTC+8). The archive contains only the two title patch directories and the complete
+empty `Bank` configuration template. Existing ZIPs are not included or overwritten.
+7-Zip is auto-detected, or can be selected with `SEVENZIP="/path/to/7z"`.
+The per-title `make -C bank` and `make -C mover` commands remain available.
 
 The patch label appears in white at the upper screen's top left; the official version stays in its original position. The root `VERSION` file defines the base patch version. Ordinary `make` always produces a development label such as `Offline Patch v0.9.1-abcdef`, using the current Git short revision; a tag does not select release mode. Uncommitted changes on the same commit retain the same Git suffix.
 

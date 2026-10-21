@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import importlib.util
+import re
 import subprocess
 import sys
 import zlib
@@ -69,6 +70,34 @@ def symbols(path: Path) -> dict[str, int]:
 def word(image: bytes, address: int) -> int:
     offset = address - IMAGE_BASE
     return int.from_bytes(image[offset:offset + 4], "little")
+
+
+def verify_vc_name_tables(base: bytes, patched: bytes) -> None:
+    # Source classification must still restrict Korean to Korean Gold/Silver.
+    # 保留原版来源分类，韩文编码只能对应韩版金银，不能按名字内容猜测。
+    for address in (0x0024E464, 0x0024F414, 0x0025088C):
+        if word(base, address) != 0x002BE810 or word(patched, address) != 0x002BE810:
+            raise ValueError("VC source alphabet must retain its native classification")
+    korean = [(index, word(base, 0x002BE8AC + index * 4)) for index in range(39)
+              if word(base, 0x002BE810 + index * 4) == 6]
+    if korean != [(31, 39), (32, 40)]:
+        raise ValueError("Korean fan text must be limited to Korean Gold/Silver")
+    for start, end in ((0x002BE810, 0x002BE964), (0x002C23D0, 0x002C27D0),
+                       (0x002C2E54, 0x002C3054), (0x00198D60, 0x0019911C)):
+        if patched[start - IMAGE_BASE:end - IMAGE_BASE] != base[start - IMAGE_BASE:end - IMAGE_BASE]:
+            raise ValueError("native VC source/character tables or decoder changed")
+
+    # Chinese lead bytes must not consume real Western single-byte characters.
+    # 汉化前导字节必须只占用西文表的空白占位，不得吞掉西欧专有字符。
+    table = Path(__file__).resolve().parents[1] / "include" / "vc_chinese_us.inc"
+    values = [int(value, 16) for value in re.findall(
+        r"0x([0-9a-fA-F]+)", table.read_text(encoding="utf-8").split("{", 1)[1])]
+    if not values or len(values) > 0x10000 or not any(values):
+        raise ValueError("invalid Western fan-translation character table")
+    for byte in range(1, ((len(values) - 1) >> 8) + 1):
+        offset = 0x002C2E54 - IMAGE_BASE + byte * 2
+        if int.from_bytes(base[offset:offset + 2], "little") != 0x20:
+            raise ValueError("fan-translation prefix overlaps a Western character")
 
 
 def verify_constructor_table(base: bytes, patched: bytes) -> None:
@@ -239,6 +268,7 @@ def main() -> None:
     if retired.intersection(sym):
         raise ValueError("retired unreferenced filesystem wrappers are still imported")
     verify_constructor_table(base, patched)
+    verify_vc_name_tables(base, patched)
     from tools.prepare_expanded_code import prepare_images
     _, expected_header, _ = prepare_images(
         base, args.base_exheader.read_bytes(), EXPANDED_PAYLOAD_START, EXPANDED_PAYLOAD_SIZE)

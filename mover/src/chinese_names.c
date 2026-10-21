@@ -10,11 +10,37 @@ static int custom(void)
         (FakeServerClient_CustomOptions()&FS_CUSTOM_ALLOW_FAN_TRANSLATION_CHN);
 }
 
-/* The native single-byte alphabets remain authoritative for mixed text.
-   混排文本的单字节字符仍使用 v1.5 原始转换表，不复制或替换原字符表。 */
+/* Western alphabets share a byte table, but not every byte has the same
+   language-specific meaning. Keep the complete native v1.5 adjustments.
+   西文字母表共用字节表，但部分字符随语言变化，保留 v1.5 的全部修正。 */
 static u16 single(u8 value,u32 alphabet)
 {
-    if(alphabet==1)return value==0xd6?'v':((const u16 *)0x002c2e54u)[value];
+    if(alphabet>=1 && alphabet<=5) {
+        u16 point=((const u16 *)0x002c2e54u)[value];
+        if(alphabet==1 && value==0xd6)return 'v';
+        if(alphabet==4 && point==0xc0)return 0xdf;
+        if(alphabet==2) {
+            switch(point) {
+            case 0xc1:return 0xe7;
+            case 0xcc:return 0xe2;
+            case 0xd2:return 0xea;
+            case 0xd3:return 0xee;
+            case 0xcd:return 0xf4;
+            case 0xd1:return 0xfb;
+            }
+        }
+        if(alphabet==3 || alphabet==5) {
+            switch(value) {
+            case 0xd0:return 0xec;
+            case 0xd1:return 0xed;
+            case 0xd2:return 0xf1;
+            case 0xd3:return 0xf2;
+            case 0xd4:return 0xf3;
+            case 0xd5:return 0xfa;
+            }
+        }
+        return point;
+    }
     const u16 *pairs=(const u16 *)0x002c23d0u;
     for(u32 i=0;i<256 && pairs[2*i+1];i++)
         if(pairs[2*i+1]==value)return pairs[2*i];
@@ -23,9 +49,9 @@ static u16 single(u8 value,u32 alphabet)
 
 int MoverNames_DecodeVc(const u8 *raw,u32 bytes,u32 alphabet,u16 out[13])
 {
-    if(!raw || !out || (alphabet!=1 && alphabet!=6))return 0;
-    const u16 *table=alphabet==1?chinese_us:chinese_ko;
-    u32 size=alphabet==1?sizeof(chinese_us)/sizeof(*chinese_us):sizeof(chinese_ko)/sizeof(*chinese_ko);
+    if(!raw || !out || alphabet<1 || alphabet>6)return 0;
+    const u16 *table=alphabet==6?chinese_ko:chinese_us;
+    u32 size=alphabet==6?sizeof(chinese_ko)/sizeof(*chinese_ko):sizeof(chinese_us)/sizeof(*chinese_us);
     u32 length=0,changed=0;
     for(u32 i=0;i<bytes && raw[i]!=0x50;i++) {
         u16 value=0;
@@ -91,7 +117,7 @@ MoverVcCandidateView *MoverNames_ConvertGen5Checked(void *context,MoverGen5Recor
    不改来源字节或此前的比较输入。 */
 static void selectVcText(void *out,const u8 *raw,u32 alphabet)
 {
-    if(!custom() || !out || !raw || (alphabet!=1 && alphabet!=6))return;
+    if(!custom() || !out || !raw || alphabet<1 || alphabet>6)return;
     u32 stride=((const u32 *)0x002be948u)[alphabet]-1;
     if(!stride || stride>11)return;
     u16 text[13];

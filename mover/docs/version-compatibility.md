@@ -1,8 +1,8 @@
 # Mover v1.2 conversion compatibility
 
-[简体中文](version-compatibility.zh-cn.md) · [Configuration](../../configTemplate/templateForCopy/Bank/fakeServers/shared/readme_server.md#enablemoverv12)
+[简体中文](version-compatibility.zh-cn.md) · [Configuration](../../configTemplate/templateForCopy/Bank/fakeServers/users/readme_user.md#enablemoverv12)
 
-Shared `[custom] enableMoverv1.2=false;` defaults off. Enabling it restores verified
+Per-account `user.conf` `[custom] enableMoverv1.2=false;` defaults off. Enabling it restores verified
 offline RGBY conversion differences, not an old executable or the entire service.
 Gen2, Gen5 and online retain v1.5.
 
@@ -34,7 +34,10 @@ The option changes the three behaviors listed above. Other v1.5 conversion and s
 | Mew | Native fateful, guaranteed-IV and default-name branches remain; no historical server acceptance replay |
 | PK7/date/checksum/transactions | Keep current objects, native encryption/checks, callbacks and saving; no old object-layout copy |
 
-Explicit fan-translation permission restores Chinese after conversion. NGWord and
+Explicit fan-translation permission chooses translated text before native name writes,
+not by reopening converted records. English, French, Italian, German and Spanish
+sources use the English fan table with their native v1.5 single-byte character meanings.
+Korean Gold/Silver uses the Korean table; Japanese sources are excluded. NGWord and
 Pokémon screening remain in force; this switch does not make arbitrary specimens eligible.
 
 ## References

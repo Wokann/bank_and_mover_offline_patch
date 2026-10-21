@@ -94,7 +94,14 @@ SD:/3ds/Bank/
 
 ## 从源码构建
 
-Bank 与 Mover 分别使用 GNU Make、Python 3、devkitARM、armips 和 Floating IPS 构建。原始解密／解压代码、ExHeader 及 RomFS 必须自行从合法持有的软件中提取，本仓库不分发这些输入。
+构建使用 GNU Make、Python 3、devkitARM、armips 和 Floating IPS。原始解密／解压代码、ExHeader 及 RomFS 必须自行从合法持有的软件中提取，本仓库不分发这些输入。
+
+在仓库根目录执行 `make`，依次编译并验证两端补丁；执行 `make package` 则继续使用
+7-Zip 的 ZIP＋LZMA 最大压缩，生成
+`release/Offline Patch v<版本号>-<提交简写>-<年月日时分>.zip`，时间采用北京时间（UTC+8）。
+包内只包含两个补丁目录与完整的 `Bank` 空配置模板，不收录或覆盖已有 ZIP。
+自动查找本机 7-Zip，也可用 `SEVENZIP="/path/to/7z"` 指定程序路径。
+仍支持通过 `make -C bank`、`make -C mover` 分别构建。
 
 上屏左上角以白色显示补丁版本，官方版本号保持原样和原位置。基础版本统一保存在根目录 `VERSION`。普通 `make` 始终采用非正式标识，例如 `Offline Patch v0.9.1-abcdef`；后缀为当前 Git 提交简写，不使用 tag 自动切换为正式版。同一提交下的未提交修改不会产生不同的 Git 后缀。
 

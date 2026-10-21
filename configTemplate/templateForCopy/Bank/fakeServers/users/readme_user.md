@@ -82,10 +82,15 @@ For this account, the loaded `BanUnicodeChinese` rule is always disabled in RAM,
 
 - NDS already uses UTF-16: retain Chinese nickname/OT, including unnicknamed Han names
   otherwise replaced by a default species name. The nickname flag itself is not fabricated.
-- VC uses the English Crystal table for raw alphabet 1, Korean Gold/Silver for alphabet 6.
-  Source means string encoding, not UI/console/wrapper region. Korean-based international
-  fan patches still use the Korean table. Ordinary Korean bytes can conflict: leave off
-  for untranslated Korean saves.
+- VC sources classified by the native game version/language mapping as English, French,
+  Italian, German or Spanish (alphabets 1–5) use the English Crystal fan table. Only
+  Korean Gold/Silver (alphabet 6) uses the Korean fan table; Japanese sources are excluded.
+  Both paths support mixed two-byte Chinese and native single-byte text, retaining each
+  Western language's original character meanings. Classification does not inspect names
+  or follow the UI/console language. English-table Chinese traded between Western games
+  remains supported; Korean-table codes in Western games never select the Korean table
+  and are not guaranteed to convert. Ordinary Korean bytes can conflict: leave off for
+  untranslated Korean saves.
 - Only generated candidate names change, not source saves. Unknown/truncated pairs fall
   back for the whole name, never publishing a partial conversion.
 - Name screening receives Unicode text: NDS supplies its existing UTF-16 Chinese;

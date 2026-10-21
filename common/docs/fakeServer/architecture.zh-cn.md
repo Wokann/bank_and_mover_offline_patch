@@ -153,6 +153,9 @@ NDS 与 VC 分别使用 `checkPokemon.conf` 和 `checkName.conf`。全局关闭�
 
 `user.conf` 的 `[custom]` 属于当前账户，两个选项默认关闭。`allowFanTranslationCHN`开启时使用指定美版／韩版 VC 汉化码表，保留
 Gen5 已有的 UTF-16 中文，并仅在当前账户内存中关闭 Unicode 汉字拒绝规则；普通筛选和 NGWord 仍有效。
+VC 英、法、意、德、西文来源使用美版汉化表，并保留各语言原单字节字符的解读；
+韩版金银独立使用韩版表，日文不转码。两条汉化路径均支持单双字节混排，
+选择依据是原版所选游戏的版本／语言分类，不是姓名内容或主机地区。
 `enableMoverv1.2` 也默认关闭，仅切换离线 RGBY 的旧性别、闪光和姓名转换机制。
 详细字段、编码范围及数据来源见
 [宝可梦筛选说明](../../../configTemplate/templateForCopy/Bank/fakeServers/shared/mover/readme_checkPokemon.zh-cn.md)与
