@@ -685,6 +685,44 @@ static int publish(const FsTransactionIo *io,FsTransactionRecord *record)
     return persist(io,record,FS_TRANSACTION_PUBLISHED);
 }
 
+static int finishPublishedSource(const FsTransactionIo *io,FsTransactionRecord *record)
+{
+    if (record->operation!=FS_TRANSACTION_SOURCE_SAVE ||
+        (record->phase!=FS_TRANSACTION_PUBLISHED && record->phase!=FS_TRANSACTION_CLEANUP_PENDING) ||
+        !(record->flags&FS_TRANSACTION_SOURCE_ACKNOWLEDGED) ||
+        (record->flags&FS_TRANSACTION_CLEANUP_ACKNOWLEDGED) || record->sourceClean.present ||
+        !missing(io,FS_TRANSACTION_TEMP,record) || !missing(io,FS_TRANSACTION_TURTLE_TEMP,record)) return 0;
+    /* Commit already published Bank after the first successful source save.
+       The native client's later token-only save is not another server commit.
+       Resume this durable decision without inventing a cleanup acknowledgement;
+       a remaining native token is handled by the stock recovery callback. */
+    /* 银行提交发生在来源首次保存成功之后；客户端随后清令牌不是再次提交服务器。
+       按已发布决定结束预留，不伪造清理保存确认；残留令牌仍由原版恢复回调处理。 */
+    if (record->sourceKind==FS_TRANSACTION_NDS_FILE) {
+        /* Only the confirmed, published source permits retiring an unconfirmed
+           token-cleanup tmp/bak. Never publish those unacknowledged bytes. The
+           next native token save uses the independent source-only backend. */
+        /* 仅已确认并发布的来源允许清理未确认的令牌暂存／备份，不能发布这些暂存。
+           下一次原版清令牌保存由独立的来源文件后端完成。 */
+        /* This exceptional recovery reads actual bytes, without borrowing the
+           Bank download buffer or trusting an earlier source-view digest. */
+        /* 异常恢复核对实际字节，不借用银行下载缓冲，也不沿用旧来源摘要。 */
+        FsTransactionIo checking=*io;
+        checking.buffer=0;checking.bufferSize=0;checking.bufferBusy=0;checking.view=0;
+        FsTransactionFingerprint actual;
+        if (!record->sourceAfter.present ||
+            FsTransaction_ObserveChecked(&checking,FS_TRANSACTION_SOURCE,record,&actual,0,0)!=
+                FS_TRANSACTION_PRESENT || !equalBytes(&actual,&record->sourceAfter,sizeof(actual))) {
+            FsTransaction_ViewClear(io);return 0;
+        }
+        if (!FsTransaction_Remove(io,FS_TRANSACTION_SOURCE_TEMP,record) ||
+            !FsTransaction_Remove(io,FS_TRANSACTION_SOURCE_BACKUP,record)) return 0;
+    } else if (record->sourceKind!=FS_TRANSACTION_NATIVE_SOURCE) return 0;
+    if (!noWorkingFiles(io,record)) return 0;
+    record->serverTransaction.currentVersion=record->serverTransaction.updateVersion;
+    return persist(io,record,FS_TRANSACTION_COMPLETED);
+}
+
 int FsTransaction_Finish(const FsTransactionIo *io,uint32_t owner)
 {
     FsTransactionRecord record;
@@ -699,10 +737,11 @@ int FsTransaction_Finish(const FsTransactionIo *io,uint32_t owner)
             physicalFileIs(io,FS_TRANSACTION_SOURCE,&record,
                 record.sourceClean.present?&record.sourceClean:&record.sourceAfter)) &&
             noWorkingFiles(io,&record);
+    if (record.operation==FS_TRANSACTION_SOURCE_SAVE &&
+        !(record.flags&FS_TRANSACTION_CLEANUP_ACKNOWLEDGED))
+        return finishPublishedSource(io,&record);
     if (record.phase!=FS_TRANSACTION_PUBLISHED &&
         record.phase!=FS_TRANSACTION_CLEANUP_READY) return 0;
-    if (record.operation==FS_TRANSACTION_SOURCE_SAVE &&
-        !(record.flags&FS_TRANSACTION_CLEANUP_ACKNOWLEDGED)) return 0;
     if (record.operation==FS_TRANSACTION_SOURCE_SAVE &&
         record.sourceKind==FS_TRANSACTION_NDS_FILE) {
         if (!(record.flags&FS_TRANSACTION_CLEANUP_ACKNOWLEDGED)) return 0;
@@ -837,6 +876,46 @@ static int adoptRecord(const FsTransactionIo *io,FsTransactionRecord *record,uin
     return persist(io,record,FS_TRANSACTION_COMMIT_DECIDED) && finishAdoption(io,record);
 }
 
+int FsTransaction_PrepareBankInitialization(const FsTransactionIo *io)
+{
+    FsTransactionRecord record;
+    int status=FsTransaction_ReadRecord(io,&record);
+    if (status==FS_TRANSACTION_MISSING) return 1;
+    if (status!=FS_TRANSACTION_PRESENT) return 0;
+    int resuming=record.operation==FS_TRANSACTION_ADOPT_BANK &&
+        record.phase==FS_TRANSACTION_COMMIT_DECIDED &&
+        !record.bankBefore.present && !record.bankAfter.present;
+    if (!settled(&record) && !resuming) return 1;
+    /* Account confirmation is a new load boundary. A cached old body is not
+       evidence that a manually deleted file still exists. */
+    /* 确认账户属于新载入边界；旧内存正文不能证明被手动删除的文件仍然存在。 */
+    for (uint32_t file=FS_TRANSACTION_BANK;file<=FS_TRANSACTION_BACKUP;file++)
+        FsTransaction_ViewForget(io,file);
+    int main=fileStatus(io,FS_TRANSACTION_BANK,&record);
+    if (main!=FS_TRANSACTION_MISSING) return main==FS_TRANSACTION_PRESENT;
+    int backup=fileStatus(io,FS_TRANSACTION_BACKUP,&record);
+    if (backup!=FS_TRANSACTION_MISSING) return backup==FS_TRANSACTION_PRESENT;
+    int temporary=fileStatus(io,FS_TRANSACTION_TEMP,&record);
+    if (temporary==FS_TRANSACTION_IO_ERROR) return 0;
+    if (!resuming && !record.bankBefore.present && !record.bankAfter.present &&
+        !record.serverTransaction.token && !record.serverTransaction.size &&
+        temporary==FS_TRANSACTION_MISSING) return 1;
+    if ((record.flags&FS_TRANSACTION_TURTLE_WRITE_PENDING) ||
+        !missing(io,FS_TRANSACTION_SOURCE_TEMP,&record) ||
+        !FsTransaction_ReconcileTurtle(io) ||
+        !missing(io,FS_TRANSACTION_TURTLE_TEMP,&record)) return 0;
+    /* The decision is published before an incomplete Bank tmp is discarded.
+       Settings recovery retains its own published authority; Bank reset does
+       not replace those bytes or rewrite a source save/account configuration. */
+    /* 先发布新决定，再丢弃可能不完整的银行 tmp。设置仍按自身已发布依据恢复；
+       银行重置不替换其内容，也不改写来源存档或账户配置。 */
+    FsDiag_Checkpoint("bank.reset.begin",0,record.phase,(uint32_t)temporary,0);
+    int reset=resuming?FsTransaction_Check(io):
+        FsTransaction_AdoptBankSnapshot(io,FS_TRANSACTION_OWNER_BANK,0);
+    FsDiag_Record("bank.reset.end",reset?FS_OK:FS_LOCKED,0,0,0);
+    return reset;
+}
+
 static int restoreSettledBank(const FsTransactionIo *io,FsTransactionRecord *record)
 {
     FsTransactionFingerprint actual,backup;
@@ -849,17 +928,6 @@ static int restoreSettledBank(const FsTransactionIo *io,FsTransactionRecord *rec
         equalBytes(&actual,&record->bankAfter,sizeof(actual)))
         return 0;
     int found=FsTransaction_Observe(io,FS_TRANSACTION_BACKUP,record,&backup);
-    if (found==FS_TRANSACTION_MISSING && !actual.present) {
-        /* A settled history is not a pending reservation. When both Bank
-           copies and all participant temporaries are absent, publish an empty
-           baseline instead of requiring the deleted committed image. A new
-           identity keeps old source tokens distinct from the next Bank.
-           Settings, game saves, gift history and configuration stay intact. */
-        /* 已结束日志不是未决预留；两份银行及所有参与暂存均缺失时，发布空基线，
-           不再要求已删除正文。新编号隔离旧来源令牌；设置、游戏存档、礼物记录
-           和配置均不改写。该分支仅由已结束事务检查调用。 */
-        return adoptRecord(io,record,owner,0,FS_TRANSACTION_BANK);
-    }
     if (found!=FS_TRANSACTION_PRESENT) return 0;
     /* Only the journal's committed version is an automatic recovery source.
        An old or merely readable .bak never authorizes a new baseline. */
@@ -937,11 +1005,9 @@ static int checkBank(const FsTransactionIo *io,const FsTransactionFingerprint *b
         if (!publish(io,&record)) return 0;
         /* fall through */
     case FS_TRANSACTION_PUBLISHED:
-        if (record.operation==FS_TRANSACTION_SOURCE_SAVE &&
-            !(record.flags&FS_TRANSACTION_CLEANUP_ACKNOWLEDGED)) return 0;
         return FsTransaction_Finish(io,record.owner);
     case FS_TRANSACTION_CLEANUP_PENDING:
-        return 0;
+        return FsTransaction_Finish(io,record.owner);
     case FS_TRANSACTION_CLEANUP_READY:
         return FsTransaction_Finish(io,record.owner);
     case FS_TRANSACTION_ROLLBACK_DECIDED:
@@ -951,7 +1017,9 @@ static int checkBank(const FsTransactionIo *io,const FsTransactionFingerprint *b
     case FS_TRANSACTION_COMPLETED:
     case FS_TRANSACTION_ABORTED:
     case FS_TRANSACTION_DETACHED_ROLLED_BACK:
-        return FsTransaction_GuardBank(io,bank) || (!bank && restoreSettledBank(io,&record));
+        return FsTransaction_GuardBank(io,bank) ||
+            (!bank && FsTransaction_PrepareBankInitialization(io) &&
+             (FsTransaction_Guard(io) || restoreSettledBank(io,&record)));
     default:
         return 0;
     }
@@ -1060,8 +1128,12 @@ int FsTransaction_AdoptBankSnapshot(const FsTransactionIo *io,uint32_t owner,
     } else if (status!=FS_TRANSACTION_PRESENT) return 0;
     if (!bank) {
         if (!missing(io,FS_TRANSACTION_BANK,&record) ||
-            (status==FS_TRANSACTION_PRESENT && !missing(io,FS_TRANSACTION_TEMP,&record)) ||
-            !missing(io,FS_TRANSACTION_BACKUP,&record)) return 0;
+            !missing(io,FS_TRANSACTION_BACKUP,&record) ||
+            fileStatus(io,FS_TRANSACTION_TEMP,&record)==FS_TRANSACTION_IO_ERROR) return 0;
+        if (status==FS_TRANSACTION_PRESENT && (!settled(&record) ||
+            (record.flags&FS_TRANSACTION_TURTLE_WRITE_PENDING) ||
+            !missing(io,FS_TRANSACTION_SOURCE_TEMP,&record) ||
+            !missing(io,FS_TRANSACTION_TURTLE_TEMP,&record))) return 0;
     } else if (status==FS_TRANSACTION_PRESENT && !settled(&record) &&
         (equalBytes(bank,&record.bankBefore,sizeof(*bank)) ||
          equalBytes(bank,&record.bankAfter,sizeof(*bank)))) {

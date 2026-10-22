@@ -269,13 +269,18 @@ static int executeRequest(void *opaque,const void *input,uint32_t inputSize,
         if (result==FS_OK) reply->bodySize=bodySize;
         return result;
     }
-    /* A title rebind first reads only settings. Missing/recovery paths run on
-       this worker too, then re-read; never substitute a stale pre-recovery
-       snapshot or turn an I/O failure into permission to initialize. */
-    /* 标题重新绑定先只读设置；缺失及恢复也在后台执行，完成后重读。不得使用恢复前
-       的过期快照，或把 I/O 失败当作允许初始化。 */
+    /* A confirmed title entry starts a fresh local session, even for the same
+       account. Prepare first-use Bank state and settings on the worker; never
+       reuse a pre-reset body or turn an I/O failure into initialization. */
+    /* 标题确认进入时，即使仍是同一账户也开始新的本地会话；后台准备银行首次使用
+       状态及设置，不复用重置前正文，不把 I/O 失败当作允许初始化。 */
     if (request->operation==FS_SERVICE_PREPARE_TURTLE_RECORD) {
         if (context->owner!=FS_TRANSACTION_OWNER_BANK) return FS_UNSUPPORTED;
+        FsServer_Disconnect(context->server);
+        /* Retire a settled, deleted Bank before any native initialization or
+           settings publication can consult its obsolete baseline. */
+        /* 原版初始化或设置发布可能先检查银行基线，须在此退役已结束且被清空的银行。 */
+        if (!FsTransaction_PrepareBankInitialization(context->transactions)) return FS_LOCKED;
         int result=FsSettings_ReadPreviewRange(context->transactions,0,body,bodySize);
         if (result!=FS_OK && result!=FS_IO_ERROR) {
             result=FsTransaction_ReconcileTurtle(context->transactions)?

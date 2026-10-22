@@ -487,8 +487,17 @@ static int readBankSnapshot(FsServer *server,void *data,uint32_t capacity,
     server->bankDelivered=1;
     if (FsTransaction_GuardBank(io,observed)) return FS_OK;
     FsTransactionRecord record;
+    int recorded=FsTransaction_ReadRecord(io,&record)==FS_TRANSACTION_PRESENT;
+    /* A committed upload is no longer a remote reservation merely because the
+       client lost its final token-save callback. The same checked Bank snapshot
+       must still pass the guard after the durable publication is settled. */
+    /* 客户端最后一次清令牌回调丢失，不使已提交上传重新成为服务器未决预留。
+       完成已发布决定后，仍须以本次实际下载的同份银行快照通过保护检查。 */
+    if (recorded && record.operation==FS_TRANSACTION_SOURCE_SAVE &&
+        (record.phase==FS_TRANSACTION_PUBLISHED || record.phase==FS_TRANSACTION_CLEANUP_PENDING) &&
+        FsTransaction_Finish(io,record.owner) && FsTransaction_GuardBank(io,observed)) return FS_OK;
     if (server->owner==FS_TRANSACTION_OWNER_BANK && server->bankDownloadToken &&
-        FsTransaction_ReadRecord(io,&record)==FS_TRANSACTION_PRESENT &&
+        recorded &&
         record.owner==server->owner && record.operation==FS_TRANSACTION_SOURCE_SAVE &&
         record.sourceKind==FS_TRANSACTION_NATIVE_SOURCE && record.phase==FS_TRANSACTION_SOURCE_PENDING &&
         record.serverTransaction.token==server->bankDownloadToken &&

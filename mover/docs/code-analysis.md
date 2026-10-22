@@ -870,7 +870,8 @@ primary differing from both pending images through recorded `ADOPT_BANK=6`.
 It retires the old reservation, assigns a new ID and removes the old Bank
 backup, without rewriting the actual source .sav or claiming paired rollback.
 A normal recorded pending image still uses native recovery. All Bank images
-missing with valid old authority may reset the baseline; Mover retains its
+missing with valid settled authority may reset the baseline, discarding a sole
+unconfirmed Bank tmp only after the new decision is published; Mover retains its
 native download-failure route and never creates a Bank. Missing settings recover an
 exact recorded image, or reinitialize after settled complete deletion, without
 changing Bank ID/metadata. Pending settings loss and damaged authority still stop;
@@ -908,12 +909,18 @@ Journals are not uploaded. Flush/reread are not real
 SD power-loss proof. Concurrent
 writers to one SD directory are unsupported.
 
-Offline cartridge/VC publication does not finish the journal early. Save substate
+Offline cartridge/VC saves retain their native cleanup callbacks. Save substate
 14 matches the descriptor and records cleanup start; only actual native polling
 success on `15 → 16` acknowledges final cleanup. State 13 recovery also observes
-the original cleanup save at substates `6/8/9`. Failures keep pending evidence and
-block replacement staging; matching native descriptors allow cross-application
-Bank/Mover recovery. Digital sources retain image-validation/publication handling,
+the original cleanup save at substates `6/8/9`. Failures retain the descriptors and
+block unverified replacement staging. Once the server commit is published, a
+later connection/download may verify the Bank, settings and committed NDS source
+and finish the server record without inventing a lost cleanup acknowledgement.
+Unacknowledged cleanup temporaries are never published; native callbacks and the
+independent source-file backend still clear residual tokens. Uncommitted work
+and mismatched files retain their matching, rollback and error paths. Matching
+native descriptors allow cross-application Bank/Mover recovery.
+Digital sources retain image-validation/publication handling,
 and Online native saves do not use these local acknowledgements.
 An old Bank/Mover descriptor cannot acknowledge a newer reservation. Valid formal
 journal authority, missing-formal `.bak` recovery and non-authoritative `.tmp`

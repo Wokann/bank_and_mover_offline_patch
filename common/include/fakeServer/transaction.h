@@ -202,6 +202,12 @@ int FsTransaction_TurtleGuard(const FsTransactionIo *);
    copies were deleted after settlement, record absence without changing Bank ID. */
 /* 设置缺失时仅恢复已发布基线；事务结束且设置副本全部删除时，登记缺失而不改变银行编号。 */
 int FsTransaction_ReconcileTurtle(const FsTransactionIo *);
+/* Bank account entry: a settled journal with no published Bank may retire its
+   old identity and discard a sole Bank tmp before native initialization.
+   Settings/source temporaries and unreadable journals do not authorize reset. */
+/* Bank 账户入口：事务已结束且银行正文／备份均缺失时，退役旧编号并放弃孤立银行
+   tmp，再交原版初始化；设置／来源暂存及不可读日志不授权重置。 */
+int FsTransaction_PrepareBankInitialization(const FsTransactionIo *);
 /* No published journal: discard pure settings tmp; for NDS, inspect only the
    selected source's siblings through ReconcileOrphanSource. Never invent a save. */
 /* 无正式日志时清理纯设置暂存；NDS 仅由 ReconcileOrphanSource 检查所选来源的
@@ -230,11 +236,12 @@ int FsTransaction_EnsureIdentitySnapshot(const FsTransactionIo *,uint32_t owner,
     const FsTransactionFingerprint *);
 /* Register the freshly validated main as a new Bank, abandoning an unrelated
    reservation without restoring/rewriting its game save. NULL requires both
-   published Bank copies to be missing; with published history, tmp must also be
-   missing. Persist the decision before retiring old temporaries. */
+   published Bank copies to be missing. Published history must be settled with
+   no settings/source work pending; a sole Bank tmp is discarded only after
+   persisting the new decision. */
 /* 将本次验证的主文件登记为新银行，放弃无关旧预留，不恢复或改写游戏存档。
-   NULL 要求正式正文及备份缺失；有正式历史时暂存也必须缺失。
-   先发布决定，再清理旧暂存及银行备份。 */
+   NULL 要求正式正文及备份缺失；有正式历史时须已结束且无设置／来源待处理工作。
+   先发布决定，再丢弃孤立银行 tmp 及清理银行备份。 */
 int FsTransaction_AdoptBankSnapshot(const FsTransactionIo *,uint32_t owner,
     const FsTransactionFingerprint *);
 /* Missing history + missing main only: adopt a freshly checked backup as a new

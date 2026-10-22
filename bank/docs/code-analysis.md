@@ -70,6 +70,12 @@ copy the full validated `0x200` bytes when missing, otherwise update only
 `0x28–0x2B`. Identity, transaction fields, CRC and opaque tail remain intact.
 Native language and font selection do not change when switching modes or users.
 
+Offline account confirmation retires the previous local session/body cache even
+for the same user, then retires a settled Bank baseline when both the main and
+backup were deleted. It publishes the empty baseline before discarding a sole
+Bank tmp and entering native first-use creation. Settings retain their own
+recovery authority; active/corrupt journals and source/settings work cannot reset.
+
 The current mode is a separate single-line pane above START. R-mode, L-language
 and HOME hints sit below it. All use native font size and integer coordinates;
 their lower-screen centers are `88/120/156/182/208` for mode/START/R/L/HOME.
@@ -1013,7 +1019,11 @@ validation; successful writes establish the baseline, not historical integrity. 
 
 PREPARING → SOURCE_PENDING → STAGED → COMMIT_DECIDED → PUBLISHED →
 CLEANUP_PENDING → CLEANUP_READY → COMPLETED connects native saves to publication.
-Bank/settings-only need no source save. Online NDS SOURCE_ONLY retains current
+Bank/settings-only need no source save. After source-save publication, reconnect
+may verify and finish PUBLISHED/CLEANUP_PENDING without repeating or inventing a
+lost token-cleanup acknowledgement. Native residual tokens still use the stock
+recovery callback. NDS recovery verifies the committed source and never publishes
+unacknowledged cleanup temporaries. Online NDS SOURCE_ONLY retains current
 Bank baseline and uploads no local Bank. Undecided work aborts only with provable
 old Bank/full old NDS source; decisions proceed forward. ROLLBACK_DECIDED and
 DETACHED_ROLLBACK_DECIDED are manual decisions retryable after interruption.
@@ -1026,8 +1036,11 @@ Official transaction calls do not enter fakeServer.
 Bank/settings backups remain server-managed pre-write snapshots after completion;
 Finish never overwrites them with the new main. Read-only native Bank reservations
 leave the previous backup untouched; the actual changed upload backs up its old
-main before staging. NDS sibling work files are retired only after verified
-publication and successful token cleanup. A damaged, truncated or missing settled Bank is repaired
+main before staging. NDS sibling work files are normally retired after verified
+publication and successful token cleanup. If publication succeeded but its cleanup
+acknowledgement was lost, recovery verifies the committed source before retiring
+unacknowledged cleanup temporaries and the old backup, without rewriting the source.
+A damaged, truncated or missing settled Bank is repaired
 only from a backup matching the journal's bankAfter fingerprint, with a new
 RESTORE_BACKUP decision recorded before copying. Unknown or stale backups are
 preserved, never promoted on readability alone.
@@ -1035,9 +1048,11 @@ preserved, never promoted on readability alone.
 Offline import policy gives a well-formed primary priority over old backups.
 A primary differing from the settled image, or from both pending images, gets
 a new ID/version 0 through recorded `ADOPT_BANK=6`; old work files and the Bank
-backup are removed only after the adoption decision is published. All Bank
-images missing with valid old authority may establish an empty baseline and
-enter native creation. A settings deletion alone is not a Bank import; same-Bank
+backup are removed only after the adoption decision is published. When Bank
+main and backup images are missing, valid settled authority may establish an empty
+baseline and enter native creation, discarding a sole unconfirmed Bank tmp only
+after publishing that decision. Active/corrupt authority never permits this reset.
+A settings deletion alone is not a Bank import; same-Bank
 repair/settings rebuilding retains native last-source metadata. Adoption does
 not rewrite game saves or prove paired rollback. Native callbacks handle stale
 source tokens. Unknown well-formed corruption is indistinguishable from import
