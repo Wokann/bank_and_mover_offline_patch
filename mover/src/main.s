@@ -251,6 +251,10 @@
 // trampolines into the untouched implementations.
 // 公共来源发现保留原版列表与存档校验状态，并在两种会话模式中通过三个原生卡带 I/O
 // 边界提供 SD 上的第五世代候选。实体卡带胜出项经精确序言跳板进入未修改实现。
+// Extend the native background availability probe before the source-list gate.
+// 在来源列表之前的原版后台预检中纳入 SD 候选，保留无可用来源时的原提示。
+.org MoverSourceAvailability_UpdateVtableSlot
+    .word NdsSources_AvailabilityUpdate + 1
 .org MoverSourceList_UpdateVtableSlot
     .word NdsSources_ListUpdate + 1
 .org MoverSourceSelection_Update

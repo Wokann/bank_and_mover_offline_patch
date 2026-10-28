@@ -135,6 +135,7 @@
 .definelabel MoverMemory_Clear,                    0x001E6D84
 .definelabel MoverMemory_Copy,                     0x001E6F8C
 .definelabel MoverSourceList_UpdateVtableSlot,       0x002E6620
+.definelabel MoverSourceAvailability_UpdateVtableSlot, 0x002E6780
 .definelabel MoverSourceSelection_IdCompare,         0x00244870
 .definelabel MoverSourceSelection_Update,            0x002445A4
 .definelabel MoverSourceSelection_ConfirmFadeCall,   0x0024483C

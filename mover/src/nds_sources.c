@@ -1,5 +1,6 @@
 #include "nds_sources.h"
 #include "bankdata_redirect.h"
+#include "fs_system/diagnostic_log.h"
 #include <string.h>
 
 enum NdsSaveStep { NDS_SAVE_PREPARE=1,NDS_SAVE_NATIVE,NDS_SAVE_READ_IMAGE,NDS_SAVE_PUBLISH,NDS_SAVE_DONE };
@@ -156,14 +157,14 @@ u32 NdsSources_TitleMessage(const MoverSourceListStateView *state,u32 originalMe
     return NDS_GAME_TITLE_MESSAGE_BASE+(u32)rank*NDS_GAME_COUNT+sourceId-1;
 }
 
-static int gameIndex(const u8 header[NDS_ROM_HEADER_READ_SIZE])
+static int gameCodeIndex(u32 code)
 {
-    if (header[0x0C]!='I' || header[0x0D]!='R' || languageRank(header[0x0F])<0)
+    if ((code&0xFFFFu)!=0x5249u || languageRank((u8)(code>>24))<0)
         return -1;
-    if (header[0x0E]=='B') return 0;
-    if (header[0x0E]=='A') return 1;
-    if (header[0x0E]=='E') return 2;
-    if (header[0x0E]=='D') return 3;
+    if ((u8)(code>>16)=='B') return 0;
+    if ((u8)(code>>16)=='A') return 1;
+    if ((u8)(code>>16)=='E') return 2;
+    if ((u8)(code>>16)=='D') return 3;
     return -1;
 }
 
@@ -171,6 +172,74 @@ static u32 readGameCode(const u8 header[NDS_ROM_HEADER_READ_SIZE])
 {
     return (u32)header[0x0C]|((u32)header[0x0D]<<8)|
         ((u32)header[0x0E]<<16)|((u32)header[0x0F]<<24);
+}
+
+static int readCandidateHeader(NdsScannerContext *context,u32 *nameLength,u32 *pathSize)
+{
+    if (!isNdsFile(&context->entry,nameLength) ||
+        !buildPath(context->path,ndsRomPrefix,context->entry.name,*nameLength,0,pathSize) ||
+        readFileRangeUtf16(context->path,*pathSize,0,context->header,sizeof(context->header)))
+        return -1;
+    return gameCodeIndex(readGameCode(context->header));
+}
+
+/* Run inside the existing native card-probe worker, before it publishes its
+   completion. This is only a presence test; the list still validates the save.
+   Never report an SD candidate as an inserted physical card. */
+/* 在原版卡带预检后台作业完成前执行，只探测候选是否存在；列表阶段仍校验存档。
+   SD 候选不会被报告为插入了实体卡带。 */
+static int probeSdPresence(NdsScannerContext *context)
+{
+    u32 entriesRead=0,nameLength=0,pathSize=0;
+    u32 checked=0;
+    int found=0;
+    s32 result=openDirectoryUtf16(ndsDirectoryPath,sizeof(ndsDirectoryPath),
+        &context->directoryArchive,&context->directoryHandle);
+    while (!result) {
+        result=readDirectoryEntry(context->directoryHandle,&context->entry,&entriesRead);
+        if (result || !entriesRead) break;
+        checked++;
+        if (readCandidateHeader(context,&nameLength,&pathSize)<0 ||
+            !buildPath(context->path,ndsSavePrefix,context->entry.name,nameLength,1,&pathSize) ||
+            !fileIsReadWriteUtf16(context->path,pathSize)) continue;
+        found=1;
+        break;
+    }
+    s32 closeResult=closeScanDirectory(context);
+    FsDiag_Record("source.presence",result?result:closeResult,(u32)found,checked,0);
+    return found;
+}
+
+__attribute__((used,noinline,section(".text.nds_sources.00_availability")))
+u32 NdsSources_AvailabilityUpdate(MoverSourceAvailabilityStateView *state,
+    u32 arg1,u32 arg2,s32 arg3)
+{
+    NdsScannerContext *context=*NDS_SCANNER_CONTEXT_SLOT;
+    u32 previous=state->state;
+    if (previous==MOVER_SOURCE_AVAILABILITY_INITIALIZE) {
+        context=scannerContext();
+        if (context) {
+            /* Retire the previous selection before the native worker probes
+               the card again, including returns to title/account changes. */
+            /* 再次预检前清除上次选择，包括返回标题或切换账户后的旧 SD 来源。 */
+            s32 result=resetScanner(context);
+            context->phase=NDS_SCAN_INACTIVE;
+            context->presencePending=1;
+            FsDiag_Record("source.preflight.begin",result,0,0,0);
+        }
+    }
+    u32 result=MoverSourceAvailability_Update(state,arg1,arg2,arg3);
+    /* Native job completion synchronizes the worker's presence result. Only
+       its no-card/no-VC branch may be extended; errors and UI remain native. */
+    /* 原版作业完成时同步后台结果；只扩展无卡带且无 VC 的分支，保留原错误与界面。 */
+    if (context && previous==MOVER_SOURCE_AVAILABILITY_WAIT_CARD &&
+        state->state!=MOVER_SOURCE_AVAILABILITY_WAIT_CARD) context->presencePending=0;
+    if (context && previous==MOVER_SOURCE_AVAILABILITY_CHECK_VC &&
+        state->state==MOVER_SOURCE_AVAILABILITY_MISSING && context->presenceFound) {
+        state->state=MOVER_SOURCE_AVAILABILITY_READY;
+        FsDiag_Record("source.preflight.sd",0,0,0,0);
+    }
+    return result;
 }
 
 static u8 sourceIdForIndex(u32 index)
@@ -219,22 +288,14 @@ static void capturePhysicalSources(NdsScannerContext *context,MoverSourceListSta
     state->sourceCount=0;
 }
 
-static void abortDirectoryScan(NdsScannerContext *context,MoverSourceListStateView *state)
-{
-    (void)closeScanDirectory(context);
-    context->backend=NDS_BACKEND_CARD;
-    context->phase=NDS_SCAN_PASSTHROUGH;
-    state->sourceCount=0;
-    state->state=6;
-}
-
 static void emitNdsSources(NdsScannerContext *context,MoverSourceListStateView *state)
 {
     u32 index;
-    if (closeScanDirectory(context)) {
-        abortDirectoryScan(context,state);
-        return;
-    }
+    s32 closeResult=closeScanDirectory(context);
+    if (closeResult) FsDiag_Record("source.directory.close",closeResult,0,0,0);
+    /* An optional SD directory failure does not invalidate a verified card
+       or candidate, and must not bypass the native VC enumeration. */
+    /* 可选 SD 目录失败不否定已校验的卡带或候选，也不能跳过后续原版 VC 枚举。 */
     state->sourceCount=0;
     for (index=0;index<NDS_GAME_COUNT;index++) {
         NdsSourceWinner *winner=&context->winners[index];
@@ -261,8 +322,8 @@ static void beginDirectoryScan(NdsScannerContext *context,MoverSourceListStateVi
     result=openDirectoryUtf16(ndsDirectoryPath,sizeof(ndsDirectoryPath),
         &context->directoryArchive,&context->directoryHandle);
     if (result) {
-        if (resultIsNotFound(result)) emitNdsSources(context,state);
-        else abortDirectoryScan(context,state);
+        FsDiag_Record("source.directory.open",result,0,0,0);
+        emitNdsSources(context,state);
         return;
     }
     context->phase=NDS_SCAN_DIRECTORY;
@@ -288,18 +349,15 @@ static void scanOneEntry(NdsScannerContext *context,MoverSourceListStateView *st
     u32 gameCode;
     NdsSourceWinner *winner;
     if (result) {
-        abortDirectoryScan(context,state);
+        FsDiag_Record("source.directory.read",result,0,0,0);
+        emitNdsSources(context,state);
         return;
     }
     if (entriesRead==0) {
         emitNdsSources(context,state);
         return;
     }
-    if (!isNdsFile(&context->entry,&nameLength) ||
-        !buildPath(context->path,ndsRomPrefix,context->entry.name,nameLength,0,&pathSize) ||
-        readFileRangeUtf16(context->path,pathSize,0,context->header,sizeof(context->header)))
-        return;
-    index=gameIndex(context->header);
+    index=readCandidateHeader(context,&nameLength,&pathSize);
     if (index<0) return;
     rank=languageRank(context->header[0x0F]);
     winner=&context->winners[index];
@@ -347,25 +405,37 @@ static void updateStockLoadingUi(MoverSourceListStateView *state,u32 arg1,u32 ar
     state->state=stockState;
 }
 
+static u32 updateStockSourceList(MoverSourceListStateView *state,u32 arg1,u32 arg2,s32 arg3)
+{
+    u32 result=MoverSourceList_Update(state,arg1,arg2,arg3);
+    if (result==MOVER_STATE_UPDATE_FINISHED && state->cursor>=state->sourceCount)
+        state->cursor=0;
+    return result;
+}
+
 __attribute__((used,noinline,section(".text.nds_sources.01_list")))
 u32 NdsSources_ListUpdate(MoverSourceListStateView *state,u32 arg1,u32 arg2,s32 arg3)
 {
     NdsScannerContext *context;
     u32 result;
+    if (state->state==0) {
+        /* A reused native object must not turn old SD entries into freshly
+           detected cards. The native probe rebuilds this round's list. */
+        /* 复用原版对象时不能把旧 SD 条目当作本轮卡带；本轮来源由原检测重新建立。 */
+        state->sourceCount=0;
+        MoverMemory_Clear(state->sourceIds,sizeof(state->sourceIds));
+    }
     context=scannerContext();
-    if (!context) return MoverSourceList_Update(state,arg1,arg2,arg3);
+    if (!context) return updateStockSourceList(state,arg1,arg2,arg3);
     if (state->state==0) {
         s32 closeResult=resetScanner(context);
         context->sourceContext=state->sourceContext;
-        result=MoverSourceList_Update(state,arg1,arg2,arg3);
-        if (closeResult) {
-            abortDirectoryScan(context,state);
-            return 0;
-        }
+        result=updateStockSourceList(state,arg1,arg2,arg3);
+        if (closeResult) FsDiag_Record("source.directory.reset",closeResult,0,0,0);
         return result;
     }
     if (context->phase==NDS_SCAN_PHYSICAL) {
-        result=MoverSourceList_Update(state,arg1,arg2,arg3);
+        result=updateStockSourceList(state,arg1,arg2,arg3);
         if (state->state==3) beginDirectoryScan(context,state);
         return result;
     }
@@ -380,9 +450,9 @@ u32 NdsSources_ListUpdate(MoverSourceListStateView *state,u32 arg1,u32 arg2,s32 
         return 0;
     }
     if (context->phase==NDS_SCAN_PASSTHROUGH)
-        return MoverSourceList_Update(state,arg1,arg2,arg3);
+        return updateStockSourceList(state,arg1,arg2,arg3);
     context->backend=NDS_BACKEND_CARD;
-    return MoverSourceList_Update(state,arg1,arg2,arg3);
+    return updateStockSourceList(state,arg1,arg2,arg3);
 }
 
 /* Observe concurrently with the native confirmation/fade. Only the native
@@ -527,7 +597,13 @@ s32 NdsSources_ReadGameCode(u32 *gameCode)
         *gameCode=context->activeGameCode;
         return 0;
     }
-    return NdsSources_OriginalReadGameCode(gameCode);
+    s32 result=NdsSources_OriginalReadGameCode(gameCode);
+    if (context && context->presencePending) {
+        context->presencePending=0;
+        if (result<0 || gameCodeIndex(*gameCode)<0)
+            context->presenceFound=(u32)probeSdPresence(context);
+    }
+    return result;
 }
 
 __attribute__((used,noinline,section(".text.nds_sources.05_write")))

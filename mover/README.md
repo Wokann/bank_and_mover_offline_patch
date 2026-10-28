@@ -62,9 +62,12 @@ match; the save must be readable/writable and pass native validation. Each game
 gets at most one source: valid cartridges take priority, then digital language
 rank `J > O > F > I > D > S > K`; keep the first valid copy at the best rank.
 
-Do not combine this with an external Transporter Redirect Patch. VC retains
-native save reading/conversion, not NDS file substitution. Discovery and native
-object access remain client work, not server filtering policy.
+SD Gen5 sources can be used without an inserted NDS cartridge or a VC save.
+An unavailable SD ROM directory does not hide otherwise usable cartridge or VC sources.
+
+Do not combine this with an external Transporter Redirect Patch. VC reads the
+corresponding VC game's save. The NDS paths above apply to Gen5 digital
+sources; name and Pokémon filters are applied after a game is selected.
 
 ## Words and Pokémon filters
 

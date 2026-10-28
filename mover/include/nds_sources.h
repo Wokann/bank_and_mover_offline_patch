@@ -1,6 +1,7 @@
 #ifndef MOVER_OFFLINE_PATCH_NDS_SOURCES_H
 #define MOVER_OFFLINE_PATCH_NDS_SOURCES_H
 
+#include <stddef.h>
 #include "fs_system/fs_utf16.h"
 #include "fakeServer/fake_server_client.h"
 #include "mover_state.h"
@@ -75,6 +76,8 @@ typedef struct NdsScannerContext {
     FsTransactionFingerprint validatedWork;
     u32 selectionSourceId;
     u32 selectionReady;
+    volatile u32 presencePending;
+    volatile u32 presenceFound;
 } NdsScannerContext;
 
 /* The save job owns the complete image; selected-face accessors are not a
@@ -106,7 +109,23 @@ typedef struct MoverSourceListStateView {
     void *vcEnumerator;
 } MoverSourceListStateView;
 
+/* The availability state has its own layout; only its state word is shared. */
+/* 前置来源检查使用独立布局，只访问它与列表状态同偏移的状态字。 */
+typedef struct MoverSourceAvailabilityStateView {
+    u8 reserved00[0x10];
+    u32 state;
+} MoverSourceAvailabilityStateView;
+
+_Static_assert(offsetof(MoverSourceAvailabilityStateView,state)==0x10,
+    "native availability state word");
+_Static_assert(offsetof(MoverSourceListStateView,sourceIds)==0x3C &&
+    offsetof(MoverSourceListStateView,sourceCount)==0x64 &&
+    offsetof(MoverSourceListStateView,cursor)==0x66 &&
+    offsetof(MoverSourceListStateView,workerArena)==0x68,
+    "native source-list layout");
+
 typedef u32 (*MoverSourceList_UpdateFn)(MoverSourceListStateView *,u32,u32,s32);
+typedef u32 (*MoverSourceAvailability_UpdateFn)(MoverSourceAvailabilityStateView *,u32,u32,s32);
 typedef void (*MoverNds_StartLoadFn)(void *,void *);
 typedef int (*MoverNds_PollLoadFn)(void *,s32 *);
 typedef int (*MoverNds_ValidateSaveFn)(int,const void *);
@@ -118,6 +137,7 @@ typedef void *(*MoverMemory_ClearFn)(void *,u32);
 typedef void *(*MoverMemory_CopyFn)(void *,const void *,u32);
 
 #define MoverSourceList_Update ((MoverSourceList_UpdateFn)0x00244D2Cu)
+#define MoverSourceAvailability_Update ((MoverSourceAvailability_UpdateFn)0x00246F04u)
 #define MoverNds_StartLoad ((MoverNds_StartLoadFn)0x0019ADECu)
 #define MoverVc_StartLoad ((MoverNds_StartLoadFn)0x00153BD8u)
 typedef int (*MoverVc_LoadFn)(void *,void *);
@@ -153,6 +173,7 @@ u32 NdsSources_OriginalSelectionUpdate(MoverSourceListStateView *,u32,u32,s32)
 #undef NDS_ARM_TRAMPOLINE
 
 u32 NdsSources_ListUpdate(MoverSourceListStateView *state,u32 arg1,u32 arg2,s32 arg3);
+u32 NdsSources_AvailabilityUpdate(MoverSourceAvailabilityStateView *,u32,u32,s32);
 u32 NdsSources_SelectListId(u32 sourceId);
 u32 NdsSources_SelectionUpdate(MoverSourceListStateView *,u32,u32,s32);
 u32 NdsSources_SelectionReady(MoverSourceListStateView *);

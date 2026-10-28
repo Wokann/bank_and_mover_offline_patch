@@ -338,7 +338,7 @@ def main() -> None:
         "nativeresponse_acceptmetadata", "nativeresponse_pollmetadata",
         "nativeresponse_createconnection", "nativeresponse_pollconnection",
         "servervalidation_start", "servervalidation_poll",
-        "ndssources_listupdate", "ndssources_selectlistid",
+        "ndssources_listupdate", "ndssources_availabilityupdate", "ndssources_selectlistid",
         "ndssources_titlemessage", "combinepatch_selectndsgametitle",
         "ndssources_readsave", "ndssources_readgamecode", "ndssources_writesave",
         "ndssources_originalreadsave", "ndssources_originalreadgamecode",
@@ -562,6 +562,7 @@ def main() -> None:
         0x0021AA0C: 0xE92D40F0,
         0x0021AB50: 0xE92D4FFF,
         0x002E6620: 0x00244D2C,
+        0x002E6780: 0x00246F04,
         0x0024538C: 0xE5D01038,
         0x00245450: 0xE92D4010,
     }
@@ -1100,6 +1101,11 @@ def main() -> None:
 
     if word(patched, 0x002E6620) != sym["ndssources_listupdate"] + 1:
         raise ValueError("NDS source-list vtable slot does not target the scanner")
+    if word(patched, 0x002E6780) != sym["ndssources_availabilityupdate"] + 1:
+        raise ValueError("NDS source-availability vtable slot does not include SD candidates")
+    if patched[0x00246F04-IMAGE_BASE:0x0024704C-IMAGE_BASE] != \
+            base[0x00246F04-IMAGE_BASE:0x0024704C-IMAGE_BASE]:
+        raise ValueError("native source-availability job, errors or UI were changed")
 
     thumb_entries = (
         ("combinepatch_ndsselectionupdateentry", "ndssources_selectionupdate"),
@@ -1191,7 +1197,7 @@ def main() -> None:
                        (0x0019B1F0, 0x0019B240), (0x0019B244, 0x0019B2E8),
                        (0x002B47E0, 0x002B488C),
                        (0x0021A7E4, 0x0021AA0C), (0x0021AA10, 0x0021AB50),
-                       (0x0021AB54, 0x0021ADCC), (0x00243510, 0x00243AC0),
+                       (0x0021AB54, 0x0021ADCC), (0x00243510, 0x00243AE4),
                        (0x00244D2C, 0x002450F4),
                        (0x00246B6C, 0x00246EC8), (0x00246ECC, 0x00246F04),
                        (0x00243AF8, 0x002444BC),
