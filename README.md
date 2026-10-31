@@ -37,6 +37,7 @@ Notes:
 1. Bank and Mover share the same Bank data for a given account. Each account has its own separate Bank data.
 2. Local Bank data in Offline Mode is independent of the official server's Bank data. Official data can be downloaded to replace local data, but local data cannot be uploaded back to the official server.
 3. To move Pokemon from Offline Mode to Original Mode, use a Gen6/7 game as an intermediate step: Offline Mode → Gen6/7 → Original Mode.
+4. The offline patch does not support Pokemon HOME transfer. HOME assigns tracker IDs to Pokemon and records them on the official server. Third-party tools cannot forge tracker IDs which can be accepted by the official server.
 
 ## Installation
 
