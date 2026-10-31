@@ -104,7 +104,7 @@ empty `Bank` configuration template. Existing ZIPs are not included or overwritt
 7-Zip is auto-detected, or can be selected with `SEVENZIP="/path/to/7z"`.
 The per-title `make -C bank` and `make -C mover` commands remain available.
 
-The patch label appears in white at the upper screen's top left; the official version stays in its original position. The root `VERSION` file defines the base patch version. Ordinary `make` always produces a development label such as `Offline Patch v0.9.1-abcdef`, using the current Git short revision; a tag does not select release mode. Uncommitted changes on the same commit retain the same Git suffix.
+The patch label appears in white at the upper screen's top left; the official version stays in its original position. The root `VERSION` file defines the base patch version. Ordinary `make` always produces a development label such as `Offline Patch v1.0.0-abcdef`, using the current Git short revision; a tag does not select release mode. Uncommitted changes on the same commit retain the same Git suffix.
 
 For an official patch release, explicitly update and commit `VERSION`, then build both titles:
 
