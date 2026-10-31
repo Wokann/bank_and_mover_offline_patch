@@ -2,6 +2,30 @@
 
 [简体中文](CHANGELOG.zh-cn.md)
 
+## v1.0.0
+
+### Pokémon Bank
+
+- Added six configurable Bank gift distributions, enabled by default, with PL6, WC6, WC7 and other supported assets.
+- Added configurable free-use periods, 30-day trial passes, 365-day annual passes and virtual top-ups. Virtual balances and purchase records are stored per account.
+
+### Poké Mover
+
+- Fixed discovery of SD Gen5 sources when no cartridge or valid VC save is available, retaining source validation and selection priorities.
+- Added separate NDS and VC Pokemon screening and name lists. Screening supports cross-field AND/OR, parentheses and line breaks; name filtering supports NGWord syntax and multilingual exceptions.
+- Allocate word lists and rules according to their contents and available memory. Invalid or unsupported word entries are skipped individually without invalidating the entire list.
+- Added optional encoding conversion for fan translations, currently supporting Chinese.
+- Added optional v1.2 conversion behavior, including different shiny criteria, for offline VC Gen1 only. VC Gen2 retains v1.5 behavior.
+
+### Shared features and distribution
+
+- Introduced a fake server architecture with support for multiple users, shared and personal configuration, gifts, and Pokemon screening.
+- Added multiple user directories selected through NNID, PNID or localid. The title screen supports D-pad and Circle Pad Up/Down user selection, including auto selection.
+- Client records now reside in `client/users/<userID>/`; Banks, journals and personal configuration reside in `fakeServers/users/<userID>/`. Eligible first-user migration accepts Bank and client records from the v0.9.1 root layout.
+- The three basic configurations support default generation and per-entry repair while retaining valid settings. Players maintain gift, name and Pokemon screening inputs. Locale, currency, balances and custom conversion options are isolated per account.
+- Adjusted background requests, response delivery and storage caching to reduce repeated SD reads and preserve connection animations. Improved large-SD free-space checks and I/O failure messages.
+- Title L now selects the shared interface language; Mover synchronizes Bank's native save and the corresponding client record. Updated mode/user hints, expanded characters for cross-language display and added patch version labels.
+
 ## v0.9.1
 
 ### Pokémon Bank
