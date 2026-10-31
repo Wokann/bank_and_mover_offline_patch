@@ -1,6 +1,6 @@
-"""Package verified title patches and the empty configuration template with 7-Zip.
+"""Package verified patches and configuration; include project guides in release builds.
 
-使用 7-Zip 打包已验证的两端补丁与空配置模板，不包含玩家数据。
+使用 7-Zip 打包两端补丁与空配置模板；正式构建附带根目录说明和更新日志。
 """
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ from patch_version import ROOT, add_version_arguments, label_from_arguments, lab
 
 TITLES = {"bank": "00040000000C9B00", "mover": "00040000000C9C00"}
 FOLDERS = (*TITLES.values(), "Bank")
+DOCUMENTS = ("README.md", "README.zh-cn.md", "CHANGELOG.md", "CHANGELOG.zh-cn.md")
 
 
 def digest(stream) -> str:
@@ -60,10 +61,12 @@ def sevenzip_tool(requested: str = "") -> str:
     raise ValueError("Install 7-Zip or set SEVENZIP to its executable")
 
 
-def collect_inputs(root: Path, label: str) -> dict[str, str]:
+def collect_inputs(root: Path, label: str, *, include_documents: bool = False) -> dict[str, str]:
     release = root / "release"
     template = root / "configTemplate" / "templateForCopy" / "Bank"
     paths = [release / folder for folder in FOLDERS] + [template]
+    if include_documents:
+        paths.extend(root / name for name in DOCUMENTS)
     for title, title_id in TITLES.items():
         paths.extend((root / title / "build" / "patch-version.bin",
                       root / title / "build" / (title_id + ".dec.code"),
@@ -87,6 +90,10 @@ def collect_inputs(root: Path, label: str) -> dict[str, str]:
             if folder != "Bank" and name not in ("code.bps", "exheader.bin") and not name.startswith("romfs/"):
                 raise ValueError(f"Unexpected file in patch output: {folder}/{name}")
             expected[folder + "/" + name] = checksum
+    if include_documents:
+        for name in DOCUMENTS:
+            with (root / name).open("rb") as stream:
+                expected[name] = digest(stream)
     for title, title_id in TITLES.items():
         build = root / title / "build"
         if (build / "patch-version.bin").read_bytes() != label_storage(label):
@@ -113,7 +120,7 @@ def verify_archive(path: Path, expected: dict[str, str]) -> Counter:
             raise ValueError("Duplicate archive entries")
         for name in names:
             parts = PurePosixPath(name).parts
-            if (not parts or parts[0] not in FOLDERS or name.startswith("/") or
+            if (not parts or (parts[0] not in FOLDERS and name not in DOCUMENTS) or name.startswith("/") or
                     ".." in parts or ":" in name or "\\" in name):
                 raise ValueError("Unexpected archive path")
         files = {entry.filename: entry for entry in entries if not entry.is_dir()}
@@ -131,8 +138,8 @@ def verify_archive(path: Path, expected: dict[str, str]) -> Counter:
     return methods
 
 
-def package(root: Path, label: str, tool: str) -> Path:
-    expected = collect_inputs(root, label)
+def package(root: Path, label: str, tool: str, *, include_documents: bool = False) -> Path:
+    expected = collect_inputs(root, label, include_documents=include_documents)
     release = root / "release"
     stamp = datetime.now(timezone(timedelta(hours=8))).strftime("%Y%m%d%H%M")
     output = release / (label + "-" + stamp + ".zip")
@@ -140,11 +147,15 @@ def package(root: Path, label: str, tool: str) -> Path:
         raise FileExistsError(f"Archive already exists: {output.name}; it will not be overwritten")
     with tempfile.TemporaryDirectory(prefix=".package-", dir=release) as temporary:
         archive = Path(temporary) / output.name
-        subprocess.run([tool, "a", "-tzip", "-mm=LZMA", "-mx=9", "-mmt=on", "-sse", "-bb0", "-bsp0",
-                        str(archive), *FOLDERS], cwd=release, check=True)
+        inputs = [(release, FOLDERS)]
+        if include_documents:
+            inputs.append((root, DOCUMENTS))
+        for directory, names in inputs:
+            subprocess.run([tool, "a", "-tzip", "-mm=LZMA", "-mx=9", "-mmt=on", "-sse", "-bb0", "-bsp0",
+                            str(archive), *names], cwd=directory, check=True)
         subprocess.run([tool, "t", "-bsp0", str(archive)], cwd=release, check=True)
         methods = verify_archive(archive, expected)
-        if collect_inputs(root, label) != expected:
+        if collect_inputs(root, label, include_documents=include_documents) != expected:
             raise ValueError("Build outputs changed during packaging")
         if output.exists():
             raise FileExistsError(f"Archive already exists: {output.name}; it will not be overwritten")
@@ -171,7 +182,8 @@ def main() -> None:
     parser.add_argument("--sevenzip", default="", help="7-Zip executable; auto-detected when empty")
     args = parser.parse_args()
     try:
-        package(ROOT, label_from_arguments(args), sevenzip_tool(args.sevenzip))
+        package(ROOT, label_from_arguments(args), sevenzip_tool(args.sevenzip),
+                include_documents=args.patch_release == "1")
     except (OSError, ValueError, subprocess.CalledProcessError, zipfile.BadZipFile) as error:
         parser.exit(1, f"Package failed: {error}\n")
 

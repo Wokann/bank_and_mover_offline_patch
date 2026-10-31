@@ -2,6 +2,8 @@
 
 [GitHub](https://github.com/Wokann/bank_and_mover_offline_patch) · [简体中文](README.zh-cn.md) · [Download](../../releases/latest) · [Changelog](CHANGELOG.md)
 
+When reading this guide from a release ZIP, use the GitHub link above to view screenshots and follow repository links online.
+
 Use Pokemon Bank and Poke Mover locally and offline on Nintendo 3DS, even after the official servers shut down.
 
 ## AI usage statement
@@ -391,6 +393,8 @@ Build with GNU Make, Python 3, devkitARM, armips and Floating IPS.<br>
 Original decrypted/decompressed code, ExHeader and RomFS inputs must come from your own legally obtained titles and are not distributed in this repository.
 
 Run `make` from the repository root to build and verify Bank and Mover, with output in `release/`. You can also build them separately with `make -C bank` and `make -C mover`.
+
+By default, `make package` packages the two patch directories and the `Bank` configuration directory. Use `make PATCH_RELEASE=1 package` for a release build; it also places both root READMEs and both changelogs at the ZIP root. Images are not included; view them on GitHub.
 
 - [Bank build instructions and implementation](bank/README.md#independent-build)
 - [Mover build instructions and implementation](mover/README.md#independent-build)

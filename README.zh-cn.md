@@ -2,6 +2,8 @@
 
 [GitHub](https://github.com/Wokann/bank_and_mover_offline_patch) · [English](README.md) · [下载](../../releases/latest) · [更新记录](CHANGELOG.zh-cn.md)
 
+从发行压缩包阅读本说明时，图片及仓库内链接请通过上方 GitHub 链接在线查看。
+
 让 Nintendo 3DS 上的 Pokemon Bank 和 Poke Mover 能够在官方服务器关闭的情况下，也能离线本地使用。
 
 ## AI 使用声明
@@ -364,6 +366,8 @@ balance.$USD=0;
 原始解密／解压代码、ExHeader 及 RomFS 必须自行从合法持有的软件中提取，本仓库不分发这些输入。
 
 在仓库根目录执行 `make`，会编译并校验 Bank 和 Mover，输出到 `release/`。也可以通过 `make -C bank`、`make -C mover` 分别构建。
+
+`make package` 默认打包两个补丁目录及 `Bank` 配置目录。正式打包使用 `make PATCH_RELEASE=1 package`，额外将根目录的两份 README 和两份更新日志放入 ZIP 根目录；图片不包含在包内，可在 GitHub 查看。
 
 - [Bank 构建与实现说明](bank/README.zh-cn.md#独立编译)
 - [Mover 构建与实现说明](mover/README.zh-cn.md#独立编译)
