@@ -65,12 +65,6 @@ Currency and console locale belong to each account's user.conf, not client.conf.
 sd:/3ds/Bank/
 ├── readme_fakeServer.md
 ├── readme_fakeServer.zh-cn.md
-├── bankdata.bin
-├── bankdata.bak
-├── bankdata.tmp
-├── sav.bin
-├── sav.bak
-├── sav.tmp
 ├── client/
 │   ├── client.conf
 │   ├── client.bak
@@ -138,11 +132,24 @@ sd:/3ds/Bank/
             └── transaction.tmp
 ```
 
-The tree includes shipped files and possible runtime/temporary files; it is not a request to create them. `<userID>` represents each independent user. Root bankdata and sav files appear only before legacy migration. See the [shared layout guide](../readme_fakeServer.md) for details.
+The tree includes shipped files and possible runtime/temporary files; it is not a request to create them. `<userID>` represents each independent user. Client records belong in `client/users/<userID>/`; Banks and journals belong in `fakeServers/users/<userID>/`. See the [shared layout guide](../readme_fakeServer.md) for details.
 
 Bank/Mover share one registry and selected user's data. Three basic configurations are generated automatically. Players supply optional gift/Mover policy, words and assets.
 
 Use Bank first to initialize the offline user and create or migrate its Bank. Offline Mover neither creates a Bank nor migrates legacy files. If the selected user's directory is absent, service entry reads shared policy/defaults in memory without creating that user's directories or configuration, preserving Bank's first automatic migration. Title-time structural repair of other published configuration does not initialize that account. A missing Bank body follows the native download-failure exit, not the server-locked message, and transfer saving does not continue. Established profiles retain normal configuration repair and Bank backup recovery.
+
+### Legacy layout migration
+
+The following six root-level files are migration inputs from the old layout, not files used by current accounts. Paths are relative to `sd:/3ds/Bank/`:
+
+| Legacy migration input | Current user destination |
+| --- | --- |
+| `bankdata.bin` | `fakeServers/users/<userID>/bankdata.bin` |
+| `bankdata.bak` | `fakeServers/users/<userID>/bankdata.bak` |
+| `bankdata.tmp` | `fakeServers/users/<userID>/bankdata.tmp` |
+| `sav.bin` | `client/users/<userID>/sav.bin` |
+| `sav.bak` | `client/users/<userID>/sav.bak` |
+| `sav.tmp` | `client/users/<userID>/sav.tmp` |
 
 Automatic v0.9.1 migration requires **neither side to have any user directory**. Root bankdata.bin/.bak/.tmp move directly into the first selected user's server directory; sav.bin/.bak/.tmp move into that user's client directory. Same-SD renames remove old paths on success, without leaving another copy. Any existing file among the six targets prevents the entire migration; nothing is overwritten. Old transactions, passes and balances are not imported. Once any user directory exists, remaining root files require manual migration. Partial failure retains moved files at their destinations and unmoved originals; do not delete remaining sources indiscriminately.
 

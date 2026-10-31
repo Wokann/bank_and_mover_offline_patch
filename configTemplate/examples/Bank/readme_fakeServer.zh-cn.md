@@ -38,12 +38,6 @@ activeUser=2;
 sd:/3ds/Bank/
 ├── readme_fakeServer.md
 ├── readme_fakeServer.zh-cn.md
-├── bankdata.bin
-├── bankdata.bak
-├── bankdata.tmp
-├── sav.bin
-├── sav.bak
-├── sav.tmp
 ├── client/
 │   ├── client.conf
 │   ├── client.bak
@@ -111,11 +105,11 @@ sd:/3ds/Bank/
             └── transaction.tmp
 ```
 
-- 上图列出当前分发的全部配置、素材和说明，以及运行时可能出现的个人、临时与迁移文件；不表示这些文件同时存在。
+- 上图列出当前分发的配置、素材和说明，以及运行时可能出现的用户、备份和暂存文件；不表示这些文件同时存在。旧布局迁移来源不列入当前文件树。
 - `<userID>` 表示每位用户各自的目录，两端必须使用同一个完整 ID；不是要求创建名为占位符的目录。
 - 用户目录中的 `sav.bin`、`bankdata.bin` 和事务文件由正常流程创建或迁移，不在空模板中放入伪造或零字节占位二进制。
 - `.tmp` 是尚未发布的暂存，不应手工创建；`.bak` 是否保留由对应保存／恢复流程决定。
-- 根目录的 `bankdata.bin`、`bankdata.bak`、`bankdata.tmp`、`sav.bin`、`sav.bak`、`sav.tmp` 是旧布局的迁移来源，成功迁移后原路径消失。
+- v0.9.1 旧布局的迁移来源、目标及触发条件见[旧布局迁移](client/readme_client.zh-cn.md#旧布局迁移)。当前银行、事务和客户端记录分别位于对应用户目录。
 - 客户端用户选择在 `client.conf`；个人地区在 `user.conf` 的 `[console]`，币种在 `[ticket]`。共享政策与素材在 `fakeServers/shared/`。个人购券记录和 `balance.$币种` 都在 `user.conf` 的 `[ticket]` 下，以空行分隔，不另设余额段。
 - 修改个人数据前请停止软件并备份，只修改所需配置字段；不要覆盖银行、事务或游戏存档。
 
@@ -132,23 +126,23 @@ sd:/3ds/Bank/
 | `client/users/<userID>/sav.bin` | `sav.bak` | `sav.tmp` | 专用事务保护；包括身份和事务字段，保留写入前一版，不按普通配置回退。 |
 | `fakeServers/users/<userID>/bankdata.bin` | `bankdata.bak` | `bankdata.tmp` | 专用银行事务保护；保留实际修改前一版，恢复须符合事务及正文检查。 |
 | `fakeServers/users/<userID>/transaction.bin` | `transaction.bak` | `transaction.tmp` | 专用日志保护；保留上一条已发布日志，核对记录 CRC32、格式、序号与事务阶段。 |
-| `fakeServers/shared/mover/<nds或vc>/checkPokemon.conf` | 无 | 无 | 玩家提供的只读筛选配置；账户汉化许可仅在内存中覆盖指定规则。 |
 | 所选 NDS 游戏旁的 `x.sav`，不在 Bank 目录内 | `x.bak` | `x.tmp` | 来源及令牌约束的事务保护；确认保存及清令牌保存完成后清理，意外中断时保留。 |
-| Bank 主机存档，Mover 直接访问其中的 `/turtle` | 不额外增加 SD 备份 | 不额外增加 SD 暂存 | Bank 沿原存档流程；Mover 仅更新语言字段，提交后重新打开并核对整份记录。 |
+| Bank 主机存档 | 不额外增加 SD 备份 | 不额外增加 SD 暂存 | Bank 沿原存档流程；Mover 仅更新语言字段，提交后重新打开并核对整份记录。 |
 | 所选卡带、3DS 数字版及 VC 游戏存档 | 由原存档系统管理 | 由原存档系统管理 | 保留原版校验、保存及事务流程，不套用通用配置回退，不臆造物理文件路径。 |
-| 旧根目录的六份 `bankdata`／`sav` 文件，逐项见上树 | 原名搬迁 | 原名搬迁 | 仅首次迁移时同 SD 改名移动；不覆盖目标，成功后源路径消失，失败的源文件保留。 |
 
-基础配置及下述指定规则字段使用的公共流程为：生成新内容 → 写齐并刷新、关闭暂存 → 回读核对 → 旧主文件轮替为备份 → 暂存发布为主文件。内容不变时不写盘，也不轮替备份；首次生成且没有旧主文件时不伪造备份。成功发布后保留上一版，不把新主文件再复制成相同的备份。
+三份基础配置使用的公共流程为：生成新内容 → 写齐并刷新、关闭暂存 → 回读核对 → 旧主文件轮替为备份 → 暂存发布为主文件。内容不变时不写盘，也不轮替备份；首次生成且没有旧主文件时不伪造备份。成功发布后保留上一版，不把新主文件再复制成相同的备份。
 
-主配置存在时采用当前文本并逐项修复，保留合法值，不因某条格式错误就整份回退。主文件缺失时先读备份，再解析并重建主配置；主文件及备份都缺失才使用内置默认值，孤立暂存不作已提交依据。I/O 错误不是文件缺失，不静默清零。只读启动可读取备份视图，但不在后台悄悄发布或清理文件。没有可恢复来源时，默认值不能重现旧余额或购券历史。
+主配置存在时采用当前文本并逐项修复，保留合法值，不因某条格式错误就整份回退。主文件缺失时先读备份，再解析并重建主配置；主文件及备份都缺失才使用内置默认值，孤立暂存不作已提交依据。I/O 错误不是文件缺失，不静默清零。没有可恢复来源时，默认值不能重现旧余额或购券历史。
 
 `transaction.bak` 是上一条日志决定，不是银行正文备份：仅正式日志缺失才读它；损坏／不可读的正式日志不会静默回退，日志暂存不作权威。一般文件保护不决定银行、来源存档或日志的提交／回滚；这些仍由事务层核对后处理。需要清理备份的业务，必须先明确确认整个操作完成，不能仅因一次写入回调成功就删除恢复依据。
 
 ### 补丁严格只读的文件
 
-checkPokemon 只有上表所列指定字段写入例外，不是通用规则编辑器。
+宝可梦与姓名筛选配置均由玩家维护，补丁只读；账户汉化许可仅影响内存中的规则，不回写共享文件。
 
 - `fakeServers/shared/gifts/gift.conf`
+- `fakeServers/shared/mover/nds/checkPokemon.conf`
+- `fakeServers/shared/mover/vc/checkPokemon.conf`
 - `fakeServers/shared/mover/nds/checkName.conf`
 - `fakeServers/shared/mover/vc/checkName.conf`
 - 礼物 PL6／WC6／WC7 素材、NDS ROM、README 和许可证。

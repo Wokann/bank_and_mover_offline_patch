@@ -62,12 +62,6 @@ Bank 离线选择所使用的本地银行，下载选择写入哪个本地账户
 sd:/3ds/Bank/
 ├── readme_fakeServer.md
 ├── readme_fakeServer.zh-cn.md
-├── bankdata.bin
-├── bankdata.bak
-├── bankdata.tmp
-├── sav.bin
-├── sav.bak
-├── sav.tmp
 ├── client/
 │   ├── client.conf
 │   ├── client.bak
@@ -135,11 +129,24 @@ sd:/3ds/Bank/
             └── transaction.tmp
 ```
 
-上图同时列出分发文件及运行时可能出现的用户／临时文件，不要求预先创建。`<userID>` 代表每个独立用户；根目录的 bankdata 和 sav 文件仅在旧数据迁移前可能存在。分类说明见[统一目录说明](../readme_fakeServer.zh-cn.md)。
+上图同时列出分发文件及运行时可能出现的用户／临时文件，不要求预先创建。`<userID>` 代表每个独立用户；客户端记录位于 `client/users/<userID>/`，银行及事务位于 `fakeServers/users/<userID>/`。分类说明见[统一目录说明](../readme_fakeServer.zh-cn.md)。
 
 Bank/Mover 共用同一用户表及所选用户数据。三份基础配置可自动生成；礼物、Mover 配置／词表／素材由玩家手动放入。附加输入保持只读；汉化许可仅影响当前账户的内存规则，详见用户配置说明。
 
 请先用 Bank 完成离线用户初始化及银行创建或迁移。离线 Mover 不代建银行，也不触发旧文件迁移：若当前用户目录尚不存在，进入服务时只在内存读取共享配置／默认值，不创建该用户的目录或配置，不影响之后 Bank 的首次自动迁移。标题对其他既有正式配置的结构修复不代表该账户已初始化。银行正文缺失按原下载失败流程结束，不显示“服务器被锁定”，也不继续传送保存。已有用户的正常配置修复及银行备份恢复不受影响。
+
+### 旧布局迁移
+
+以下六个根目录文件仅用于旧布局升级迁移，不属于当前账户的常驻文件。下表路径相对 `sd:/3ds/Bank/`：
+
+| 旧布局迁移来源 | 当前用户目标 |
+| --- | --- |
+| `bankdata.bin` | `fakeServers/users/<userID>/bankdata.bin` |
+| `bankdata.bak` | `fakeServers/users/<userID>/bankdata.bak` |
+| `bankdata.tmp` | `fakeServers/users/<userID>/bankdata.tmp` |
+| `sav.bin` | `client/users/<userID>/sav.bin` |
+| `sav.bak` | `client/users/<userID>/sav.bak` |
+| `sav.tmp` | `client/users/<userID>/sav.tmp` |
 
 v0.9.1 自动迁移仅在两端均没有**任何用户目录**时进行：旧根目录 bankdata.bin/.bak/.tmp 移至第一个所选用户的服务器目录；sav.bin/.bak/.tmp 移至同一用户的 client 目录。使用同一 SD 内改名移动，成功后旧路径消失，不额外复制一套。六个目标中任一已有文件则整组不迁，不覆盖。旧事务、购券和余额不自动导入。已有任一用户目录后，根目录遗留文件只能手动迁移。若部分移动失败，成功移动的文件保留在目标，未移动的源文件保留，不能把源文件全部当垃圾删除。
 
