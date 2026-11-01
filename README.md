@@ -2,35 +2,44 @@
 
 [GitHub](https://github.com/Wokann/bank_and_mover_offline_patch) · [简体中文](README.zh-cn.md) · [Download](../../releases/latest) · [Changelog](CHANGELOG.md)
 
+![title](assets/Bank-Offline-Mode-1-bigcut.png)
+
 Use Pokemon Bank and Poke Mover locally and offline on Nintendo 3DS, even after the official servers shut down.
 
 ## AI usage statement
 
 This project uses AI tools, including OpenAI Codex, to help analyze decompiled output, design patches, write code, and review changes. If you have concerns about using patches developed with AI-assisted reverse-engineering analysis or coding, please take this into account before deciding whether to use them.
 
+## Note Ahead:
+
+1. **The offline patch DOES NOT support Pokemon HOME transfer**. HOME assigns tracker IDs to Pokemon and records them on the official server. Third-party tools cannot forge tracker IDs which can be accipted by the official server.
+2. **The offline patch DOES NOT modify any online data**. Data obtained via "Download Mode" is intended solely for local, "Offline Mode" use; no internal metadata or related information of "Offline Mode" is transmitted back to official servers.
+3. **The purpose of the offline patch** is to maintain the transmission channels from the Mover (Gen 5, VC Gen 1/2) to the Bank, as well as the intra-generation and inter-generation transfers (involving Gen 6/7) within the Bank and restores the ability to preserve and re-experience events that have already expired within Bank.
+4. **The offline patch also provides an option** for players who prefer not to use PKSM, allowing them to continue transferring Pokémon using the official data-transfer methods. Cause PKSM still contains various bugs related to data transfers, which can lead to data errors or even corruption. And these issues can still be seen on the PKSM's github "Issues" page.
+
 ## Features
 
 ### Bank
 
-1. Offline mode: Manage a local Bank with the original features, including Pokemon deposits and withdrawals, box organization, Poke Miles, Pokedex records, and game information.
-2. Download mode: Download your official Bank for offline use while the official servers are available. Local data cannot be uploaded back to the official server.
-3. Unlock mode: Unlock an official Bank that has become unusable because of mismatched save data, while the official servers are available.
-4. Original mode: Use Bank's original online features while the official servers are available.
-5. Mode selection: Press **R** on the title screen to switch modes.
-6. Language selection: Press **L** on the title screen to change the interface language.
-7. Multiple users: Configure multiple local accounts, each with its own settings.
-8. Mystery Gifts: Receive gifts when they are enabled in the configuration and the console date and selected game meet the distribution requirements.
-9. Virtual shop: Set the console date within the configured period to try virtual top-ups, claim a 30-day trial pass, and buy 365-day annual passes. Virtual funds are for local simulation only and are unrelated to eShop funds or money in any real account.
+1. **Offline mode**: Manage a local Bank with the original features, including Pokemon deposits and withdrawals, box organization, Poke Miles, Pokedex records, and game information.
+2. **Download mode**: Download your official Bank for offline use while the official servers are available. Local data cannot be uploaded back to the official server.
+3. **Unlock mode**: Unlock an official Bank that has become unusable because of mismatched save data, while the official servers are available.
+4. **Original mode**: Use Bank's original online features while the official servers are available.
+5. **Mode selection**: Press **R** on the title screen to switch modes.
+6. **Language selection**: Press **L** on the title screen to change the interface language.
+7. **Multiple users**: Configure multiple local accounts, each with its own settings.
+8. **Mystery Gifts**: Receive gifts when they are enabled in the configuration and the console date and selected game meet the distribution requirements.
+9. **Virtual shop**: Set the console date within the configured period to try virtual top-ups, claim a 30-day trial pass, and buy 365-day annual passes. Virtual funds are for local simulation only and are unrelated to eShop funds or money in any real account.
 
 ### Mover/Transporter
 
-1. Offline mode: Transfer Pokemon from supported `Gen5` and `VC Gen1/2` saves into the local Bank's Transport Box.
-2. Online mode: Use Mover's original online features while the official servers are available.
-3. Mode selection: Press **R** on the title screen to switch modes.
-4. Multiple users: Configure multiple local accounts, each with its own settings.
-5. Gen5 digital support: Recognize legally dumped Gen5 cartridge ROMs and saves stored in the specified SD card locations, in both Offline and Online modes.
-6. Screening by the fake server: In addition to the original client checks, the offline patch includes some name and Pokemon screening rules documented by the community to simulate the official server's checks. These do not completely reproduce the official rules. You can disable these extra filters in the configuration.
-7. Custom options: Enable selected v1.2 conversion rules for an account (VC Gen1 only; VC Gen2 continues to use v1.5 rules), or enable Chinese encoding conversion for VC fan translations and preserve Chinese names from Gen5. These options are disabled by default and must be enabled manually. See the [personal configuration guide](configTemplate/templateForCopy/Bank/fakeServers/users/readme_user.md) for their scope and limitations.
+1. **Offline mode**: Transfer Pokemon from supported `Gen5` and `VC Gen1/2` saves into the local Bank's Transport Box.
+2. **Online mode**: Use Mover's original online features while the official servers are available.
+3. **Mode selection**: Press **R** on the title screen to switch modes.
+4. **Multiple users**: Configure multiple local accounts, each with its own settings.
+5. **Gen5 digital support**: Recognize legally dumped Gen5 cartridge ROMs and saves stored in the specified SD card locations, in both Offline and Online modes.
+6. **Screening by the fake server**: In addition to the original client checks, the offline patch includes some name and Pokemon screening rules documented by the community to simulate the official server's checks. These do not completely reproduce the official rules. You can disable these extra filters in the configuration.
+7. **Custom options**: Enable selected v1.2 conversion rules for an account (VC Gen1 only; VC Gen2 continues to use v1.5 rules), or enable Chinese encoding conversion for VC fan translations and preserve Chinese names from Gen5. These options are disabled by default and must be enabled manually. See the [personal configuration guide](configTemplate/templateForCopy/Bank/fakeServers/users/readme_user.md) for their scope and limitations.
 
 Notes:
 
