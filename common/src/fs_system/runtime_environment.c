@@ -1,14 +1,17 @@
 #include "runtime_environment.h"
 #include "fs_system/diagnostic_log.h"
 
-static int detectAzahar(void)
+static u32 detectEnvironment(void)
 {
     register u32 r0 __asm__("r0")=0;
     register u32 r1 __asm__("r1")=CODE_EXPANSION_EMULATOR_INFO;
     register u32 r2 __asm__("r2")=0;
     __asm__ volatile("svc 0x2A":"+r"(r0),"+r"(r1),"+r"(r2)::
         "r3","r12","memory","cc");
-    return r0==0 && r1==CODE_EXPANSION_AZAHAR_ID && r2==0;
+    if (r0 || r2) return RUNTIME_ENVIRONMENT_NATIVE_OR_UNKNOWN;
+    if (r1==CODE_EXPANSION_AZAHAR_ID) return RUNTIME_ENVIRONMENT_AZAHAR;
+    if (r1==CODE_EXPANSION_CITRA_ID) return RUNTIME_ENVIRONMENT_CITRA;
+    return RUNTIME_ENVIRONMENT_NATIVE_OR_UNKNOWN;
 }
 
 s32 CodeExpansion_Enable(u32 address,u32 size)
@@ -19,8 +22,7 @@ s32 CodeExpansion_Enable(u32 address,u32 size)
     u32 process;
     s32 result;
 
-    environment->environment=detectAzahar()?RUNTIME_ENVIRONMENT_AZAHAR:
-        RUNTIME_ENVIRONMENT_NATIVE_OR_UNKNOWN;
+    environment->environment=detectEnvironment();
     environment->processMemory=RUNTIME_CAPABILITY_UNKNOWN;
     environment->ticket=RUNTIME_CAPABILITY_UNKNOWN;
     environment->ticketResult=0;
@@ -49,11 +51,12 @@ s32 CodeExpansion_Enable(u32 address,u32 size)
         result=(s32)r0;
     }
 
-    /* An unhandled SVC in identified Azahar leaves its input handle in r0.
+    /* An unhandled SVC in identified Citra/Azahar leaves its input handle in r0.
        Hardware, unknown environments and every other nonzero result fail. */
-    /* 已识别的 Azahar 未处理 SVC 时，r0 保留输入句柄。
+    /* 已识别的 Citra／Azahar 未处理 SVC 时，r0 保留输入句柄。
        实机、未知环境及其他任何非零结果仍按失败处理。 */
-    if (environment->environment==RUNTIME_ENVIRONMENT_AZAHAR && (u32)result==process) {
+    if ((environment->environment==RUNTIME_ENVIRONMENT_AZAHAR ||
+        environment->environment==RUNTIME_ENVIRONMENT_CITRA) && (u32)result==process) {
         environment->processMemory=RUNTIME_CAPABILITY_MISSING;
         result=0;
     } else environment->processMemory=result?RUNTIME_CAPABILITY_ERROR:
