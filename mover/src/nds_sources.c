@@ -1,6 +1,8 @@
 #include "nds_sources.h"
 #include "bankdata_redirect.h"
 #include "fs_system/diagnostic_log.h"
+#include "fs_system/utf_path.h"
+#include "runtime_environment.h"
 #include <string.h>
 
 enum NdsSaveStep { NDS_SAVE_PREPARE=1,NDS_SAVE_NATIVE,NDS_SAVE_READ_IMAGE,NDS_SAVE_PUBLISH,NDS_SAVE_DONE };
@@ -174,12 +176,53 @@ static u32 readGameCode(const u8 header[NDS_ROM_HEADER_READ_SIZE])
         ((u32)header[0x0E]<<16)|((u32)header[0x0F]<<24);
 }
 
+/* Old Citra sign-extends UTF-8 bytes into directory name units. Validate the
+   complete byte sequence before replacing the name, after its original path
+   was not found. Correct UTF-16 entries never need this fallback. */
+/* 旧 Citra 将 UTF-8 字节符号扩展为目录名字符；仅原路径不存在时尝试，
+   先完整验证字节序列再替换名字。正确的 UTF-16 目录项不需要此回退。 */
+static int restoreCitraDirectoryName(FsDirectoryEntry *entry,u32 *nameLength)
+{
+    char bytes[sizeof(entry->name)/sizeof(entry->name[0])];
+    u32 length=*nameLength;
+    int extended=0;
+    if (length>=sizeof(bytes)) return 0;
+    for (u32 i=0;i<length;i++) {
+        u16 c=entry->name[i];
+        if (c>=0xFF80u) extended=1;
+        else if (c>=0x80u) return 0;
+        bytes[i]=(char)(u8)c;
+    }
+    if (!extended) return 0;
+    bytes[length]=0;
+    const char *cursor=bytes,*end=bytes+length;
+    while (cursor<end) {
+        uint32_t scalar;
+        if (!FsUtf8_Next(&cursor,end,&scalar) || scalar<32u ||
+            scalar=='/' || scalar=='\\' || scalar==':') return 0;
+    }
+    uint32_t units;
+    if (!FsUtf8_ToUtf16(bytes,entry->name,
+        (uint32_t)(sizeof(entry->name)/sizeof(entry->name[0])),&units)) return 0;
+    *nameLength=(u32)units;
+    return 1;
+}
+
 static int readCandidateHeader(NdsScannerContext *context,u32 *nameLength,u32 *pathSize)
 {
     if (!isNdsFile(&context->entry,nameLength) ||
-        !buildPath(context->path,ndsRomPrefix,context->entry.name,*nameLength,0,pathSize) ||
-        readFileRangeUtf16(context->path,*pathSize,0,context->header,sizeof(context->header)))
+        !buildPath(context->path,ndsRomPrefix,context->entry.name,*nameLength,0,pathSize))
         return -1;
+    s32 result=readFileRangeUtf16(context->path,*pathSize,0,context->header,sizeof(context->header));
+    if (result) {
+        if (!resultIsNotFound(result) ||
+            RuntimeEnvironment_Get()->environment!=RUNTIME_ENVIRONMENT_CITRA ||
+            !restoreCitraDirectoryName(&context->entry,nameLength) ||
+            !buildPath(context->path,ndsRomPrefix,context->entry.name,*nameLength,0,pathSize) ||
+            readFileRangeUtf16(context->path,*pathSize,0,context->header,sizeof(context->header)))
+            return -1;
+        FsDiag_Record("source.filename.restored",0,*nameLength,*pathSize,0);
+    }
     return gameCodeIndex(readGameCode(context->header));
 }
 
